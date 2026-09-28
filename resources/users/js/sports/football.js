@@ -8,6 +8,26 @@ const getSelectedFilters = () => {
     };
 };
 
+const clearGoalHighlight = (row) => {
+    row.classList.remove('!bg-[#ffe4ec]', '!border-[#f7a8bd]', 'dark:!bg-[#4a2633]');
+    row.removeAttribute('data-goal-highlight-until');
+    row.querySelector('[data-goal-indicator]')?.remove();
+};
+
+const scheduleGoalHighlights = () => {
+    document.querySelectorAll('[data-goal-highlight-until]').forEach((row) => {
+        const expiresAt = Number(row.dataset.goalHighlightUntil) * 1000;
+        const remainingTime = expiresAt - Date.now();
+
+        if (remainingTime <= 0) {
+            clearGoalHighlight(row);
+            return;
+        }
+
+        setTimeout(() => clearGoalHighlight(row), remainingTime);
+    });
+};
+
 const pills = document.querySelectorAll('.filter-pill');
 pills.forEach((pill) => {
     pill.onclick = async function () {
@@ -46,10 +66,8 @@ const callFixtureData = async (value) => {
         }
 
         const data = await response.json();
-        console.log("data",data);
-
         document.querySelector('.fixtures-container').innerHTML = data.html;
-        console.log(data);
+        scheduleGoalHighlights();
 
     } catch (error) {
         console.error('Request failed:', error);
@@ -85,9 +103,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 window.Echo.channel('sports.football.live')
-    .listen('.score.updated', async (event) => {
-        console.log("eventtt",event);
-
+    .listen('.score.updated', async () => {
         try {
             const url = new URL('/football/websocket-football',window.location.origin);
 
@@ -98,7 +114,7 @@ window.Echo.channel('sports.football.live')
                     'Accept': 'application/json',
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
                 },
-                body: JSON.stringify(event),
+                body: JSON.stringify(getSelectedFilters()),
             });
 
             if (!response.ok) {
@@ -108,11 +124,11 @@ window.Echo.channel('sports.football.live')
             const data = await response.json();
 
             document.querySelector('.fixtures-container').innerHTML = data.html;
-
-            console.log('Score updated:', event);
-            console.log('Fixture data:', data);
+            scheduleGoalHighlights();
 
         } catch (error) {
             console.error('Request failed:', error);
         }
     });
+
+scheduleGoalHighlights();

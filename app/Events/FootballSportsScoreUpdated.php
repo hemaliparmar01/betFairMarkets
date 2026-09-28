@@ -4,32 +4,17 @@ namespace App\Events;
 
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Broadcasting\PresenceChannel;
-use Illuminate\Broadcasting\PrivateChannel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Log;
 
-class FootballSportsScoreUpdated implements ShouldBroadcast
+class FootballSportsScoreUpdated implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
-
-    /**
-     * Create a new event instance.
-     */
-    public function __construct(public array $payload)
-    {
-        //
-    }
 
     public function broadcastOn(): array
     {
         return [new Channel('sports.football.live')];
-
-        // return [
-        //     new PrivateChannel('channel-name'),
-        // ];
     }
 
     public function broadcastAs(): string {
@@ -37,6 +22,6 @@ class FootballSportsScoreUpdated implements ShouldBroadcast
     }
 
     public function broadcastWith(): array {
-        return $this->payload;
+        return ['refresh' => true];
     }
 }

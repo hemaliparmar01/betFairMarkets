@@ -18,5 +18,5 @@ Schedule::call(function () {
 
 Schedule::call(function () {
     app(\App\Http\Controllers\Users\Football\FootballSyncController::class)->syncBetFairPrematchData();
-})->name('football-betfair-prematch')->everyFiveMinutes()->withoutOverlapping();
+})->name('football-betfair-prematch')->everyFiveMinutes()->withoutOverlapping(10);
 
