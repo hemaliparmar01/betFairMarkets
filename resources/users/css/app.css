@@ -1,0 +1,89 @@
+@import 'tailwindcss';
+@custom-variant dark (&:where(.dark-mode, .dark-mode *));
+
+* {
+    box-sizing: border-box;
+    font-family: 'Inter', 'Noto Sans Georgian', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+body {
+    background: #f0f5fc;
+    padding: 12px 16px 40px;
+    color: #0b2a40;
+    transition: background 0.3s, color 0.3s;
+    line-height: 1.5;
+    overflow-y: scroll;
+}
+
+body.dark-mode {
+    background: #121e2a;
+    color: #e8edf2;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.5;
+        transform: scale(1.15);
+    }
+}
+
+.market-select {
+    background: #f0f6fc url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f4b66' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e") no-repeat right 12px center;
+    font-family: inherit;
+}
+
+body.dark-mode .market-select {
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b0c8dd' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+}
+
+@keyframes expandIn {
+    from {
+        opacity: 0;
+        transform: scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes fadeInTerms {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (max-width: 768px) {
+    body {
+        padding: 8px;
+    }
+}
+
+@keyframes pulseGreen { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+.manifesto-quote-block::before { content: '"'; font-family: Georgia, serif; }
