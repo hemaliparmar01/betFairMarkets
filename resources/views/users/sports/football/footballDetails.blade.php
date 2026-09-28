@@ -2,12 +2,10 @@
     @foreach ($data as $league => $matches)
         <div class="league-header [font-size:13px] font-bold uppercase [letter-spacing:0.5px] [color:#1e4763] [padding:10px_0_6px_0] [border-bottom:2px_solid_#e6edf6] [margin-top:8px] [transition:0.3s] bg-white [z-index:2] dark:[color:#8aaccc] dark:[border-bottom-color:#2a3f50] dark:[background:#1a2a38] [&:first-of-type]:[margin-top:0]">{{ $matches['tournament_name'] }} · {{ $matches['status'] }}</div>
         @foreach ($matches['matches'] as $event)
-            <div data-sportApi-match-id="{{ $matches['sportsApiPro_match_id'] }}" data-betfair-match-id="{{ $matches['betfair_match_id'] }}" class="event-row flex items-center [background:#fafdff] [border-radius:12px] [padding:5px_12px_5px_16px] [border:1px_solid_#e6eff8] [gap:4px_12px] flex-wrap [transition:0.06s] [min-height:44px] dark:[background:#1a2a38] dark:[border-color:#2a3f50] dark:[&:hover]:[background:#223848] [&:hover]:[background:#f2f8ff] [&:hover]:[border-color:#c6d8ea]">
+            <div data-sportApi-match-id="{{ $event['sportsApiPro_match_id'] }}" data-betfair-match-id="{{ $event['betfair_match_id'] }}" class="event-row flex items-center [background:#fafdff] [border-radius:12px] [padding:5px_12px_5px_16px] [border:1px_solid_#e6eff8] [gap:4px_12px] flex-wrap [transition:0.06s] [min-height:44px] dark:[background:#1a2a38] dark:[border-color:#2a3f50] dark:[&:hover]:[background:#223848] [&:hover]:[background:#f2f8ff] [&:hover]:[border-color:#c6d8ea]">
                 <div class="event-left flex items-center flex-wrap [gap:6px_10px] [flex:2_1_380px] max-[800px]:[flex:1_1_100%]">
                     <button type="button" class="fav-star [color:#b8ccdf] [font-size:15px] cursor-pointer [background:none] border-0 [width:24px] [transition:0.2s] text-center dark:[color:#4a6a88] dark:[&.active-fav]:[color:#f5b342] [&.active-fav]:[color:#f5b342]" data-action="favorite" aria-label="Favorite {{ $event['home'] ?? 'ahdkjahskd' }} vs {{ $event['away'] ?? 'shxc' }}"><i class="fas fa-star"></i></button>
-                    @if ($matches['status'] == 'Live')
-                        @php $color = $matches['status'] == 'Live' ? '#dc2e08' : '#1f4b66'; @endphp
-                    @endif
+                    @php $color = $event['status'] == 'Live' ? '#dc2e08' : '#1f4b66'; @endphp
                     <span style="color: {{ $color }}"  class="event-time [font-size:13px] font-medium [min-width:44px] [transition:color_0.3s] text-right dark:[color:#b0c8dd]">{{ $event['minutes'] }}</span>
                     <div class="team-score-group flex items-center [gap:6px] font-semibold [font-size:15px] [color:#0b2a40] [flex:1] justify-center [min-width:200px] max-[800px]:[justify-content:flex-start] max-[800px]:[min-width:100%]">
                         @if (($event['corners']['home'] ?? 0) > 0)
@@ -16,7 +14,7 @@
                         <span class="team-name font-semibold [transition:color_0.3s] whitespace-nowrap dark:[color:#e8edf2] dark:[&.away]:[color:#b0c8dd]">{{ $event['team1'] }}</span>
                         @foreach (['home', 'away'] as $side)
                             @if (in_array($event['cards'][$side] ?? null, ['yellow', 'red'], true))
-                                <span class="card-icon card-{{ $event['cards'][$side] }} [font-size:14px] [margin:0_2px]"><i class="fas fa-square"></i></span>
+                                <span class="card-icon card-{{ $event['cards'][$side] }} [font-size:14px] [margin:0_2px] {{ $event['cards'][$side] === 'red' ? 'text-[#c74e4e]' : 'text-[#e6b422]' }}"><i class="fas fa-square"></i></span>
                             @endif
                         @endforeach
                         <span class="score-badge live-score font-bold [font-size:16px] [padding:0_4px] [min-width:28px] text-center [transition:color_0.3s] dark:[color:#e8edf2] dark:[&.live-score]:[color:#ff6b6b] dark:[&.finished-score]:[color:#e8edf2] [&.live-score]:[color:#d63e3e] [&.finished-score]:[color:#0b2a40] [&.upcoming-score]:[color:#8aaccc] dark:[&.upcoming-score]:[color:#5a7d99]">{{ $event['score'] ?? '—' }}</span>

@@ -10,11 +10,11 @@ Artisan::command('inspire', function () {
 
 Schedule::call(function () {
     app(\App\Http\Controllers\Users\Football\FootballSyncController::class)->syncBetFairLiveData();
-})->name('football-betfair-live')->everyMinute()->withoutOverlapping();
+})->name('football-betfair-live')->everyMinute()->withoutOverlapping(2);
 
 Schedule::call(function () {
     app(\App\Http\Controllers\Users\Football\FootballSyncController::class)->syncSportsApiProLiveData();
-})->name('football-sportApiPro-live')->everyMinute()->withoutOverlapping();
+})->name('football-sportApiPro-live')->everyMinute()->withoutOverlapping(2);
 
 Schedule::call(function () {
     app(\App\Http\Controllers\Users\Football\FootballSyncController::class)->syncBetFairPrematchData();

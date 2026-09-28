@@ -56,6 +56,34 @@ const callFixtureData = async (value) => {
     }
 };
 
+let minuteRefreshInProgress = false;
+
+const refreshFixtureMinutes = async () => {
+    if (
+        minuteRefreshInProgress ||
+        document.visibilityState !== 'visible' ||
+        !document.querySelector('.fixtures-container')
+    ) {
+        return;
+    }
+
+    minuteRefreshInProgress = true;
+
+    try {
+        await callFixtureData(getSelectedFilters());
+    } finally {
+        minuteRefreshInProgress = false;
+    }
+};
+
+setInterval(refreshFixtureMinutes, 60_000);
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        refreshFixtureMinutes();
+    }
+});
+
 window.Echo.channel('sports.football.live')
     .listen('.score.updated', async (event) => {
         console.log("eventtt",event);
