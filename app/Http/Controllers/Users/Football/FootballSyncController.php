@@ -64,13 +64,20 @@ class FootballSyncController extends Controller
 
             $getSingleRecords = $getExistingRecords[$payloadKey] ?? [];
 
-            $result_status = $isLiveApi == true ? 'Live' : 'Prematch';
+            $result_status = $this->transitionResultStatus(
+                $tempArray['result_status'] ?? null,
+                $isLiveApi == true ? 'Live' : 'Prematch'
+            );
             $tempArray['unique_key'] = $uniqueKey;
             $tempArray['betfair_match_id'] = $payloadKey;
             $tempArray['team1'] = $team1;
             $tempArray['team2'] = $team2;
             $tempArray['tournament'] = $payload['tournament'];
             $tempArray['result_status'] = $result_status;
+            $tempArray['minutes_status'] = $this->alignMinuteStatusWithResult(
+                $tempArray['minutes_status'] ?? null,
+                $result_status
+            );
             $tempArray['timestamp'] = $currentTimestamp;
             $markets = $this->filterSupportedMarkets($payload['markets']);
             $tempMarketArray = [];
@@ -90,10 +97,10 @@ class FootballSyncController extends Controller
                 $tempMarketArray[$marketKey][$sortPriority] = $market;
                 $tempArray['markets'] = $tempMarketArray;
             }
+            unset($tempArray['events'], $tempArray['goals'], $tempArray['goal_counts'], $tempArray['status_description']);
             $mainArray[$uniqueKey] = $tempArray;
         }
         storeInRedis($cacheKey,$mainArray,$ttlSeconds);
-        dd($mainArray);
     }
 
     private function readsportApiData(array $payloads, string $cacheKey,int $ttlSeconds) {
@@ -105,31 +112,103 @@ class FootballSyncController extends Controller
             $tempArray = [];
             $uniqueKey = $this->generateUniqueKey($payload['homeTeam'],$payload['awayTeam'],$payload['startTimestamp']);
             $checkIsExists = $this->checkIfRecordExistsOnAnotherApi($uniqueKey,$payload['homeTeam'],$payload['awayTeam'],$payload['startTimestamp']);
+            $minutesStatus = $this->sportsApiMinuteStatus(
+                $payload['status']['code'] ?? null,
+                $getExistingRecords[$checkIsExists]['minutes_status'] ?? 'Live'
+            );
+            $resultStatus = $this->sportsApiResultStatus(
+                $payload['status']['code'] ?? null,
+                $payload['status']['type'] ?? null,
+                $getExistingRecords[$checkIsExists]['result_status'] ?? 'Live'
+            );
+            $minutesStatus = $this->alignMinuteStatusWithResult($minutesStatus, $resultStatus);
             if($checkIsExists) {
                 $data_sync_complete = isset($getExistingRecords[$checkIsExists]['betfair_match_id']);
                 $additionalData = [
                     'data_sync_complete' => $data_sync_complete,
-                    'home_score' => $payload['homeScore'],
+                    'home_score' => $payload['homeScore'] ?? 0,
                     'sportsApiPro_match_id' => $payload['id'],
-                    'away_score' => $payload['awayScore'],
-                    'minutes_status' => $payload['status'],
+                    'away_score' => $payload['awayScore'] ?? 0,
+                    'minutes_status' => $minutesStatus,
+                    'result_status' => $resultStatus,
+                    // 'status_type' => $payload['status']['type'] ?? null,
                 ];
                 $getExistingRecords[$checkIsExists] = array_merge($getExistingRecords[$checkIsExists] ,$additionalData);
+                unset($getExistingRecords[$checkIsExists]['status_description']);
+                unset($getExistingRecords[$checkIsExists]['events'], $getExistingRecords[$checkIsExists]['goals'], $getExistingRecords[$checkIsExists]['goal_counts']);
             } else {
                 $tempArray['unique_key'] = $uniqueKey;
                 $tempArray['sportsApiPro_match_id'] = $payload['id'];
                 $tempArray['timestamp'] = $payload['startTimestamp'];
                 $tempArray['data_sync_complete'] = false;
-                $tempArray['home_score'] = $payload['homeScore'];
-                $tempArray['away_score'] = $payload['awayScore'];
-                $tempArray['minutes_status'] = $payload['status'];
+                $tempArray['home_score'] = $payload['homeScore'] ?? 0;
+                $tempArray['away_score'] = $payload['awayScore'] ?? 0;
+                $tempArray['minutes_status'] = $minutesStatus;
+                $tempArray['result_status'] = $resultStatus;
+                // $tempArray['status_type'] = $payload['status']['type'] ?? null;
                 $tempArray['team1'] = $payload['homeTeam'];
                 $tempArray['team2'] = $payload['awayTeam'];
                 $getExistingRecords[$uniqueKey] = $tempArray;
             }
         }
         storeInRedis($cacheKey,$getExistingRecords,$ttlSeconds);
-        dd($getExistingRecords);
+    }
+
+    private function sportsApiMinuteStatus(int|string|null $statusCode, string $currentStatus): string {
+        return match ((int) $statusCode) {
+            6 => '1st half',
+            7 => '2nd half',
+            100 => 'Finished',
+            default => in_array($currentStatus, ['Live', 'Prematch', 'Finished', '1st half', '2nd half'], true)
+                ? $currentStatus
+                : 'Live',
+        };
+    }
+
+    private function sportsApiResultStatus(int|string|null $statusCode, ?string $statusType, string $currentStatus): string {
+        if($currentStatus === 'Finished') {
+            return 'Finished';
+        }
+
+        if((int) $statusCode === 100 || $statusType === 'finished') {
+            return 'Finished';
+        }
+
+        if(in_array((int) $statusCode, [6, 7, 31], true) || $statusType === 'inprogress') {
+            return 'Live';
+        }
+
+        return in_array($currentStatus, ['Live', 'Prematch', 'Finished'], true)
+            ? $currentStatus
+            : 'Live';
+    }
+
+    private function transitionResultStatus(?string $currentStatus, string $incomingStatus): string {
+        if($currentStatus === 'Finished') {
+            return 'Finished';
+        }
+
+        if($currentStatus === 'Live' && $incomingStatus === 'Prematch') {
+            return 'Live';
+        }
+
+        return in_array($incomingStatus, ['Live', 'Prematch', 'Finished'], true)
+            ? $incomingStatus
+            : 'Prematch';
+    }
+
+    private function alignMinuteStatusWithResult(?string $minuteStatus, string $resultStatus): string {
+        if($resultStatus === 'Finished') {
+            return 'Finished';
+        }
+
+        if($resultStatus === 'Prematch') {
+            return 'Prematch';
+        }
+
+        return in_array($minuteStatus, ['Live', '1st half', '2nd half'], true)
+            ? $minuteStatus
+            : 'Live';
     }
 
     public function getCacheStoreData() {
