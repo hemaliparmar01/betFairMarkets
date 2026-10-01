@@ -93,6 +93,7 @@ class ListenSportsApiPro extends Command
                     }
 
                     $type = $frame['type'] ?? 'unknown';
+                    Log::info("TYPE :  ".$type);
 
                     if (in_array($type, ['snapshot', 'update'], true)) {
                         $frameData = $frame['data'] ?? null;

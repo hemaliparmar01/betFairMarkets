@@ -16,7 +16,8 @@ class FootballController extends Controller
     }
 
     public function marketActivity() {
-        return view('users.sports.football.marketActivity');
+        $marketActivites = $this->getMarketActivites();
+        return view('users.sports.football.marketActivity', compact("marketActivites"));
     }
 
     public function filterFootball() {

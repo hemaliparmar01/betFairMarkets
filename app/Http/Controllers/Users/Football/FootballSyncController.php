@@ -40,7 +40,7 @@ class FootballSyncController extends Controller
         $key = "x-api-key: " . $this->getsportsAPIProKeys;
         $liveData = ApiCall($url,$key);
         $cacheKey = $this->sports.':matches';
-        return $this->readsportApiData($liveData,$cacheKey,10);
+        return $this->readsportApiData($liveData,$cacheKey,true,10);
     }
 
     private function readBetFairData(array $payloads,string $cacheKey, bool $isLiveApi,int $ttlSeconds) {
@@ -62,12 +62,10 @@ class FootballSyncController extends Controller
                 $tempArray['data_sync_complete'] = false;
             }
 
-            $getSingleRecords = $getExistingRecords[$payloadKey] ?? [];
+            $getSingleRecords = $checkIsExists ? ($getExistingRecords[$checkIsExists] ?? []) : ($getExistingRecords[$uniqueKey] ?? []);
 
-            $result_status = $this->transitionResultStatus(
-                $tempArray['result_status'] ?? null,
-                $isLiveApi == true ? 'Live' : 'Prematch'
-            );
+            $currentStatus = $isLiveApi == true ? 'Live' : 'Prematch';
+            $result_status = $currentStatus;
             $tempArray['unique_key'] = $uniqueKey;
             $tempArray['betfair_match_id'] = $payloadKey;
             $tempArray['team1'] = $team1;
@@ -85,12 +83,11 @@ class FootballSyncController extends Controller
                 $sortPriority = $market['sortPriority'] ?? null;
                 $marketKey = $market['marketId'].'_'.$market['marketType'];
 
-                if(!empty($getSingleRecords)) {
-                    $previousBackOdds = $getSingleRecords['markets'][$marketKey][$sortPriority]['backOdds'] ?? $market['backOdds'];
-                } else {
-                    $previousBackOdds = $market['backOdds'];
-                }
-                $currentOdds = $market['backOdds'];
+                $previousMarket = $getSingleRecords['markets'][$marketKey][$sortPriority] ?? [];
+
+                $previousBackOdds = $previousMarket['currentBackOdds'] ?? $previousMarket['backOdds'] ?? $market['backOdds'];
+                $currentOdds = (float) $market['backOdds'] > 0 ? $market['backOdds'] : $previousBackOdds;
+
                 $market['previousBackOdds'] = $previousBackOdds;
                 $market['currentBackOdds'] = $currentOdds;
                 $market['odds_direction'] = $this->matchDirection($previousBackOdds,$currentOdds);
@@ -103,7 +100,7 @@ class FootballSyncController extends Controller
         storeInRedis($cacheKey,$mainArray,$ttlSeconds);
     }
 
-    private function readsportApiData(array $payloads, string $cacheKey,int $ttlSeconds) {
+    private function readsportApiData(array $payloads, string $cacheKey,bool $isLive,int $ttlSeconds) {
         if(empty($payloads)) {
             return;
         }
@@ -116,11 +113,7 @@ class FootballSyncController extends Controller
                 $payload['status']['code'] ?? null,
                 $getExistingRecords[$checkIsExists]['minutes_status'] ?? 'Live'
             );
-            $resultStatus = $this->sportsApiResultStatus(
-                $payload['status']['code'] ?? null,
-                $payload['status']['type'] ?? null,
-                $getExistingRecords[$checkIsExists]['result_status'] ?? 'Live'
-            );
+            $resultStatus = $isLive == true ? 'Live' : 'Prematch';
             $minutesStatus = $this->alignMinuteStatusWithResult($minutesStatus, $resultStatus);
             if($checkIsExists) {
                 $data_sync_complete = isset($getExistingRecords[$checkIsExists]['betfair_match_id']);
@@ -183,20 +176,6 @@ class FootballSyncController extends Controller
             : 'Live';
     }
 
-    private function transitionResultStatus(?string $currentStatus, string $incomingStatus): string {
-        if($currentStatus === 'Finished') {
-            return 'Finished';
-        }
-
-        if($currentStatus === 'Live' && $incomingStatus === 'Prematch') {
-            return 'Live';
-        }
-
-        return in_array($incomingStatus, ['Live', 'Prematch', 'Finished'], true)
-            ? $incomingStatus
-            : 'Prematch';
-    }
-
     private function alignMinuteStatusWithResult(?string $minuteStatus, string $resultStatus): string {
         if($resultStatus === 'Finished') {
             return 'Finished';
@@ -257,24 +236,6 @@ class FootballSyncController extends Controller
         $name = trim(preg_replace('/\s+/', ' ', $name));
         return str_replace(' ', '_', $name);
     }
-
-    // private function checkIfRecordExistsOnAnotherApi(string $uniqueKey,string $team1,string $team2,string $timestamp) {
-    //     $existingRecords = getInRedis($this->sports.':matches');
-    //     if (array_key_exists($uniqueKey, $existingRecords)) {
-    //         dump('Exact Match Found', $existingRecords[$uniqueKey]);
-    //     } else {
-    //         foreach ($existingRecords as $key => $record) {
-    //             $sameTimestamp = ($record['timestamp'] ?? null) === $timestamp;
-    //             $team1Match = $this->teamSimilarity($record['team1'] ?? '', $team1) >= 80;
-    //             $team2Match = $this->teamSimilarity($record['team2'] ?? '',$team2) >= 80;
-
-    //             if ($sameTimestamp && $team1Match && $team2Match) {
-    //                 dump('Similar Match Found', $key, $record);
-    //                 break;
-    //             }
-    //         }
-    //     }
-    // }
 
     private function checkIfRecordExistsOnAnotherApi(string $uniqueKey,string $team1, string $team2,string|int $timestamp) {
         $existingRecords = getInRedis($this->sports . ':matches') ?? [];
