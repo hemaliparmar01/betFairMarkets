@@ -255,14 +255,14 @@
         <div><img src="https://mc.yandex.ru/watch/109087271" style="position:absolute; left:-9999px;" alt="" /></div>
     </noscript>
 
-    <div>
+    <div class="min-w-0 overflow-hidden">
         @include('users.layout.sports')
 
         @include('users.sports.football.football_filter')
 
-        <div class="market-selector-wrap flex flex-wrap items-center gap-2.5 py-3.5   [gap:14px] [margin:4px_0_12px_0] [padding:6px_0_4px_0] [border-top:1px_solid_#e3ecf5] [padding-top:12px] [transition:border-color_0.3s] [justify-content:end] dark:[border-top-color:#2a3f50] dark:[&.hidden]:[display:none] [&.hidden]:[display:none]!" id="marketSelectorWrap">
+        <div class="market-selector-wrap flex flex-wrap items-center gap-2.5 py-3.5   [gap:14px] [margin:4px_0_12px_0] [padding:6px_0_4px_0] [border-top:1px_solid_#e3ecf5] [padding-top:12px] [transition:border-color_0.3s] [justify-content:end] dark:[border-top-color:#2a3f50] dark:[&.hidden]:[display:none] [&.hidden]:[display:none]! max-[480px]:justify-between max-[480px]:gap-2" id="marketSelectorWrap">
             <span class="market-label font-semibold [color:#1e4763] [font-size:14px] [transition:color_0.3s]" id="marketLabel">{{ __('Market:') }}</span>
-            <select class="market-dropdown min-w-[200px] rounded-lg border px-3 py-2 bg-white [border:1px_solid_#ccdbe9] [border-radius:40px] [padding:5px_20px_5px_18px] font-medium [font-size:14px] [color:#0b2a40] cursor-pointer [outline:none] [background:#fafdff] [transition:0.3s] [min-width:180px] dark:[background:#1f3444] dark:[border-color:#3a5568] dark:[color:#e8edf2] max-[800px]:[min-width:140px]" id="marketDropdown">
+            <select class="market-dropdown min-w-[200px] rounded-lg border px-3 py-2 bg-white [border:1px_solid_#ccdbe9] [border-radius:40px] [padding:5px_20px_5px_18px] font-medium [font-size:14px] [color:#0b2a40] cursor-pointer [outline:none] [background:#fafdff] [transition:0.3s] [min-width:180px] dark:[background:#1f3444] dark:[border-color:#3a5568] dark:[color:#e8edf2] max-[800px]:[min-width:140px] max-[480px]:min-w-0 max-[480px]:flex-1 max-[480px]:text-xs" id="marketDropdown">
                 @foreach ($getAllMarkets['options'] as $option)
                     <option value="{{ $option['value'] }}" data-odds-count="{{ $option['oddsCount'] }}">{{ $option['label'] }}</option>
                 @endforeach
@@ -270,5 +270,14 @@
         </div>
 
         @include('users.sports.football.footballDetails',["data" => $data])
+
+        <div
+            class="flex items-center justify-center py-10 text-sm font-semibold text-slate-300 dark:text-slate-600 {{ $hasMore ? '' : 'hidden' }}"
+            data-football-lazy-loader
+            data-has-more="{{ $hasMore ? 'true' : 'false' }}"
+            data-next-page="{{ $nextPage }}"
+        >
+            <span data-lazy-loader-text>↓ {{ __('Scroll for more matches') }} ↓</span>
+        </div>
     </div>
 @endsection

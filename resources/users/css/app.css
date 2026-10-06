@@ -34,6 +34,21 @@ body.dark-mode {
     }
 }
 
+@keyframes minuteTickBlink {
+    0%, 22%, 83%, 100% {
+        opacity: 1;
+    }
+
+    23%, 82% {
+        opacity: 0;
+    }
+}
+
+.minute-tick-blink {
+    display: inline-block;
+    animation: minuteTickBlink 1s steps(1, end) infinite;
+}
+
 .market-select {
     background: #f0f6fc url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f4b66' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e") no-repeat right 12px center;
     font-family: inherit;
@@ -41,6 +56,63 @@ body.dark-mode {
 
 body.dark-mode .market-select {
     background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b0c8dd' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+}
+
+@media (min-width: 1025px) {
+    .event-left {
+        display: grid;
+        grid-template-columns: 28px 76px minmax(0, 1fr);
+        column-gap: 0;
+        align-items: center;
+    }
+
+    .event-left .fav-star {
+        width: 28px;
+        justify-self: center;
+    }
+
+    .event-left .event-time {
+        width: 76px;
+        text-align: center;
+    }
+
+    .event-left .team-score-group {
+        display: grid;
+        grid-template-columns: 38px 38px 38px minmax(0, 180px) 64px minmax(0, 180px) 38px 38px 38px;
+        justify-content: center;
+        align-items: center;
+        column-gap: 0;
+        width: 100%;
+    }
+
+    .event-left .team-score-group > span {
+        min-width: 0;
+    }
+
+    .event-left .team-score-group > span.invisible {
+        visibility: visible;
+    }
+
+    .event-left .team-score-group .team-name {
+        width: 100%;
+        max-width: none;
+        padding-right: 0;
+        padding-left: 6px;
+        text-align: left;
+    }
+
+    .event-left .team-score-group .team-name.away {
+        padding-right: 6px;
+        padding-left: 0;
+        text-align: right;
+    }
+
+    .event-left .team-score-group .score-badge {
+        width: 64px;
+        min-width: 64px;
+        max-width: 64px;
+        justify-self: center;
+    }
 }
 
 @keyframes expandIn {

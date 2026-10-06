@@ -1,18 +1,19 @@
 <?php
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
 
 if (!function_exists('GetBetfairKey')) {
     function GetBetfairKey()
     {
-        return "OdGluNAET_ZZlULcG3pRW_ZpBupdt7gv";
+        return env('Betfair_API_KEY');
     }
 }
 
 if (!function_exists('GetSportApiProKey')) {
     function GetSportApiProKey()
     {
-        return "e258f815-b9f3-4143-b968-15337538f9d2";
+        return env('SPORTS_API_PRO_KEY');
     }
 }
 
@@ -39,6 +40,14 @@ if(!function_exists('storeInRedis')) {
 if(!function_exists('getInRedis')) {
     function getInRedis(string $cacheKey) {
         return json_decode(Redis::get($cacheKey),true);
+    }
+}
+
+if(!function_exists('withRedisLock')) {
+    function withRedisLock(string $cacheKey, callable $callback) {
+        return Cache::store('redis')
+            ->lock("{$cacheKey}:write-lock", 30)
+            ->block(5, $callback);
     }
 }
 

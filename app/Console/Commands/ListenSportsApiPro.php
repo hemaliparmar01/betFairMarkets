@@ -5,24 +5,43 @@ namespace App\Console\Commands;
 use Amp\Websocket\Client\WebsocketHandshake;
 use App\Events\FootballSportsScoreUpdated;
 use Illuminate\Console\Command;
-use Revolt\EventLoop;
-use Throwable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
+use Revolt\EventLoop;
+use Throwable;
+
 use function Amp\delay;
 use function Amp\Websocket\Client\connect;
 
 class ListenSportsApiPro extends Command
 {
     protected $signature = 'sports:listen';
+
     protected $description = 'Listen to SportsAPIPro football updates';
 
     public function handle(): int
     {
+        $listenerLock = Cache::store('redis')->lock('Football:sports-api-pro-listener', 120);
+        if (! $listenerLock->get()) {
+            $this->warn('SportsAPI Pro listener is already running.');
+
+            return self::SUCCESS;
+        }
+
+        EventLoop::repeat(60, function () use ($listenerLock): void {
+            if (! $listenerLock->refresh(120)) {
+                Log::critical('SportsAPI Pro listener lost its singleton lock and is stopping.');
+                exit(self::FAILURE);
+            }
+        });
+        register_shutdown_function(static fn () => $listenerLock->release());
+
         $key = GetSportApiProKey();
 
         if (! $key) {
             $this->error('SPORTS_API_PRO_KEY is missing.');
+
             return self::FAILURE;
         }
 
@@ -93,7 +112,7 @@ class ListenSportsApiPro extends Command
                     }
 
                     $type = $frame['type'] ?? 'unknown';
-                    Log::info("TYPE :  ".$type);
+                    Log::info('TYPE :  '.$type);
 
                     if (in_array($type, ['snapshot', 'update'], true)) {
                         $frameData = $frame['data'] ?? null;
@@ -131,6 +150,7 @@ class ListenSportsApiPro extends Command
                                     ], JSON_THROW_ON_ERROR));
                                 }
                                 unset($incidentSubscriptions[$matchId], $statsSubscriptions[$matchId]);
+
                                 continue;
                             }
 
@@ -151,9 +171,11 @@ class ListenSportsApiPro extends Command
                             }
                         }
 
-                        $this->updateFootballCache($channel, $frameData);
+                        withRedisLock('Football:matches', function () use ($channel, $frameData): void {
+                            $this->updateFootballCache($channel, $frameData);
+                        });
 
-                        Event::dispatch(new FootballSportsScoreUpdated());
+                        Event::dispatch(new FootballSportsScoreUpdated);
                     }
                 }
             } catch (Throwable $e) {
@@ -203,7 +225,7 @@ class ListenSportsApiPro extends Command
         } elseif (preg_match('/^match:(\d+):incidents$/', $channel, $channelMatch)) {
             $this->updateMatchIncidents($matches, $channelMatch[1], $frameData, $channel);
         } elseif (preg_match('/^match:(\d+):stats$/', $channel, $channelMatch)) {
-            $this->updateMatchCorners($matches, $channelMatch[1], $frameData, $channel);
+            $this->updateMatchStats($matches, $channelMatch[1], $frameData, $channel);
         }
 
         foreach ($matches as &$match) {
@@ -221,7 +243,7 @@ class ListenSportsApiPro extends Command
             $match['minutes_status'] = match ($match['result_status']) {
                 'Finished' => 'Finished',
                 'Prematch' => 'Prematch',
-                'Live' => in_array($match['minutes_status'] ?? null, ['Live', '1st half', '2nd half'], true)
+                'Live' => in_array($match['minutes_status'] ?? null, ['Live', 'Half Time', '1st half', '2nd half'], true)
                     ? $match['minutes_status']
                     : 'Live',
             };
@@ -266,13 +288,13 @@ class ListenSportsApiPro extends Command
                 $match['minutes_status'] = '2nd half';
                 $match['result_status'] = 'Live';
             } elseif ($statusCode == 31 && ($match['result_status'] ?? null) !== 'Finished') {
-                $match['minutes_status'] = 'Live';
+                $match['minutes_status'] = 'Half Time';
                 $match['result_status'] = 'Live';
             } elseif ($statusCode == 100 || $statusType === 'finished') {
                 $match['minutes_status'] = 'Finished';
                 $match['result_status'] = 'Finished';
             } elseif ($statusCode !== null && ! in_array((int) $statusCode, [6, 7, 31], true)) {
-                if (! in_array($match['minutes_status'] ?? null, ['Live', 'Prematch', 'Finished', '1st half', '2nd half'], true)) {
+                if (! in_array($match['minutes_status'] ?? null, ['Live', 'Prematch', 'Finished', 'Half Time', '1st half', '2nd half'], true)) {
                     $match['minutes_status'] = 'Live';
                 }
                 Log::warning('Unhandled SportsAPI Pro football status', [
@@ -283,7 +305,15 @@ class ListenSportsApiPro extends Command
             }
 
             // $match['status_type'] = $statusType;
+            if (
+                ($match['result_status'] ?? null) === 'Live'
+                && ($match['minutes_status'] ?? null) === 'Live'
+                && (int) floor((time() - (int) ($match['timestamp'] ?? time())) / 60) >= 60
+            ) {
+                $match['minutes_status'] = '2nd half';
+            }
             unset($match['status_description']);
+
             return;
         }
         unset($match);
@@ -316,12 +346,14 @@ class ListenSportsApiPro extends Command
                     if ($latestGoal === null || ($incident['timeSeconds'] ?? 0) > ($latestGoal['timeSeconds'] ?? 0)) {
                         $latestGoal = $incident;
                     }
+
                     continue;
                 }
 
                 if ($incidentType === 'injuryTime' && isset($incident['length'], $incident['time'])) {
                     $period = $incident['time'] <= 45 ? 'first_half' : 'second_half';
                     $addedTime[$period] = (int) $incident['length'];
+
                     continue;
                 }
 
@@ -393,6 +425,7 @@ class ListenSportsApiPro extends Command
             $match['cards'] = $cards;
             $match['card_counts'] = $cardCounts;
             $match['added_time'] = $addedTime;
+
             return;
         }
         unset($match);
@@ -419,7 +452,7 @@ class ListenSportsApiPro extends Command
         return [$frameData];
     }
 
-    private function updateMatchCorners(array &$matches, int|string $matchId, array $frameData, string $channel): void
+    private function updateMatchStats(array &$matches, int|string $matchId, array $frameData, string $channel): void
     {
         foreach ($matches as &$match) {
             if (($match['data_sync_complete'] ?? false) !== true || ($match['sportsApiPro_match_id'] ?? null) != $matchId) {
@@ -430,39 +463,75 @@ class ListenSportsApiPro extends Command
                 return;
             }
 
-            $corners = $this->findCorners($frameData);
-            if ($corners !== null) {
-                $match['corners'] = $corners;
+            $statKeys = [
+                'attacks' => 'attacks',
+                'dangerousattacks' => 'dangerous_attacks',
+                'ballpossession' => 'possession',
+                'possession' => 'possession',
+                'totalshotsongoal' => 'total_shots',
+                'shotsongoal' => 'shots_on_target',
+                'shotsoffgoal' => 'shots_off_target',
+                'blockedscoringattempt' => 'blocked_shots',
+                'passes' => 'total_passes',
+                'accuratepasses' => 'accurate_passes',
+                'totaltackle' => 'tackles',
+                'interceptionwon' => 'interceptions',
+                'fouls' => 'fouls',
+                'cornerkicks' => 'corners',
+                'yellowcards' => 'yellow_cards',
+                'redcards' => 'red_cards',
+                'offsides' => 'offsides',
+            ];
+            $liveStats = [];
+            $stack = [[$frameData, true]];
+
+            while ($stack !== []) {
+                [$data, $includePeriod] = array_pop($stack);
+                if (! is_array($data)) {
+                    continue;
+                }
+
+                $period = strtoupper((string) ($data['period'] ?? $data['periodName'] ?? ''));
+                if (in_array($period, ['1ST', '2ND', 'FIRST', 'SECOND'], true)) {
+                    $includePeriod = false;
+                } elseif ($period === 'ALL') {
+                    $includePeriod = true;
+                }
+
+                $name = strtolower(preg_replace('/[^a-z0-9]/i', '', (string) ($data['name'] ?? $data['statisticName'] ?? $data['key'] ?? '')));
+                if ($includePeriod && isset($statKeys[$name])) {
+                    $home = $data['homeValue'] ?? $data['home'] ?? null;
+                    $away = $data['awayValue'] ?? $data['away'] ?? null;
+                    $home = is_string($home) ? rtrim(trim($home), '%') : $home;
+                    $away = is_string($away) ? rtrim(trim($away), '%') : $away;
+
+                    if (is_numeric($home) && is_numeric($away)) {
+                        $key = $statKeys[$name];
+                        $liveStats[$key] = [
+                            'home' => (float) $home,
+                            'away' => (float) $away,
+                        ];
+                    }
+                }
+
+                foreach ($data as $value) {
+                    if (is_array($value)) {
+                        $stack[] = [$value, $includePeriod];
+                    }
+                }
             }
+
+            $match['live_stats'] = $liveStats;
+            if (isset($liveStats['corners'])) {
+                $match['corners'] = [
+                    'home' => (int) $liveStats['corners']['home'],
+                    'away' => (int) $liveStats['corners']['away'],
+                ];
+            }
+
             return;
         }
         unset($match);
-    }
-
-    private function findCorners(array $data): ?array
-    {
-        $name = strtolower((string) ($data['name'] ?? $data['statisticName'] ?? ''));
-        if (str_contains($name, 'corner')) {
-            $home = $data['home'] ?? $data['homeValue'] ?? null;
-            $away = $data['away'] ?? $data['awayValue'] ?? null;
-
-            if (is_numeric($home) && is_numeric($away)) {
-                return ['home' => (int) $home, 'away' => (int) $away];
-            }
-        }
-
-        foreach ($data as $value) {
-            if (! is_array($value)) {
-                continue;
-            }
-
-            $corners = $this->findCorners($value);
-            if ($corners !== null) {
-                return $corners;
-            }
-        }
-
-        return null;
     }
 
     private function syncedMatchIds(): array
@@ -510,6 +579,7 @@ class ListenSportsApiPro extends Command
         }
 
         $match['websocket_change_timestamps'][$channel] = $changeTimestamp;
+
         return false;
     }
 }

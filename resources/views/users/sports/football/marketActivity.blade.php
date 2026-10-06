@@ -1,8 +1,155 @@
 @extends('users.layout.main')
 
-@section('title', 'Market Activity Terminal · BF Markets')
+@section('title', request()->routeIs('football.pinnacle-odds') ? 'Pinnacle Odds · BF Markets' : 'Market Activity Terminal · BF Markets')
 
 @section('content')
+@if (request()->routeIs('football.pinnacle-odds'))
+    <section id="pinnacleDashboard" class="my-5 min-w-0" data-source-url="{{ route('football.pinnacle-odds') }}">
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <h1 class="flex items-center gap-2 text-2xl font-extrabold text-[#0b2a40] dark:text-[#e8edf2] max-[480px]:text-xl">
+                    <i class="fas fa-arrow-trend-down text-[#dc4c64]"></i> {{ __('Pinnacle Odds') }}
+                </h1>
+                <p class="mt-1 text-sm text-[#5a7d99] dark:text-[#8aaccc]">{{ __('Realtime Pinnacle odds drops compared with Betfair prices') }}</p>
+            </div>
+            <span id="pinnacleConnection" class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">
+                <span class="size-2 rounded-full bg-current"></span><span data-status-text>{{ __('Connecting') }}</span>
+            </span>
+        </div>
+
+        <div class="mb-4 flex gap-2 overflow-x-auto pb-2 [scrollbar-width:thin]" data-sport-filters>
+            @foreach ([['all','🎯','All'],['soccer','⚽','Soccer'],['tennis','🎾','Tennis'],['basketball','🏀','Basketball'],['ice-hockey','🏒','Ice Hockey'],['baseball','⚾','Baseball'],['cricket','🏏','Cricket'],['esports','🎮','Esports']] as [$value, $icon, $label])
+                <button type="button" data-sport="{{ $value }}" class="pinnacle-sport {{ $value === 'all' ? 'border-[#0b2a40] bg-[#0b2a40] text-white' : 'border-[#d4e0ec] bg-white text-[#2a4d66] dark:border-[#3a5568] dark:bg-[#1f3444] dark:text-[#b0c8dd]' }} inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-bold">
+                    <span>{{ $icon }} {{ __($label) }}</span><span class="rounded-full bg-black/10 px-1.5 py-0.5 text-[10px]" data-count>0</span>
+                </button>
+            @endforeach
+        </div>
+
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#dbe7f2] bg-[#f8fbfe] p-3 dark:border-[#2a3f50] dark:bg-[#1f3444]">
+            <div class="flex rounded-lg border border-[#d4e0ec] bg-white p-1 dark:border-[#3a5568] dark:bg-[#1a2a38]" data-mode-switch>
+                <button type="button" data-mode="prematch" class="rounded-md bg-[#0b2a40] px-3 py-1.5 text-xs font-bold text-white">📋 {{ __('Prematch') }}</button>
+                <button type="button" data-mode="live" class="rounded-md px-3 py-1.5 text-xs font-bold text-[#5a7d99]">🔴 {{ __('Live') }}</button>
+            </div>
+            <div class="flex rounded-lg border border-[#d4e0ec] bg-white p-1 dark:border-[#3a5568] dark:bg-[#1a2a38]" data-view-switch>
+                <button type="button" data-view="simple" class="rounded-md bg-[#1a6b9c] px-3 py-1.5 text-xs font-bold text-white">{{ __('Simple') }}</button>
+                <button type="button" data-view="advanced" class="rounded-md px-3 py-1.5 text-xs font-bold text-[#5a7d99]">{{ __('Advanced') }}</button>
+            </div>
+        </div>
+
+        <div class="overflow-hidden rounded-2xl border border-[#dbe7f2] bg-white dark:border-[#2a3f50] dark:bg-[#1a2a38]">
+            <div class="flex flex-wrap items-center justify-between gap-3 bg-[#0b2a40] px-4 py-3 text-white">
+                <h2 class="flex items-center gap-2 text-sm font-extrabold uppercase tracking-wide"><span class="size-2 rounded-full bg-[#ff647c]"></span>{{ __('Pinnacle Drops') }}</h2>
+                <span class="text-xs font-semibold text-white/70" data-alert-meta>{{ __('Prematch') }} · ODDS-DROP · ≥5%</span>
+            </div>
+            <div class="overflow-x-auto" data-alerts></div>
+        </div>
+    </section>
+
+    <div id="pinnacleModal" class="fixed inset-0 z-[10000] hidden items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="pinnacleModalTitle">
+        <div class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl dark:bg-[#1a2a38]" data-modal-panel></div>
+    </div>
+
+    @push('js')
+        <script>
+            (() => {
+                const root = document.getElementById('pinnacleDashboard');
+                const modal = document.getElementById('pinnacleModal');
+                if (!root || !modal) return;
+
+                const state = { alerts: @json($pinnacleAlerts ?? []), sport: 'all', mode: 'prematch', view: 'simple', connected: @json($pinnacleFeedConnected ?? false) };
+                const sportKey = value => { const key = String(value || '').toLowerCase().trim().replace(/\s+/g, '-'); return key === 'football' ? 'soccer' : key; };
+                const number = value => value === null || value === undefined || value === '' ? null : Number(value);
+                const price = value => Number.isFinite(number(value)) ? number(value).toFixed(2) : '—';
+                const escapeHtml = value => { const el = document.createElement('div'); el.textContent = String(value ?? ''); return el.innerHTML; };
+                const drop = alert => { const from = number(alert.from_price); const to = number(alert.to_price); return from > 0 && to > 0 ? ((from - to) / from) * 100 : 0; };
+                const pinnacleEdge = alert => { const current = number(alert.to_price); const nvp = number(alert.nvp); return current > 0 && nvp > 0 ? ((current / nvp) - 1) * 100 : null; };
+                const edge = alert => { const bf = number(alert.bf_back); const nvp = number(alert.nvp); return bf > 0 && nvp > 0 ? ((bf / nvp) - 1) * 100 : null; };
+                const edgeText = value => value === null ? 'N/A' : Math.abs(value) > 50 ? 'Low Liquidity' : `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+                const edgeClass = value => value === null || Math.abs(value) > 50 ? 'text-slate-400 italic' : value >= 5 ? 'text-emerald-600' : value >= 3 ? 'text-green-500' : value >= 0 ? 'text-amber-600' : 'text-slate-500';
+                const isLive = alert => alert.is_live === true || alert.is_live === 1 || alert.is_live === '1' || String(alert.status || '').toLowerCase() === 'live';
+                const alertTime = value => { const raw = number(value); if (!raw) return '—'; const time = raw < 100000000000 ? raw * 1000 : raw; const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000)); return seconds < 60 ? `${seconds}s ago` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ago` : `${Math.floor(seconds / 3600)}h ago`; };
+
+                const filtered = () => state.alerts.filter(alert => drop(alert) >= 5 && (state.sport === 'all' || sportKey(alert.sport) === state.sport) && (state.mode === 'live' ? isLive(alert) : !isLive(alert))).sort((a, b) => (number(b.alerted) || 0) - (number(a.alerted) || 0));
+                const render = () => {
+                    root.querySelectorAll('[data-sport]').forEach(button => {
+                        const count = state.alerts.filter(alert => drop(alert) >= 5 && (button.dataset.sport === 'all' || sportKey(alert.sport) === button.dataset.sport) && (state.mode === 'live' ? isLive(alert) : !isLive(alert))).length;
+                        button.querySelector('[data-count]').textContent = count;
+                    });
+                    root.querySelector('[data-alert-meta]').textContent = `${state.mode === 'live' ? 'Live' : 'Prematch'} · ODDS-DROP · ≥5%`;
+
+                    const groups = new Map();
+                    filtered().forEach(alert => {
+                        const key = `${alert.home ?? ''}|${alert.away ?? ''}|${alert.league ?? ''}`;
+                        if (!groups.has(key)) groups.set(key, []);
+                        groups.get(key).push(alert);
+                    });
+
+                    if (!groups.size) {
+                        root.querySelector('[data-alerts]').innerHTML = `<div class="px-5 py-14 text-center text-sm font-semibold text-[#8aaccc]"><div class="mb-2 text-4xl opacity-50">🔍</div>{{ __('No alerts match the current filters.') }}</div>`;
+                        return;
+                    }
+
+                    const header = state.view === 'simple' ? `<div class="grid min-w-[760px] grid-cols-[80px_minmax(240px,1fr)_130px_100px_100px_110px] gap-3 border-b border-[#dbe7f2] bg-[#f5f9fc] px-4 py-2 text-[10px] font-extrabold uppercase tracking-wide text-[#6a8aaa] dark:border-[#2a3f50] dark:bg-[#1f3444]"><span>Drop</span><span>Match · Market</span><span class="text-center">Pinnacle Odds</span><span class="text-center">NVP</span><span class="text-center">Betfair</span><span class="text-center">Edge %</span></div>` : '';
+                    const html = [...groups.values()].map((alerts, groupIndex) => {
+                        const first = alerts[0];
+                        const rows = alerts.map(alert => {
+                            const alertIndex = state.alerts.indexOf(alert);
+                            const dropValue = drop(alert);
+                            const pinnacleEdgeValue = pinnacleEdge(alert);
+                            const edgeValue = edge(alert);
+                            if (state.view === 'advanced') return `<button type="button" data-alert-index="${alertIndex}" class="grid w-full min-w-[520px] grid-cols-[80px_1fr] gap-4 border-t border-[#e6eff8] px-5 py-4 text-left hover:bg-[#f8fbfe] dark:border-[#2a3f50] dark:hover:bg-[#1f3444]"><span class="text-right text-base font-black text-[#dc4c64]">−${Math.abs(dropValue).toFixed(1)}%</span><span class="min-w-0"><strong class="block text-sm text-[#12324a] dark:text-[#e8edf2]">${escapeHtml(alert.sect || 'Market')} · ${escapeHtml(alert.outcome || '')}</strong><span class="mt-1 block text-xs text-[#6a8aaa]">Pinnacle ${price(alert.from_price)} → <b class="text-[#dc4c64]">${price(alert.to_price)}</b> · NVP ${price(alert.nvp)} · Pinnacle Edge <b class="${edgeClass(pinnacleEdgeValue)}">${edgeText(pinnacleEdgeValue)}</b> · Betfair Back ${price(alert.bf_back)} / Lay ${price(alert.bf_lay)} · Sizes ${price(alert.bf_back_size)} / ${price(alert.bf_lay_size)} · Betfair Edge <b class="${edgeClass(edgeValue)}">${edgeText(edgeValue)}</b> · ${alertTime(alert.alerted)}</span></span></button>`;
+                            return `<button type="button" data-alert-index="${alertIndex}" class="grid w-full min-w-[760px] grid-cols-[80px_minmax(240px,1fr)_130px_100px_100px_110px] items-center gap-3 border-t border-[#e6eff8] px-4 py-3 text-left hover:bg-[#f8fbfe] dark:border-[#2a3f50] dark:hover:bg-[#1f3444]"><span class="text-right text-sm font-black text-[#dc4c64]">−${Math.abs(dropValue).toFixed(1)}%</span><span class="min-w-0"><strong class="block truncate text-sm text-[#12324a] dark:text-[#e8edf2]">${escapeHtml(alert.sect || 'Market')} · ${escapeHtml(alert.outcome || '')}</strong><small class="text-[10px] font-bold uppercase text-[#6a8aaa]">${isLive(alert) ? 'LIVE' : 'PREMATCH'} · ${escapeHtml(alert.sport || '')}</small></span><span class="text-center text-xs font-semibold"><s class="text-slate-400">${price(alert.from_price)}</s> → <b class="text-[#dc4c64]">${price(alert.to_price)}</b></span><span class="text-center text-xs font-bold text-[#dc4c64]">${price(alert.nvp)}</span><span class="text-center text-xs font-extrabold text-[#1a6b9c]">${price(alert.bf_back)}</span><span class="text-center text-xs font-extrabold ${edgeClass(edgeValue)}">${edgeText(edgeValue)}</span></button>`;
+                        }).join('');
+                        return `<article class="m-2 overflow-hidden rounded-xl border border-[#dbe7f2] dark:border-[#2a3f50]"><button type="button" data-group="${groupIndex}" class="flex w-full items-center justify-between gap-3 bg-[#f5f9fc] px-4 py-3 text-left dark:bg-[#1f3444]"><span class="min-w-0"><strong class="block truncate text-sm text-[#12324a] dark:text-[#e8edf2]">${escapeHtml(first.home)} v ${escapeHtml(first.away)}</strong><small class="text-[10px] font-bold uppercase tracking-wide text-[#6a8aaa]">${isLive(first) ? 'LIVE' : 'PREMATCH'} · ${escapeHtml(first.sport)} · ${escapeHtml(first.league)}</small></span><span class="shrink-0 text-xs font-bold text-[#6a8aaa]">${alerts.length} alert${alerts.length === 1 ? '' : 's'} <i class="fas fa-chevron-down ml-1"></i></span></button><div data-group-body="${groupIndex}">${rows}</div></article>`;
+                    }).join('');
+                    root.querySelector('[data-alerts]').innerHTML = header + html;
+                };
+
+                const openModal = alert => {
+                    const dropValue = drop(alert); const pinnacleEdgeValue = pinnacleEdge(alert); const edgeValue = edge(alert);
+                    const recent = state.alerts.filter(item => item.home === alert.home && item.away === alert.away).sort((a, b) => (number(b.alerted) || 0) - (number(a.alerted) || 0)).slice(0, 5);
+                    modal.querySelector('[data-modal-panel]').innerHTML = `<div class="flex items-start justify-between gap-4"><div><h2 id="pinnacleModalTitle" class="text-xl font-extrabold text-[#12324a] dark:text-[#e8edf2]">${escapeHtml(alert.home)} v ${escapeHtml(alert.away)}</h2><p class="mt-1 text-xs font-bold uppercase text-[#6a8aaa]">${isLive(alert) ? 'LIVE' : 'PREMATCH'} · ${escapeHtml(alert.sport)} · ${escapeHtml(alert.league)}</p></div><button type="button" data-close-modal class="flex size-9 shrink-0 items-center justify-center rounded-full border border-[#d4e0ec] text-[#5a7d99]">✕</button></div><div class="mt-5 grid gap-3 rounded-xl border border-[#dbe7f2] bg-[#f8fbfe] p-4 sm:grid-cols-2 dark:border-[#2a3f50] dark:bg-[#1f3444]"><div class="text-3xl font-black text-[#dc4c64]">−${Math.abs(dropValue).toFixed(1)}%</div><div class="grid grid-cols-2 gap-3 text-xs"><span>Pinnacle<br><b>${price(alert.from_price)} → ${price(alert.to_price)}</b></span><span>NVP<br><b>${price(alert.nvp)}</b></span><span>Pinnacle Edge<br><b class="${edgeClass(pinnacleEdgeValue)}">${edgeText(pinnacleEdgeValue)}</b></span><span>Betfair Back / Lay<br><b class="text-[#1a6b9c]">${price(alert.bf_back)} / ${price(alert.bf_lay)}</b></span><span>Betfair Sizes<br><b>${price(alert.bf_back_size)} / ${price(alert.bf_lay_size)}</b></span><span>Betfair Edge<br><b class="${edgeClass(edgeValue)}">${edgeText(edgeValue)}</b></span></div></div><h3 class="mb-2 mt-5 text-xs font-extrabold uppercase tracking-wide text-[#6a8aaa]">Full Market</h3><div class="overflow-x-auto"><table class="w-full min-w-[520px] text-sm"><thead class="border-b border-[#dbe7f2] text-left text-[10px] uppercase text-[#6a8aaa]"><tr><th class="p-2">Outcome</th><th class="p-2 text-right">Pinnacle</th><th class="p-2 text-right">NVP</th><th class="p-2 text-right">Betfair</th><th class="p-2 text-right">Edge</th></tr></thead><tbody><tr class="border-b border-[#e6eff8]"><td class="p-2 font-bold">${escapeHtml(alert.outcome || '—')}</td><td class="p-2 text-right font-bold text-[#dc4c64]">${price(alert.to_price)}</td><td class="p-2 text-right">${price(alert.nvp)}</td><td class="p-2 text-right font-bold text-[#1a6b9c]">${price(alert.bf_back)}</td><td class="p-2 text-right font-bold ${edgeClass(edgeValue)}">${edgeText(edgeValue)}</td></tr></tbody></table></div><h3 class="mb-2 mt-5 text-xs font-extrabold uppercase tracking-wide text-[#6a8aaa]">Recent Alerts</h3><div class="divide-y divide-[#e6eff8]">${recent.map(item => `<div class="flex items-center justify-between gap-3 py-2 text-xs"><span class="text-[#6a8aaa]">${alertTime(item.alerted)}</span><span class="flex-1">${escapeHtml(item.sect)} · ${price(item.from_price)} → ${price(item.to_price)}</span><b class="${edgeClass(edge(item))}">${edgeText(edge(item))}</b></div>`).join('')}</div>`;
+                    modal.classList.remove('hidden'); modal.classList.add('flex');
+                };
+
+                root.addEventListener('click', event => {
+                    const sportButton = event.target.closest('[data-sport]');
+                    const switchButton = event.target.closest('[data-mode], [data-view]');
+                    const groupButton = event.target.closest('[data-group]');
+                    const alertButton = event.target.closest('[data-alert-index]');
+                    if (sportButton) { state.sport = sportButton.dataset.sport; root.querySelectorAll('[data-sport]').forEach(button => { const active = button === sportButton; button.classList.toggle('border-[#0b2a40]', active); button.classList.toggle('bg-[#0b2a40]', active); button.classList.toggle('text-white', active); button.classList.toggle('border-[#d4e0ec]', !active); button.classList.toggle('bg-white', !active); button.classList.toggle('text-[#2a4d66]', !active); }); render(); }
+                    if (switchButton) { const key = switchButton.dataset.mode ? 'mode' : 'view'; state[key] = switchButton.dataset[key]; switchButton.parentElement.querySelectorAll('button').forEach(button => { button.classList.remove('bg-[#0b2a40]','bg-[#1a6b9c]','text-white'); button.classList.add('text-[#5a7d99]'); }); switchButton.classList.remove('text-[#5a7d99]'); switchButton.classList.add(key === 'mode' ? 'bg-[#0b2a40]' : 'bg-[#1a6b9c]','text-white'); render(); }
+                    if (groupButton) { const body = root.querySelector(`[data-group-body="${groupButton.dataset.group}"]`); body?.classList.toggle('hidden'); groupButton.querySelector('i')?.classList.toggle('-rotate-90'); }
+                    if (alertButton) openModal(state.alerts[Number(alertButton.dataset.alertIndex)]);
+                });
+                modal.addEventListener('click', event => { if (event.target === modal || event.target.closest('[data-close-modal]')) { modal.classList.add('hidden'); modal.classList.remove('flex'); } });
+                document.addEventListener('keydown', event => { if (event.key === 'Escape') { modal.classList.add('hidden'); modal.classList.remove('flex'); } });
+
+                const status = root.querySelector('#pinnacleConnection');
+                const refresh = async () => {
+                    try {
+                        const response = await fetch(root.dataset.sourceUrl, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                        const payload = await response.json();
+                        state.alerts = payload.data ?? [];
+                        state.connected = payload.connected === true;
+                        status.className = state.connected ? 'inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700' : 'inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700';
+                        status.querySelector('[data-status-text]').textContent = state.connected ? 'Live' : 'Disconnected';
+                        render();
+                    } catch (error) {
+                        status.className = 'inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700';
+                        status.querySelector('[data-status-text]').textContent = 'Disconnected';
+                    }
+                };
+
+                status.className = state.connected ? 'inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700' : 'inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700';
+                status.querySelector('[data-status-text]').textContent = state.connected ? 'Live' : 'Disconnected';
+                render();
+                window.setInterval(refresh, 3000);
+            })();
+        </script>
+    @endpush
+@else
 @php
     $marketTags = [
         'match_odds' => [
@@ -78,9 +225,9 @@
     ];
 @endphp
 
-    <div class="page-header my-[18px] flex flex-wrap items-center justify-between gap-3 [display:flex] [align-items:center] [justify-content:space-between] [flex-wrap:wrap] [gap:12px] [margin:18px_0_14px] [margin:28px_0_8px]">
+    <div class="page-header my-[18px] flex min-w-0 flex-wrap items-center justify-between gap-3 [display:flex] [align-items:center] [justify-content:space-between] [flex-wrap:wrap] [gap:12px] [margin:18px_0_14px] [margin:28px_0_8px] max-[480px]:items-start">
         <h1 class="page-title [font-size:24px] [font-weight:800] [color:#0b2a40] [display:flex] [align-items:center] [gap:10px] [letter-spacing:-0.3px] [transition:color_0.3s] dark:[color:#e8edf2] [&_i]:[color:#1a6b9c] [&_i]:[font-size:22px] max-[768px]:[font-size:18px] max-[768px]:[&_i]:[font-size:18px] max-[480px]:[font-size:16px] [font-size:32px] [font-weight:700] [letter-spacing:-0.5px] [gap:12px] [&_i]:[font-size:28px] max-[768px]:[font-size:24px] max-[480px]:[font-size:20px] max-[480px]:[gap:8px] max-[480px]:[&_i]:[font-size:20px] max-[768px]:[font-size:22px] max-[768px]:[gap:10px] max-[768px]:[&_i]:[font-size:22px] max-[480px]:[font-size:19px] max-[1024px]:[font-size:28px] max-[480px]:[font-size:21px]"><i class="fas fa-bolt"></i> {{ __('Market Activity') }}</h1>
-        <div class="header-indicators flex flex-wrap items-center gap-2   [gap:8px] ">
+        <div class="header-indicators flex flex-wrap items-center gap-2 [gap:8px] max-[480px]:w-full">
             <button type="button"
                 class="collapse-toggle inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold   [gap:6px] [padding:6px_14px] [border-radius:30px] [font-size:12.5px]  [background:#f0f6fc] [border:1px_solid_#d4e0ec] [color:#1f4b66] cursor-pointer [transition:0.2s] select-none [font-family:inherit] dark:[background:#1f3444] dark:[border-color:#3a5568] dark:[color:#b0c8dd] [&:hover]:[border-color:#1a6b9c] [&:hover]:[color:#1a6b9c] dark:[&:hover]:[border-color:#4a8ab5] dark:[&:hover]:[color:#6aafdf] [&_i]:[transition:transform_0.3s]"
                 id="collapseToggle" title="Collapse/expand filters">
@@ -102,7 +249,7 @@
     <div class="controls-wrapper overflow-hidden  [transition:max-height_0.35s_ease,_opacity_0.25s_ease] [max-height:800px] opacity-100" id="controlsWrapper">
 
         <!-- SPEED SELECTOR -->
-        <div class="speed-bar flex flex-wrap items-center gap-2 border-b py-3    [gap:8px] [padding:10px_0_12px] [border-bottom:1px_solid_#e6edf6] [margin-bottom:12px] [transition:border-color_0.3s] dark:[border-bottom-color:#2a3f50] max-[768px]:[gap:6px]" id="speedBar">
+        <div class="speed-bar flex flex-wrap items-center gap-2 border-b py-3    [gap:8px] [padding:10px_0_12px] [border-bottom:1px_solid_#e6edf6] [margin-bottom:12px] [transition:border-color_0.3s] dark:[border-bottom-color:#2a3f50] max-[768px]:[gap:6px] max-[768px]:flex-nowrap max-[768px]:overflow-x-auto max-[768px]:pb-2 max-[768px]:[&_.speed-label]:shrink-0 max-[768px]:[&_.speed-pill]:shrink-0" id="speedBar">
             <span class="speed-label inline-flex items-center [gap:6px] [font-size:12px] font-bold [color:#5a7d99] uppercase [letter-spacing:0.4px] [padding-right:6px] dark:[color:#8aaccc] [&_i]:[color:#1a6b9c] [&_i]:[font-size:13px] dark:[&_i]:[color:#6aafdf]"><i class="fas fa-tachometer-alt"></i> {{ __('Speed:') }}</span>
             @foreach ($speedOptions as $speed)
                 <button type="button" class="speed-pill {{ ($speed['pro'] ?? false) ? 'pro' : '' }} {{ $speed['value'] === 3000 ? 'active' : '' }} inline-flex items-center [gap:5px] [padding:6px_13px] [border-radius:20px] [font-size:12px] font-bold [background:#f0f6fc] [border:1px_solid_#d4e0ec] [color:#5a7d99] cursor-pointer [transition:0.2s] select-none [font-variant-numeric:tabular-nums] [font-family:inherit] dark:[background:#1f3444] dark:[border-color:#3a5568] dark:[color:#8aaccc] [&:hover]:[border-color:#1a6b9c] [&:hover]:[color:#1a6b9c] [&:hover]:[transform:translateY(-1px)] dark:[&:hover]:[border-color:#4a8ab5] dark:[&:hover]:[color:#6aafdf] [&.active]:[background:linear-gradient(135deg,_#0b2a40,_#1a6b9c)] [&.active]:[border-color:#1a6b9c] [&.active]:[color:white] [&.active]:[box-shadow:0_4px_12px_rgba(26,_107,_156,_0.25)] dark:[&.active]:[background:linear-gradient(135deg,_#1a6b9c,_#4a8ab5)] dark:[&.active]:[border-color:#4a8ab5] [&.pro]:[border-color:#e6b422] [&.pro]:[color:#b8860b] [&.pro]:[background:linear-gradient(135deg,_#fff8e6,_#fef3d6)] dark:[&.pro]:[background:linear-gradient(135deg,_#3a2e1a,_#2e2414)] dark:[&.pro]:[border-color:#e6b422] dark:[&.pro]:[color:#e6b422] [&.pro.active]:[background:linear-gradient(135deg,_#b8860b,_#e6b422)] [&.pro.active]:[border-color:#e6b422] [&.pro.active]:[color:white] [&.pro.active]:[box-shadow:0_4px_12px_rgba(230,_180,_34,_0.3)] max-[768px]:[padding:5px_10px] max-[768px]:[font-size:11px] max-[480px]:[padding:4px_8px] max-[480px]:[font-size:10px]" data-speed="{{ $speed['value'] }}">{{ $speed['label'] }}</button>
@@ -114,7 +261,7 @@
         @include('users.sports.football.football_filter')
 
         <!-- MARKET CONTAINER (football only) -->
-        <div class="market-container flex flex-wrap items-center gap-2.5 border-b py-3   [gap:10px] [padding:10px_0_14px] [border-bottom:1px_solid_#e6edf6] [margin-bottom:14px] [transition:border-color_0.3s] dark:[border-bottom-color:#2a3f50] [&[hidden]]:[display:none] max-[768px]:[gap:6px]" id="marketContainer" hidden>
+        <div class="market-container flex flex-wrap items-center gap-2.5 border-b py-3   [gap:10px] [padding:10px_0_14px] [border-bottom:1px_solid_#e6edf6] [margin-bottom:14px] [transition:border-color_0.3s] dark:[border-bottom-color:#2a3f50] [&[hidden]]:[display:none] max-[768px]:[gap:6px] max-[480px]:items-stretch max-[480px]:[&_.market-container-label]:w-full max-[480px]:[&_.market-select]:w-full max-[480px]:[&_.market-select]:min-w-0" id="marketContainer">
             <span class="market-container-label inline-flex items-center [gap:6px] [font-size:12px] font-bold [color:#5a7d99] uppercase [letter-spacing:0.4px] dark:[color:#8aaccc] [&_i]:[color:#1a6b9c] [&_i]:[font-size:13px] dark:[&_i]:[color:#6aafdf]"><i class="fas fa-filter"></i> {{ __('Market:') }}</span>
             <select class="market-select [appearance:none] [-webkit-appearance:none] [background-size:14px] [border:1px_solid_#d4e0ec] [border-radius:30px] [padding:8px_38px_8px_16px] [font-size:13px] [font-weight:700] [color:#1f4b66] [cursor:pointer] [transition:0.2s] [min-width:200px] [&:hover]:[border-color:#1a6b9c] [&:focus]:[outline:none] [&:focus]:[border-color:#1a6b9c] [&:focus]:[box-shadow:0_0_0_3px_rgba(26,_107,_156,_0.15)] dark:[background-color:#1f3444] dark:[border-color:#3a5568] dark:[color:#b0c8dd] max-[768px]:[font-size:12px] max-[768px]:[min-width:170px] max-[768px]:[padding:7px_34px_7px_14px]" id="marketSelect">
                 @foreach ($marketOptions as $marketOption)
@@ -125,9 +272,15 @@
 
     </div>
 
-    <div class="terminal grid gap-4  [grid-template-columns:1fr] [gap:16px] [transition:grid-template-columns_0.35s_ease] [&.with-panel]:[grid-template-columns:1fr_460px] [&.panel-expanded]:[grid-template-columns:1fr_0px] [&.panel-expanded_.detail-panel]:[position:fixed] [&.panel-expanded_.detail-panel]:[top:0] [&.panel-expanded_.detail-panel]:[left:0] [&.panel-expanded_.detail-panel]:[right:0] [&.panel-expanded_.detail-panel]:[bottom:0] [&.panel-expanded_.detail-panel]:[width:100vw] [&.panel-expanded_.detail-panel]:[height:100vh] [&.panel-expanded_.detail-panel]:[z-index:99999] [&.panel-expanded_.detail-panel]:[border-radius:0] [&.panel-expanded_.detail-panel]:[overflow-y:auto] [&.panel-expanded_.detail-panel]:[animation:expandIn_0.3s_ease] max-[1200px]:[&.with-panel]:[grid-template-columns:1fr] [&.panel-expanded_.detail-body]:[max-width:1200px] [&.panel-expanded_.detail-body]:[margin:0_auto] [&.panel-expanded_.detail-body]:[padding:24px_32px] max-[1024px]:[&.with-panel]:[grid-template-columns:1fr] max-[480px]:[&.panel-expanded_.detail-body]:[padding:16px]" id="terminal">
-        <div class="events-table-wrap overflow-x-auto rounded-[14px]  [border-radius:14px] [border:1px_solid_#e6eff8] [transition:border-color_0.3s] dark:[border-color:#2a3f50]" id="eventsWrap">
-            <table class="events-table w-full min-w-[1150px] border-separate text-[13px]  [border-collapse:separate] [border-spacing:0] [font-size:13px] [min-width:1150px] bg-white [transition:background_0.3s] dark:[background:#1f3444] [&_thead]:[background:linear-gradient(135deg,_#0b2a40,_#1a6b9c)] [&_thead]:[color:white] [&_thead]:[position:sticky] [&_thead]:[top:0] [&_thead]:[z-index:5] [&_thead_th]:[padding:10px_12px] [&_thead_th]:[text-align:left] [&_thead_th]:[font-weight:700] [&_thead_th]:[font-size:11px] [&_thead_th]:[letter-spacing:0.5px] [&_thead_th]:[text-transform:uppercase] [&_thead_th]:[white-space:nowrap] [&_tbody_td]:[padding:10px_12px] [&_tbody_td]:[border-bottom:1px_solid_#eef2f8] [&_tbody_td]:[color:#2a4d66] [&_tbody_td]:[white-space:nowrap] [&_tbody_td]:[transition:color_0.3s,_border-color_0.3s] dark:[&_tbody_td]:[border-bottom-color:#2a3f50] dark:[&_tbody_td]:[color:#b0c8dd] [&_tbody_tr]:[cursor:pointer] [&_tbody_tr]:[transition:background_0.2s] [&_tbody_tr:hover]:[background:#f8fbfe] dark:[&_tbody_tr:hover]:[background:#1a2e44] [&_tbody_tr.selected]:[background:#e8f2fc] dark:[&_tbody_tr.selected]:[background:#1a2e44] [&_td.col-odds]:[text-align:center] [&_td.col-odds]:[padding:6px_4px]! max-[768px]:[font-size:12px] max-[768px]:[min-width:1000px] max-[768px]:[&_thead_th]:[padding:8px_10px] max-[768px]:[&_tbody_td]:[padding:8px_10px]">
+    <div class="terminal grid min-w-0 gap-4 [grid-template-columns:1fr] [gap:16px] [transition:grid-template-columns_0.35s_ease] [&.with-panel]:[grid-template-columns:1fr_460px] [&.panel-expanded]:[grid-template-columns:1fr_0px] [&.panel-expanded_.detail-panel]:[position:fixed] [&.panel-expanded_.detail-panel]:[top:0] [&.panel-expanded_.detail-panel]:[left:0] [&.panel-expanded_.detail-panel]:[right:0] [&.panel-expanded_.detail-panel]:[bottom:0] [&.panel-expanded_.detail-panel]:[width:100vw] [&.panel-expanded_.detail-panel]:[height:100vh] [&.panel-expanded_.detail-panel]:[z-index:99999] [&.panel-expanded_.detail-panel]:[border-radius:0] [&.panel-expanded_.detail-panel]:[overflow-y:auto] [&.panel-expanded_.detail-panel]:[animation:expandIn_0.3s_ease] max-[1200px]:[&.with-panel]:[grid-template-columns:1fr] [&.panel-expanded_.detail-body]:[max-width:1200px] [&.panel-expanded_.detail-body]:[margin:0_auto] [&.panel-expanded_.detail-body]:[padding:24px_32px] max-[1024px]:[&.with-panel]:[grid-template-columns:1fr] max-[480px]:[&.panel-expanded_.detail-body]:[padding:16px]" id="terminal">
+        <div class="events-table-wrap min-w-0 overflow-x-auto rounded-[14px] [border-radius:14px] [border:1px_solid_#e6eff8] [transition:border-color_0.3s] dark:[border-color:#2a3f50] max-[768px]:overflow-visible max-[768px]:border-0 max-[768px]:[&_.events-table]:!min-w-0 max-[768px]:[&_.events-table]:block max-[768px]:[&_thead]:hidden max-[768px]:[&_tbody]:grid max-[768px]:[&_tbody]:gap-3 max-[768px]:[&_tbody]:bg-transparent max-[768px]:[&_tbody_tr]:grid max-[768px]:[&_tbody_tr]:grid-cols-2 max-[768px]:[&_tbody_tr]:overflow-hidden max-[768px]:[&_tbody_tr]:rounded-xl max-[768px]:[&_tbody_tr]:border max-[768px]:[&_tbody_tr]:border-[#dce7f1] max-[768px]:[&_tbody_tr]:bg-white max-[768px]:dark:[&_tbody_tr]:border-[#2a3f50] max-[768px]:dark:[&_tbody_tr]:bg-[#1f3444] max-[768px]:[&_tbody_td]:flex max-[768px]:[&_tbody_td]:min-w-0 max-[768px]:[&_tbody_td]:items-center max-[768px]:[&_tbody_td]:justify-between max-[768px]:[&_tbody_td]:gap-2 max-[768px]:[&_tbody_td]:whitespace-normal max-[768px]:[&_tbody_td]:border-b max-[768px]:[&_tbody_td]:border-[#eef2f8] max-[768px]:[&_tbody_td]:px-3! max-[768px]:[&_tbody_td]:py-2! max-[768px]:[&_tbody_td]:before:shrink-0 max-[768px]:[&_tbody_td]:before:text-[10px] max-[768px]:[&_tbody_td]:before:font-bold max-[768px]:[&_tbody_td]:before:uppercase max-[768px]:[&_tbody_td]:before:tracking-wide max-[768px]:[&_tbody_td]:before:text-[#8aaccc] max-[768px]:[&_tbody_td]:before:content-[attr(data-label)] max-[768px]:[&_tbody_td.col-match]:col-span-2 max-[768px]:[&_tbody_td.col-match]:text-right max-[768px]:[&_tbody_td.col-odds]:text-right max-[768px]:[&_tbody_td:last-child]:col-span-2 max-[480px]:[&_tbody_tr]:grid-cols-1 max-[480px]:[&_tbody_td.col-match]:col-span-1 max-[480px]:[&_tbody_td:last-child]:col-span-1" id="eventsWrap">
+            <table class="events-table table-fixed w-full min-w-[1800px] border-separate text-[13px] [border-collapse:separate] [border-spacing:0] [font-size:13px] bg-white [transition:background_0.3s] dark:[background:#1f3444] [&_thead]:[background:linear-gradient(135deg,_#0b2a40,_#1a6b9c)] [&_thead]:[color:white] [&_thead]:[position:sticky] [&_thead]:[top:0] [&_thead]:[z-index:5] [&_thead_th]:[padding:10px_12px] [&_thead_th]:[text-align:left] [&_thead_th]:[font-weight:700] [&_thead_th]:[font-size:11px] [&_thead_th]:[letter-spacing:0.5px] [&_thead_th]:[text-transform:uppercase] [&_thead_th]:[white-space:nowrap] [&_tbody_td]:[padding:10px_12px] [&_tbody_td]:[border-bottom:1px_solid_#eef2f8] [&_tbody_td]:[color:#2a4d66] [&_tbody_td]:[white-space:nowrap] [&_tbody_td]:[transition:color_0.3s,_border-color_0.3s] dark:[&_tbody_td]:[border-bottom-color:#2a3f50] dark:[&_tbody_td]:[color:#b0c8dd] [&_tbody_tr]:[cursor:pointer] [&_tbody_tr]:[transition:background_0.2s] [&_tbody_tr:hover]:[background:#f8fbfe] dark:[&_tbody_tr:hover]:[background:#1a2e44] [&_tbody_tr.selected]:[background:#e8f2fc] dark:[&_tbody_tr.selected]:[background:#1a2e44] [&_td.col-odds]:[text-align:center] [&_td.col-odds]:[padding:6px_4px]! max-[768px]:[font-size:12px] max-[768px]:[min-width:1000px] max-[768px]:[&_thead_th]:[padding:8px_10px] max-[768px]:[&_tbody_td]:[padding:8px_10px]">
+                <colgroup>
+                    <col class="w-[125px]"><col class="w-[220px]"><col class="w-[280px]"><col class="w-[145px]">
+                    <col class="w-[215px]"><col class="w-[85px]"><col class="w-[95px]"><col class="w-[85px]">
+                    <col class="w-[95px]"><col class="w-[115px]"><col class="w-[90px]"><col class="w-[105px]">
+                    <col class="w-[90px]"><col class="w-[115px]">
+                </colgroup>
                 <thead>
                     <tr>
                         <th>{{ __('TIME')}}</th>
@@ -159,27 +312,39 @@
                             $volatilityLabel = ['low' => 'Low', 'medium' => 'Med', 'high' => 'High'][$event['volatility']] ?? 'Med';
                         @endphp
                         <tr data-id="{{ $event['id'] }}">
-                            <td class="col-time font-bold [color:#0b2a40] dark:[color:#e8edf2] [&_.status-live]:[color:#c74e4e] [&_.status-live]:[font-weight:800] [&_.status-live]:[margin-right:4px] dark:[&_.status-live]:[color:#e08080] [&_.status-up]:[color:#1a6b9c] [&_.status-up]:[font-weight:700] [&_.status-up]:[margin-right:4px] dark:[&_.status-up]:[color:#6aafdf]">
+                            <td data-label="{{ __('Time') }}" class="col-time font-bold [color:#0b2a40] dark:[color:#e8edf2] [&_.status-live]:[color:#c74e4e] [&_.status-live]:[font-weight:800] [&_.status-live]:[margin-right:4px] dark:[&_.status-live]:[color:#e08080] [&_.status-up]:[color:#1a6b9c] [&_.status-up]:[font-weight:700] [&_.status-up]:[margin-right:4px] dark:[&_.status-up]:[color:#6aafdf]">
                                 @if ($event['status'] === 'LIVE')<span class="status-live">● LIVE</span>@else<span class="status-up">▲ UP</span>@endif
-                                {{ $event['time'] }}
+                                @if ($event['status'] === 'LIVE' && str_ends_with((string) $event['time'], "'"))
+                                    {{ substr((string) $event['time'], 0, -1) }}<span class="minute-tick-blink">'</span>
+                                @else
+                                    {{ $event['time'] }}
+                                @endif
                             </td>
-                            <td class="col-comp [font-size:11.5px] [color:#8aaccc] dark:[color:#5a7d99]">{{ $event['sportIcon'] }} {{ $event['comp'] }}</td>
-                            <td class="col-match font-semibold [color:#0b2a40] dark:[color:#e8edf2] [&_.fav-star]:[color:#e6b422] [&_.fav-star]:[margin-left:4px] [&_.fav-star]:[font-size:12px]">{{ $event['match'] }}@if (in_array($event['sport'], ['horseracing', 'greyhounds'], true)) <span class="fav-star [color:#b8ccdf] [font-size:15px] cursor-pointer [background:none] border-0 [width:24px] [transition:0.2s] text-center dark:[color:#4a6a88] dark:[&.active-fav]:[color:#f5b342] [&.active-fav]:[color:#f5b342]">⭐</span>@endif</td>
-                            <td class="col-market font-semibold [font-size:12px]"><span class="market-tag {{ $marketTag['cls'] }} inline-flex items-center [gap:4px] [padding:3px_10px] [border-radius:20px] [font-size:11px] font-bold whitespace-nowrap [&.mo]:[background:linear-gradient(135deg,_#e8f2fc,_#d4e8f8)] [&.mo]:[color:#1a6b9c] [&.mo]:[border:1px_solid_#b8d4ec] dark:[&.mo]:[background:linear-gradient(135deg,_#1a2e44,_#1f3444)] dark:[&.mo]:[color:#6aafdf] dark:[&.mo]:[border-color:#2a4a5e] [&.ou]:[background:linear-gradient(135deg,_#fff8e6,_#fef3d6)] [&.ou]:[color:#b8860b] [&.ou]:[border:1px_solid_#f0dfa8] dark:[&.ou]:[background:linear-gradient(135deg,_#3a2e1a,_#2e2414)] dark:[&.ou]:[color:#e6b422] dark:[&.ou]:[border-color:#5a4a1a] [&.btts]:[background:linear-gradient(135deg,_#e8f7ee,_#d6f0e0)] [&.btts]:[color:#1f9a6e] [&.btts]:[border:1px_solid_#c6e8d3] dark:[&.btts]:[background:linear-gradient(135deg,_#1a3a2a,_#14301f)] dark:[&.btts]:[color:#5ab88a] dark:[&.btts]:[border-color:#2a5a3e] [&.cs]:[background:linear-gradient(135deg,_#fce8ee,_#f8d9e2)] [&.cs]:[color:#d44a6a] [&.cs]:[border:1px_solid_#f0c9d4] dark:[&.cs]:[background:linear-gradient(135deg,_#3a1f2a,_#2e1a22)] dark:[&.cs]:[color:#e0809a] dark:[&.cs]:[border-color:#5a2a3e] [&.fh]:[background:linear-gradient(135deg,_#f0e8fc,_#e8dcf8)] [&.fh]:[color:#7a4a9c] [&.fh]:[border:1px_solid_#d8c4ec] dark:[&.fh]:[background:linear-gradient(135deg,_#2e1a44,_#251535)] dark:[&.fh]:[color:#b888df] dark:[&.fh]:[border-color:#4a2a5e] [&.win]:[background:linear-gradient(135deg,_#fde8e8,_#fcd9d9)] [&.win]:[color:#c74e4e] [&.win]:[border:1px_solid_#f0c9c9] dark:[&.win]:[background:linear-gradient(135deg,_#3a1f1f,_#2e1a1a)] dark:[&.win]:[color:#e08080] dark:[&.win]:[border-color:#5a2a2a]">{{ $marketTag['label'] }}</span></td>
-                            <td class="col-fav font-bold [font-size:12.5px] [color:#0b2a40] dark:[color:#e8edf2] [&_.fav-icon]:[color:#e6b422] [&_.fav-icon]:[font-size:11px] [&_.fav-icon]:[margin-right:4px]"><span class="fav-icon">{{ $event['market'] === 'correct_score' ? '⚽' : '⭐' }}</span>{{ $event['market'] === 'correct_score' ? ($event['marketDisplayScore'] ?? $event['score'] ?? '—') : $favorite['name'] }}</td>
-                            <td class="col-odds"><span class="odds-cell odds-cell-back [background:#72bbef] [color:#0b2a40] [border:1px_solid_#4a9fd8] dark:[background:#72bbef] dark:[color:#0b2a40] dark:[border-color:#4a9fd8] [text-align:center] [font-weight:800] [font-size:13.5px] [border-radius:4px] [padding:5px_8px]! [min-width:55px] [display:inline-block] [transition:background_0.4s_ease,_color_0.4s_ease] [margin:0_auto] [font-variant-numeric:tabular-nums] max-[768px]:[font-size:12.5px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">{{ number_format($favorite['back'], 2) }}</span></td>
-                            <td class="col-odds"><span class="size-cell size-cell-back [background:rgba(114,_187,_239,_0.18)] [color:#1a6b9c] dark:[background:rgba(114,_187,_239,_0.15)] dark:[color:#72bbef] [text-align:center] [font-weight:700] [font-size:12px] [border-radius:4px] [padding:5px_8px]! [min-width:60px] [display:inline-block] [margin:0_auto] [font-variant-numeric:tabular-nums] [transition:background_0.4s_ease,_color_0.4s_ease] max-[768px]:[font-size:11px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">{{ $event['totalBackSize'] >= 1000 ? number_format($event['totalBackSize'] / 1000, 1).'K' : $event['totalBackSize'] }}</span></td>
-                            <td class="col-odds"><span class="odds-cell odds-cell-lay [background:#faa9ba] [color:#4a1520] [border:1px_solid_#e8889a] dark:[background:#faa9ba] dark:[color:#4a1520] dark:[border-color:#e8889a] [text-align:center] [font-weight:800] [font-size:13.5px] [border-radius:4px] [padding:5px_8px]! [min-width:55px] [display:inline-block] [transition:background_0.4s_ease,_color_0.4s_ease] [margin:0_auto] [font-variant-numeric:tabular-nums] max-[768px]:[font-size:12.5px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">{{ number_format($favorite['lay'], 2) }}</span></td>
-                            <td class="col-odds"><span class="size-cell size-cell-lay [background:rgba(250,_169,_186,_0.18)] [color:#a8425a] dark:[background:rgba(250,_169,_186,_0.15)] dark:[color:#faa9ba] [text-align:center] [font-weight:700] [font-size:12px] [border-radius:4px] [padding:5px_8px]! [min-width:60px] [display:inline-block] [margin:0_auto] [font-variant-numeric:tabular-nums] [transition:background_0.4s_ease,_color_0.4s_ease] max-[768px]:[font-size:11px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">{{ $event['totalLaySize'] >= 1000 ? number_format($event['totalLaySize'] / 1000, 1).'K' : $event['totalLaySize'] }}</span></td>
-                            <td><span class="ind [&.ind-back-heavy]:[background:#e8f2fc] [&.ind-back-heavy]:[color:#1a6b9c] dark:[&.ind-back-heavy]:[background:#1a2e44] dark:[&.ind-back-heavy]:[color:#6aafdf] [&.ind-lay-heavy]:[background:#fce8ee] [&.ind-lay-heavy]:[color:#d44a6a] dark:[&.ind-lay-heavy]:[background:#3a1f2a] dark:[&.ind-lay-heavy]:[color:#e0809a] [&.ind-balanced]:[background:#f0f0f0] [&.ind-balanced]:[color:#6a8aaa] dark:[&.ind-balanced]:[background:#2a3f50] dark:[&.ind-balanced]:[color:#8aaccc] [&.ind-mom-strong-back]:[background:#e8f2fc] [&.ind-mom-strong-back]:[color:#1a6b9c] [&.ind-mom-strong-back]:[font-weight:800] [&.ind-mom-back]:[background:#e8f2fc] [&.ind-mom-back]:[color:#1a6b9c] [&.ind-mom-neutral]:[background:#f0f0f0] [&.ind-mom-neutral]:[color:#6a8aaa] [&.ind-mom-lay]:[background:#fce8ee] [&.ind-mom-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[background:#fce8ee] [&.ind-mom-strong-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[font-weight:800] dark:[&.ind-mom-strong-back]:[background:#1a2e44] dark:[&.ind-mom-strong-back]:[color:#6aafdf] dark:[&.ind-mom-back]:[background:#1a2e44] dark:[&.ind-mom-back]:[color:#6aafdf] dark:[&.ind-mom-neutral]:[background:#2a3f50] dark:[&.ind-mom-neutral]:[color:#8aaccc] dark:[&.ind-mom-lay]:[background:#3a1f2a] dark:[&.ind-mom-lay]:[color:#e0809a] dark:[&.ind-mom-strong-lay]:[background:#3a1f2a] dark:[&.ind-mom-strong-lay]:[color:#e0809a] [&.ind-delta-pos]:[background:#e8f7ee] [&.ind-delta-pos]:[color:#1f9a6e] dark:[&.ind-delta-pos]:[background:#1a3a2a] dark:[&.ind-delta-pos]:[color:#5ab88a] [&.ind-delta-neg]:[background:#fde8e8] [&.ind-delta-neg]:[color:#c74e4e] dark:[&.ind-delta-neg]:[background:#3a1f1f] dark:[&.ind-delta-neg]:[color:#e08080] [&.ind-delta-zero]:[background:#f0f0f0] [&.ind-delta-zero]:[color:#6a8aaa] dark:[&.ind-delta-zero]:[background:#2a3f50] dark:[&.ind-delta-zero]:[color:#8aaccc] [&.ind-vol-low]:[background:#e8f7ee] [&.ind-vol-low]:[color:#1f9a6e] dark:[&.ind-vol-low]:[background:#1a3a2a] dark:[&.ind-vol-low]:[color:#5ab88a] [&.ind-vol-med]:[background:#fff8e6] [&.ind-vol-med]:[color:#b8860b] dark:[&.ind-vol-med]:[background:#3a2e1a] dark:[&.ind-vol-med]:[color:#e6b422] [&.ind-vol-high]:[background:#fde8e8] [&.ind-vol-high]:[color:#c74e4e] dark:[&.ind-vol-high]:[background:#3a1f1f] dark:[&.ind-vol-high]:[color:#e08080] {{ $balanceClass }} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">{{ $balanceLabel }}</span></td>
-                            <td><span class="ind [&.ind-back-heavy]:[background:#e8f2fc] [&.ind-back-heavy]:[color:#1a6b9c] dark:[&.ind-back-heavy]:[background:#1a2e44] dark:[&.ind-back-heavy]:[color:#6aafdf] [&.ind-lay-heavy]:[background:#fce8ee] [&.ind-lay-heavy]:[color:#d44a6a] dark:[&.ind-lay-heavy]:[background:#3a1f2a] dark:[&.ind-lay-heavy]:[color:#e0809a] [&.ind-balanced]:[background:#f0f0f0] [&.ind-balanced]:[color:#6a8aaa] dark:[&.ind-balanced]:[background:#2a3f50] dark:[&.ind-balanced]:[color:#8aaccc] [&.ind-mom-strong-back]:[background:#e8f2fc] [&.ind-mom-strong-back]:[color:#1a6b9c] [&.ind-mom-strong-back]:[font-weight:800] [&.ind-mom-back]:[background:#e8f2fc] [&.ind-mom-back]:[color:#1a6b9c] [&.ind-mom-neutral]:[background:#f0f0f0] [&.ind-mom-neutral]:[color:#6a8aaa] [&.ind-mom-lay]:[background:#fce8ee] [&.ind-mom-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[background:#fce8ee] [&.ind-mom-strong-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[font-weight:800] dark:[&.ind-mom-strong-back]:[background:#1a2e44] dark:[&.ind-mom-strong-back]:[color:#6aafdf] dark:[&.ind-mom-back]:[background:#1a2e44] dark:[&.ind-mom-back]:[color:#6aafdf] dark:[&.ind-mom-neutral]:[background:#2a3f50] dark:[&.ind-mom-neutral]:[color:#8aaccc] dark:[&.ind-mom-lay]:[background:#3a1f2a] dark:[&.ind-mom-lay]:[color:#e0809a] dark:[&.ind-mom-strong-lay]:[background:#3a1f2a] dark:[&.ind-mom-strong-lay]:[color:#e0809a] [&.ind-delta-pos]:[background:#e8f7ee] [&.ind-delta-pos]:[color:#1f9a6e] dark:[&.ind-delta-pos]:[background:#1a3a2a] dark:[&.ind-delta-pos]:[color:#5ab88a] [&.ind-delta-neg]:[background:#fde8e8] [&.ind-delta-neg]:[color:#c74e4e] dark:[&.ind-delta-neg]:[background:#3a1f1f] dark:[&.ind-delta-neg]:[color:#e08080] [&.ind-delta-zero]:[background:#f0f0f0] [&.ind-delta-zero]:[color:#6a8aaa] dark:[&.ind-delta-zero]:[background:#2a3f50] dark:[&.ind-delta-zero]:[color:#8aaccc] [&.ind-vol-low]:[background:#e8f7ee] [&.ind-vol-low]:[color:#1f9a6e] dark:[&.ind-vol-low]:[background:#1a3a2a] dark:[&.ind-vol-low]:[color:#5ab88a] [&.ind-vol-med]:[background:#fff8e6] [&.ind-vol-med]:[color:#b8860b] dark:[&.ind-vol-med]:[background:#3a2e1a] dark:[&.ind-vol-med]:[color:#e6b422] [&.ind-vol-high]:[background:#fde8e8] [&.ind-vol-high]:[color:#c74e4e] dark:[&.ind-vol-high]:[background:#3a1f1f] dark:[&.ind-vol-high]:[color:#e08080] {{ $momentumClass }} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">{{ $momentumLabel }}</span></td>
-                            <td><span class="ind [&.ind-back-heavy]:[background:#e8f2fc] [&.ind-back-heavy]:[color:#1a6b9c] dark:[&.ind-back-heavy]:[background:#1a2e44] dark:[&.ind-back-heavy]:[color:#6aafdf] [&.ind-lay-heavy]:[background:#fce8ee] [&.ind-lay-heavy]:[color:#d44a6a] dark:[&.ind-lay-heavy]:[background:#3a1f2a] dark:[&.ind-lay-heavy]:[color:#e0809a] [&.ind-balanced]:[background:#f0f0f0] [&.ind-balanced]:[color:#6a8aaa] dark:[&.ind-balanced]:[background:#2a3f50] dark:[&.ind-balanced]:[color:#8aaccc] [&.ind-mom-strong-back]:[background:#e8f2fc] [&.ind-mom-strong-back]:[color:#1a6b9c] [&.ind-mom-strong-back]:[font-weight:800] [&.ind-mom-back]:[background:#e8f2fc] [&.ind-mom-back]:[color:#1a6b9c] [&.ind-mom-neutral]:[background:#f0f0f0] [&.ind-mom-neutral]:[color:#6a8aaa] [&.ind-mom-lay]:[background:#fce8ee] [&.ind-mom-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[background:#fce8ee] [&.ind-mom-strong-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[font-weight:800] dark:[&.ind-mom-strong-back]:[background:#1a2e44] dark:[&.ind-mom-strong-back]:[color:#6aafdf] dark:[&.ind-mom-back]:[background:#1a2e44] dark:[&.ind-mom-back]:[color:#6aafdf] dark:[&.ind-mom-neutral]:[background:#2a3f50] dark:[&.ind-mom-neutral]:[color:#8aaccc] dark:[&.ind-mom-lay]:[background:#3a1f2a] dark:[&.ind-mom-lay]:[color:#e0809a] dark:[&.ind-mom-strong-lay]:[background:#3a1f2a] dark:[&.ind-mom-strong-lay]:[color:#e0809a] [&.ind-delta-pos]:[background:#e8f7ee] [&.ind-delta-pos]:[color:#1f9a6e] dark:[&.ind-delta-pos]:[background:#1a3a2a] dark:[&.ind-delta-pos]:[color:#5ab88a] [&.ind-delta-neg]:[background:#fde8e8] [&.ind-delta-neg]:[color:#c74e4e] dark:[&.ind-delta-neg]:[background:#3a1f1f] dark:[&.ind-delta-neg]:[color:#e08080] [&.ind-delta-zero]:[background:#f0f0f0] [&.ind-delta-zero]:[color:#6a8aaa] dark:[&.ind-delta-zero]:[background:#2a3f50] dark:[&.ind-delta-zero]:[color:#8aaccc] [&.ind-vol-low]:[background:#e8f7ee] [&.ind-vol-low]:[color:#1f9a6e] dark:[&.ind-vol-low]:[background:#1a3a2a] dark:[&.ind-vol-low]:[color:#5ab88a] [&.ind-vol-med]:[background:#fff8e6] [&.ind-vol-med]:[color:#b8860b] dark:[&.ind-vol-med]:[background:#3a2e1a] dark:[&.ind-vol-med]:[color:#e6b422] [&.ind-vol-high]:[background:#fde8e8] [&.ind-vol-high]:[color:#c74e4e] dark:[&.ind-vol-high]:[background:#3a1f1f] dark:[&.ind-vol-high]:[color:#e08080] {{ str_starts_with($event['delta'], '+') ? 'ind-delta-pos' : (str_starts_with($event['delta'], '-') ? 'ind-delta-neg' : 'ind-delta-zero') }} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">{{ $event['delta'] }}</span></td>
-                            <td><span class="ind [&.ind-back-heavy]:[background:#e8f2fc] [&.ind-back-heavy]:[color:#1a6b9c] dark:[&.ind-back-heavy]:[background:#1a2e44] dark:[&.ind-back-heavy]:[color:#6aafdf] [&.ind-lay-heavy]:[background:#fce8ee] [&.ind-lay-heavy]:[color:#d44a6a] dark:[&.ind-lay-heavy]:[background:#3a1f2a] dark:[&.ind-lay-heavy]:[color:#e0809a] [&.ind-balanced]:[background:#f0f0f0] [&.ind-balanced]:[color:#6a8aaa] dark:[&.ind-balanced]:[background:#2a3f50] dark:[&.ind-balanced]:[color:#8aaccc] [&.ind-mom-strong-back]:[background:#e8f2fc] [&.ind-mom-strong-back]:[color:#1a6b9c] [&.ind-mom-strong-back]:[font-weight:800] [&.ind-mom-back]:[background:#e8f2fc] [&.ind-mom-back]:[color:#1a6b9c] [&.ind-mom-neutral]:[background:#f0f0f0] [&.ind-mom-neutral]:[color:#6a8aaa] [&.ind-mom-lay]:[background:#fce8ee] [&.ind-mom-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[background:#fce8ee] [&.ind-mom-strong-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[font-weight:800] dark:[&.ind-mom-strong-back]:[background:#1a2e44] dark:[&.ind-mom-strong-back]:[color:#6aafdf] dark:[&.ind-mom-back]:[background:#1a2e44] dark:[&.ind-mom-back]:[color:#6aafdf] dark:[&.ind-mom-neutral]:[background:#2a3f50] dark:[&.ind-mom-neutral]:[color:#8aaccc] dark:[&.ind-mom-lay]:[background:#3a1f2a] dark:[&.ind-mom-lay]:[color:#e0809a] dark:[&.ind-mom-strong-lay]:[background:#3a1f2a] dark:[&.ind-mom-strong-lay]:[color:#e0809a] [&.ind-delta-pos]:[background:#e8f7ee] [&.ind-delta-pos]:[color:#1f9a6e] dark:[&.ind-delta-pos]:[background:#1a3a2a] dark:[&.ind-delta-pos]:[color:#5ab88a] [&.ind-delta-neg]:[background:#fde8e8] [&.ind-delta-neg]:[color:#c74e4e] dark:[&.ind-delta-neg]:[background:#3a1f1f] dark:[&.ind-delta-neg]:[color:#e08080] [&.ind-delta-zero]:[background:#f0f0f0] [&.ind-delta-zero]:[color:#6a8aaa] dark:[&.ind-delta-zero]:[background:#2a3f50] dark:[&.ind-delta-zero]:[color:#8aaccc] [&.ind-vol-low]:[background:#e8f7ee] [&.ind-vol-low]:[color:#1f9a6e] dark:[&.ind-vol-low]:[background:#1a3a2a] dark:[&.ind-vol-low]:[color:#5ab88a] [&.ind-vol-med]:[background:#fff8e6] [&.ind-vol-med]:[color:#b8860b] dark:[&.ind-vol-med]:[background:#3a2e1a] dark:[&.ind-vol-med]:[color:#e6b422] [&.ind-vol-high]:[background:#fde8e8] [&.ind-vol-high]:[color:#c74e4e] dark:[&.ind-vol-high]:[background:#3a1f1f] dark:[&.ind-vol-high]:[color:#e08080] {{ $volatilityClass }} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">{{ $volatilityLabel }}</span></td>
-                            <td><button type="button" class="open-btn inline-flex items-center [gap:4px] [padding:5px_12px] [border-radius:20px] [background:linear-gradient(135deg,_#0b2a40,_#1a6b9c)] text-white [font-size:11.5px] font-bold border-0 cursor-pointer [transition:transform_0.2s,_box-shadow_0.2s] [font-family:inherit] whitespace-nowrap dark:[background:linear-gradient(135deg,_#1a6b9c,_#4a8ab5)] [&:hover]:[transform:translateY(-1px)] [&:hover]:[box-shadow:0_6px_16px_rgba(26,_107,_156,_0.3)]" data-id="{{ $event['id'] }}">{{ __('Open') }} →</button></td>
+                            <td data-label="{{ __('Competition') }}" class="col-comp [font-size:11.5px] [color:#8aaccc] dark:[color:#5a7d99]">{{ $event['sportIcon'] }} {{ $event['comp'] }}</td>
+                            <td data-label="{{ __('Match') }}" class="col-match font-semibold [color:#0b2a40] dark:[color:#e8edf2] [&_.fav-star]:[color:#e6b422] [&_.fav-star]:[margin-left:4px] [&_.fav-star]:[font-size:12px]">{{ $event['match'] }}@if (in_array($event['sport'], ['horseracing', 'greyhounds'], true)) <span class="fav-star [color:#b8ccdf] [font-size:15px] cursor-pointer [background:none] border-0 [width:24px] [transition:0.2s] text-center dark:[color:#4a6a88] dark:[&.active-fav]:[color:#f5b342] [&.active-fav]:[color:#f5b342]">⭐</span>@endif</td>
+                            <td data-label="{{ __('Market') }}" class="col-market font-semibold [font-size:12px]"><span class="market-tag {{ $marketTag['cls'] }} inline-flex items-center [gap:4px] [padding:3px_10px] [border-radius:20px] [font-size:11px] font-bold whitespace-nowrap [&.mo]:[background:linear-gradient(135deg,_#e8f2fc,_#d4e8f8)] [&.mo]:[color:#1a6b9c] [&.mo]:[border:1px_solid_#b8d4ec] dark:[&.mo]:[background:linear-gradient(135deg,_#1a2e44,_#1f3444)] dark:[&.mo]:[color:#6aafdf] dark:[&.mo]:[border-color:#2a4a5e] [&.ou]:[background:linear-gradient(135deg,_#fff8e6,_#fef3d6)] [&.ou]:[color:#b8860b] [&.ou]:[border:1px_solid_#f0dfa8] dark:[&.ou]:[background:linear-gradient(135deg,_#3a2e1a,_#2e2414)] dark:[&.ou]:[color:#e6b422] dark:[&.ou]:[border-color:#5a4a1a] [&.btts]:[background:linear-gradient(135deg,_#e8f7ee,_#d6f0e0)] [&.btts]:[color:#1f9a6e] [&.btts]:[border:1px_solid_#c6e8d3] dark:[&.btts]:[background:linear-gradient(135deg,_#1a3a2a,_#14301f)] dark:[&.btts]:[color:#5ab88a] dark:[&.btts]:[border-color:#2a5a3e] [&.cs]:[background:linear-gradient(135deg,_#fce8ee,_#f8d9e2)] [&.cs]:[color:#d44a6a] [&.cs]:[border:1px_solid_#f0c9d4] dark:[&.cs]:[background:linear-gradient(135deg,_#3a1f2a,_#2e1a22)] dark:[&.cs]:[color:#e0809a] dark:[&.cs]:[border-color:#5a2a3e] [&.fh]:[background:linear-gradient(135deg,_#f0e8fc,_#e8dcf8)] [&.fh]:[color:#7a4a9c] [&.fh]:[border:1px_solid_#d8c4ec] dark:[&.fh]:[background:linear-gradient(135deg,_#2e1a44,_#251535)] dark:[&.fh]:[color:#b888df] dark:[&.fh]:[border-color:#4a2a5e] [&.win]:[background:linear-gradient(135deg,_#fde8e8,_#fcd9d9)] [&.win]:[color:#c74e4e] [&.win]:[border:1px_solid_#f0c9c9] dark:[&.win]:[background:linear-gradient(135deg,_#3a1f1f,_#2e1a1a)] dark:[&.win]:[color:#e08080] dark:[&.win]:[border-color:#5a2a2a]">{{ $marketTag['label'] }}</span></td>
+                            <td data-label="{{ __('Favourite') }}" class="col-fav font-bold [font-size:12.5px] [color:#0b2a40] dark:[color:#e8edf2] [&_.fav-icon]:[color:#e6b422] [&_.fav-icon]:[font-size:11px] [&_.fav-icon]:[margin-right:4px]"><span class="fav-icon">{{ $event['market'] === 'correct_score' ? '⚽' : '⭐' }}</span>{{ $event['market'] === 'correct_score' ? ($event['marketDisplayScore'] ?? $event['score'] ?? '—') : $favorite['name'] }}</td>
+                            <td data-label="{{ __('Back') }}" class="col-odds"><span class="odds-cell odds-cell-back [background:#72bbef] [color:#0b2a40] [border:1px_solid_#4a9fd8] dark:[background:#72bbef] dark:[color:#0b2a40] dark:[border-color:#4a9fd8] [text-align:center] [font-weight:800] [font-size:13.5px] [border-radius:4px] [padding:5px_8px]! [min-width:55px] [display:inline-block] [transition:background_0.4s_ease,_color_0.4s_ease] [margin:0_auto] [font-variant-numeric:tabular-nums] max-[768px]:[font-size:12.5px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">{{ number_format($favorite['back'], 2) }}</span></td>
+                            <td data-label="{{ __('Back Size') }}" class="col-odds"><span class="size-cell size-cell-back [background:rgba(114,_187,_239,_0.18)] [color:#1a6b9c] dark:[background:rgba(114,_187,_239,_0.15)] dark:[color:#72bbef] [text-align:center] [font-weight:700] [font-size:12px] [border-radius:4px] [padding:5px_8px]! [min-width:60px] [display:inline-block] [margin:0_auto] [font-variant-numeric:tabular-nums] [transition:background_0.4s_ease,_color_0.4s_ease] max-[768px]:[font-size:11px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">{{ $event['totalBackSize'] >= 1000 ? number_format($event['totalBackSize'] / 1000, 1).'K' : $event['totalBackSize'] }}</span></td>
+                            <td data-label="{{ __('Lay') }}" class="col-odds"><span class="odds-cell odds-cell-lay [background:#faa9ba] [color:#4a1520] [border:1px_solid_#e8889a] dark:[background:#faa9ba] dark:[color:#4a1520] dark:[border-color:#e8889a] [text-align:center] [font-weight:800] [font-size:13.5px] [border-radius:4px] [padding:5px_8px]! [min-width:55px] [display:inline-block] [transition:background_0.4s_ease,_color_0.4s_ease] [margin:0_auto] [font-variant-numeric:tabular-nums] max-[768px]:[font-size:12.5px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">{{ number_format($favorite['lay'], 2) }}</span></td>
+                            <td data-label="{{ __('Lay Size') }}" class="col-odds"><span class="size-cell size-cell-lay [background:rgba(250,_169,_186,_0.18)] [color:#a8425a] dark:[background:rgba(250,_169,_186,_0.15)] dark:[color:#faa9ba] [text-align:center] [font-weight:700] [font-size:12px] [border-radius:4px] [padding:5px_8px]! [min-width:60px] [display:inline-block] [margin:0_auto] [font-variant-numeric:tabular-nums] [transition:background_0.4s_ease,_color_0.4s_ease] max-[768px]:[font-size:11px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">{{ $event['totalLaySize'] >= 1000 ? number_format($event['totalLaySize'] / 1000, 1).'K' : $event['totalLaySize'] }}</span></td>
+                            <td data-label="{{ __('Balance') }}"><span class="ind [&.ind-back-heavy]:[background:#e8f2fc] [&.ind-back-heavy]:[color:#1a6b9c] dark:[&.ind-back-heavy]:[background:#1a2e44] dark:[&.ind-back-heavy]:[color:#6aafdf] [&.ind-lay-heavy]:[background:#fce8ee] [&.ind-lay-heavy]:[color:#d44a6a] dark:[&.ind-lay-heavy]:[background:#3a1f2a] dark:[&.ind-lay-heavy]:[color:#e0809a] [&.ind-balanced]:[background:#f0f0f0] [&.ind-balanced]:[color:#6a8aaa] dark:[&.ind-balanced]:[background:#2a3f50] dark:[&.ind-balanced]:[color:#8aaccc] [&.ind-mom-strong-back]:[background:#e8f2fc] [&.ind-mom-strong-back]:[color:#1a6b9c] [&.ind-mom-strong-back]:[font-weight:800] [&.ind-mom-back]:[background:#e8f2fc] [&.ind-mom-back]:[color:#1a6b9c] [&.ind-mom-neutral]:[background:#f0f0f0] [&.ind-mom-neutral]:[color:#6a8aaa] [&.ind-mom-lay]:[background:#fce8ee] [&.ind-mom-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[background:#fce8ee] [&.ind-mom-strong-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[font-weight:800] dark:[&.ind-mom-strong-back]:[background:#1a2e44] dark:[&.ind-mom-strong-back]:[color:#6aafdf] dark:[&.ind-mom-back]:[background:#1a2e44] dark:[&.ind-mom-back]:[color:#6aafdf] dark:[&.ind-mom-neutral]:[background:#2a3f50] dark:[&.ind-mom-neutral]:[color:#8aaccc] dark:[&.ind-mom-lay]:[background:#3a1f2a] dark:[&.ind-mom-lay]:[color:#e0809a] dark:[&.ind-mom-strong-lay]:[background:#3a1f2a] dark:[&.ind-mom-strong-lay]:[color:#e0809a] [&.ind-delta-pos]:[background:#e8f7ee] [&.ind-delta-pos]:[color:#1f9a6e] dark:[&.ind-delta-pos]:[background:#1a3a2a] dark:[&.ind-delta-pos]:[color:#5ab88a] [&.ind-delta-neg]:[background:#fde8e8] [&.ind-delta-neg]:[color:#c74e4e] dark:[&.ind-delta-neg]:[background:#3a1f1f] dark:[&.ind-delta-neg]:[color:#e08080] [&.ind-delta-zero]:[background:#f0f0f0] [&.ind-delta-zero]:[color:#6a8aaa] dark:[&.ind-delta-zero]:[background:#2a3f50] dark:[&.ind-delta-zero]:[color:#8aaccc] [&.ind-vol-low]:[background:#e8f7ee] [&.ind-vol-low]:[color:#1f9a6e] dark:[&.ind-vol-low]:[background:#1a3a2a] dark:[&.ind-vol-low]:[color:#5ab88a] [&.ind-vol-med]:[background:#fff8e6] [&.ind-vol-med]:[color:#b8860b] dark:[&.ind-vol-med]:[background:#3a2e1a] dark:[&.ind-vol-med]:[color:#e6b422] [&.ind-vol-high]:[background:#fde8e8] [&.ind-vol-high]:[color:#c74e4e] dark:[&.ind-vol-high]:[background:#3a1f1f] dark:[&.ind-vol-high]:[color:#e08080] {{ $balanceClass }} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">{{ $balanceLabel }}</span></td>
+                            <td data-label="{{ __('Momentum') }}"><span class="ind [&.ind-back-heavy]:[background:#e8f2fc] [&.ind-back-heavy]:[color:#1a6b9c] dark:[&.ind-back-heavy]:[background:#1a2e44] dark:[&.ind-back-heavy]:[color:#6aafdf] [&.ind-lay-heavy]:[background:#fce8ee] [&.ind-lay-heavy]:[color:#d44a6a] dark:[&.ind-lay-heavy]:[background:#3a1f2a] dark:[&.ind-lay-heavy]:[color:#e0809a] [&.ind-balanced]:[background:#f0f0f0] [&.ind-balanced]:[color:#6a8aaa] dark:[&.ind-balanced]:[background:#2a3f50] dark:[&.ind-balanced]:[color:#8aaccc] [&.ind-mom-strong-back]:[background:#e8f2fc] [&.ind-mom-strong-back]:[color:#1a6b9c] [&.ind-mom-strong-back]:[font-weight:800] [&.ind-mom-back]:[background:#e8f2fc] [&.ind-mom-back]:[color:#1a6b9c] [&.ind-mom-neutral]:[background:#f0f0f0] [&.ind-mom-neutral]:[color:#6a8aaa] [&.ind-mom-lay]:[background:#fce8ee] [&.ind-mom-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[background:#fce8ee] [&.ind-mom-strong-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[font-weight:800] dark:[&.ind-mom-strong-back]:[background:#1a2e44] dark:[&.ind-mom-strong-back]:[color:#6aafdf] dark:[&.ind-mom-back]:[background:#1a2e44] dark:[&.ind-mom-back]:[color:#6aafdf] dark:[&.ind-mom-neutral]:[background:#2a3f50] dark:[&.ind-mom-neutral]:[color:#8aaccc] dark:[&.ind-mom-lay]:[background:#3a1f2a] dark:[&.ind-mom-lay]:[color:#e0809a] dark:[&.ind-mom-strong-lay]:[background:#3a1f2a] dark:[&.ind-mom-strong-lay]:[color:#e0809a] [&.ind-delta-pos]:[background:#e8f7ee] [&.ind-delta-pos]:[color:#1f9a6e] dark:[&.ind-delta-pos]:[background:#1a3a2a] dark:[&.ind-delta-pos]:[color:#5ab88a] [&.ind-delta-neg]:[background:#fde8e8] [&.ind-delta-neg]:[color:#c74e4e] dark:[&.ind-delta-neg]:[background:#3a1f1f] dark:[&.ind-delta-neg]:[color:#e08080] [&.ind-delta-zero]:[background:#f0f0f0] [&.ind-delta-zero]:[color:#6a8aaa] dark:[&.ind-delta-zero]:[background:#2a3f50] dark:[&.ind-delta-zero]:[color:#8aaccc] [&.ind-vol-low]:[background:#e8f7ee] [&.ind-vol-low]:[color:#1f9a6e] dark:[&.ind-vol-low]:[background:#1a3a2a] dark:[&.ind-vol-low]:[color:#5ab88a] [&.ind-vol-med]:[background:#fff8e6] [&.ind-vol-med]:[color:#b8860b] dark:[&.ind-vol-med]:[background:#3a2e1a] dark:[&.ind-vol-med]:[color:#e6b422] [&.ind-vol-high]:[background:#fde8e8] [&.ind-vol-high]:[color:#c74e4e] dark:[&.ind-vol-high]:[background:#3a1f1f] dark:[&.ind-vol-high]:[color:#e08080] {{ $momentumClass }} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">{{ $momentumLabel }}</span></td>
+                            <td data-label="{{ __('Delta') }}"><span class="ind [&.ind-back-heavy]:[background:#e8f2fc] [&.ind-back-heavy]:[color:#1a6b9c] dark:[&.ind-back-heavy]:[background:#1a2e44] dark:[&.ind-back-heavy]:[color:#6aafdf] [&.ind-lay-heavy]:[background:#fce8ee] [&.ind-lay-heavy]:[color:#d44a6a] dark:[&.ind-lay-heavy]:[background:#3a1f2a] dark:[&.ind-lay-heavy]:[color:#e0809a] [&.ind-balanced]:[background:#f0f0f0] [&.ind-balanced]:[color:#6a8aaa] dark:[&.ind-balanced]:[background:#2a3f50] dark:[&.ind-balanced]:[color:#8aaccc] [&.ind-mom-strong-back]:[background:#e8f2fc] [&.ind-mom-strong-back]:[color:#1a6b9c] [&.ind-mom-strong-back]:[font-weight:800] [&.ind-mom-back]:[background:#e8f2fc] [&.ind-mom-back]:[color:#1a6b9c] [&.ind-mom-neutral]:[background:#f0f0f0] [&.ind-mom-neutral]:[color:#6a8aaa] [&.ind-mom-lay]:[background:#fce8ee] [&.ind-mom-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[background:#fce8ee] [&.ind-mom-strong-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[font-weight:800] dark:[&.ind-mom-strong-back]:[background:#1a2e44] dark:[&.ind-mom-strong-back]:[color:#6aafdf] dark:[&.ind-mom-back]:[background:#1a2e44] dark:[&.ind-mom-back]:[color:#6aafdf] dark:[&.ind-mom-neutral]:[background:#2a3f50] dark:[&.ind-mom-neutral]:[color:#8aaccc] dark:[&.ind-mom-lay]:[background:#3a1f2a] dark:[&.ind-mom-lay]:[color:#e0809a] dark:[&.ind-mom-strong-lay]:[background:#3a1f2a] dark:[&.ind-mom-strong-lay]:[color:#e0809a] [&.ind-delta-pos]:[background:#e8f7ee] [&.ind-delta-pos]:[color:#1f9a6e] dark:[&.ind-delta-pos]:[background:#1a3a2a] dark:[&.ind-delta-pos]:[color:#5ab88a] [&.ind-delta-neg]:[background:#fde8e8] [&.ind-delta-neg]:[color:#c74e4e] dark:[&.ind-delta-neg]:[background:#3a1f1f] dark:[&.ind-delta-neg]:[color:#e08080] [&.ind-delta-zero]:[background:#f0f0f0] [&.ind-delta-zero]:[color:#6a8aaa] dark:[&.ind-delta-zero]:[background:#2a3f50] dark:[&.ind-delta-zero]:[color:#8aaccc] [&.ind-vol-low]:[background:#e8f7ee] [&.ind-vol-low]:[color:#1f9a6e] dark:[&.ind-vol-low]:[background:#1a3a2a] dark:[&.ind-vol-low]:[color:#5ab88a] [&.ind-vol-med]:[background:#fff8e6] [&.ind-vol-med]:[color:#b8860b] dark:[&.ind-vol-med]:[background:#3a2e1a] dark:[&.ind-vol-med]:[color:#e6b422] [&.ind-vol-high]:[background:#fde8e8] [&.ind-vol-high]:[color:#c74e4e] dark:[&.ind-vol-high]:[background:#3a1f1f] dark:[&.ind-vol-high]:[color:#e08080] {{ str_starts_with($event['delta'], '+') ? 'ind-delta-pos' : (str_starts_with($event['delta'], '-') ? 'ind-delta-neg' : 'ind-delta-zero') }} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">{{ $event['delta'] }}</span></td>
+                            <td data-label="{{ __('Volatility') }}"><span class="ind [&.ind-back-heavy]:[background:#e8f2fc] [&.ind-back-heavy]:[color:#1a6b9c] dark:[&.ind-back-heavy]:[background:#1a2e44] dark:[&.ind-back-heavy]:[color:#6aafdf] [&.ind-lay-heavy]:[background:#fce8ee] [&.ind-lay-heavy]:[color:#d44a6a] dark:[&.ind-lay-heavy]:[background:#3a1f2a] dark:[&.ind-lay-heavy]:[color:#e0809a] [&.ind-balanced]:[background:#f0f0f0] [&.ind-balanced]:[color:#6a8aaa] dark:[&.ind-balanced]:[background:#2a3f50] dark:[&.ind-balanced]:[color:#8aaccc] [&.ind-mom-strong-back]:[background:#e8f2fc] [&.ind-mom-strong-back]:[color:#1a6b9c] [&.ind-mom-strong-back]:[font-weight:800] [&.ind-mom-back]:[background:#e8f2fc] [&.ind-mom-back]:[color:#1a6b9c] [&.ind-mom-neutral]:[background:#f0f0f0] [&.ind-mom-neutral]:[color:#6a8aaa] [&.ind-mom-lay]:[background:#fce8ee] [&.ind-mom-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[background:#fce8ee] [&.ind-mom-strong-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[font-weight:800] dark:[&.ind-mom-strong-back]:[background:#1a2e44] dark:[&.ind-mom-strong-back]:[color:#6aafdf] dark:[&.ind-mom-back]:[background:#1a2e44] dark:[&.ind-mom-back]:[color:#6aafdf] dark:[&.ind-mom-neutral]:[background:#2a3f50] dark:[&.ind-mom-neutral]:[color:#8aaccc] dark:[&.ind-mom-lay]:[background:#3a1f2a] dark:[&.ind-mom-lay]:[color:#e0809a] dark:[&.ind-mom-strong-lay]:[background:#3a1f2a] dark:[&.ind-mom-strong-lay]:[color:#e0809a] [&.ind-delta-pos]:[background:#e8f7ee] [&.ind-delta-pos]:[color:#1f9a6e] dark:[&.ind-delta-pos]:[background:#1a3a2a] dark:[&.ind-delta-pos]:[color:#5ab88a] [&.ind-delta-neg]:[background:#fde8e8] [&.ind-delta-neg]:[color:#c74e4e] dark:[&.ind-delta-neg]:[background:#3a1f1f] dark:[&.ind-delta-neg]:[color:#e08080] [&.ind-delta-zero]:[background:#f0f0f0] [&.ind-delta-zero]:[color:#6a8aaa] dark:[&.ind-delta-zero]:[background:#2a3f50] dark:[&.ind-delta-zero]:[color:#8aaccc] [&.ind-vol-low]:[background:#e8f7ee] [&.ind-vol-low]:[color:#1f9a6e] dark:[&.ind-vol-low]:[background:#1a3a2a] dark:[&.ind-vol-low]:[color:#5ab88a] [&.ind-vol-med]:[background:#fff8e6] [&.ind-vol-med]:[color:#b8860b] dark:[&.ind-vol-med]:[background:#3a2e1a] dark:[&.ind-vol-med]:[color:#e6b422] [&.ind-vol-high]:[background:#fde8e8] [&.ind-vol-high]:[color:#c74e4e] dark:[&.ind-vol-high]:[background:#3a1f1f] dark:[&.ind-vol-high]:[color:#e08080] {{ $volatilityClass }} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">{{ $volatilityLabel }}</span></td>
+                            <td data-label="{{ __('Action') }}"><button type="button" class="open-btn inline-flex items-center [gap:4px] [padding:5px_12px] [border-radius:20px] [background:linear-gradient(135deg,_#0b2a40,_#1a6b9c)] text-white [font-size:11.5px] font-bold border-0 cursor-pointer [transition:transform_0.2s,_box-shadow_0.2s] [font-family:inherit] whitespace-nowrap dark:[background:linear-gradient(135deg,_#1a6b9c,_#4a8ab5)] [&:hover]:[transform:translateY(-1px)] [&:hover]:[box-shadow:0_6px_16px_rgba(26,_107,_156,_0.3)]" data-id="{{ $event['id'] }}">{{ __('Open') }} →</button></td>
                         </tr>
                     @endforeach
                 </tbody>
             </table>
+            <div
+                class="flex min-w-full items-center justify-center py-10 text-sm font-semibold text-slate-300 dark:text-slate-600 {{ $hasMore ? '' : 'hidden' }}"
+                data-market-lazy-loader
+                data-has-more="{{ $hasMore ? 'true' : 'false' }}"
+                data-next-page="{{ $nextPage }}"
+            >
+                <span data-market-loader-text>↓ {{ __('Scroll for more matches') }} ↓</span>
+            </div>
         </div>
 
         <div class="detail-panel overflow-y-auto rounded-2xl border hidden [background:#f8fbfe] [border:1px_solid_#e6eff8] [border-radius:16px] p-0 overflow-hidden [transition:0.3s] [height:fit-content] [position:sticky] [top:20px] [max-height:calc(100vh_-_40px)] [overflow-y:auto] dark:[background:#1f3444] dark:[border-color:#2a3f50] [&.open]:[display:block] [&.open]:[animation:slideIn_0.3s_ease] max-[1024px]:[position:static] max-[480px]:[padding:0]" id="detailPanel">
@@ -234,7 +399,9 @@
                 }
 
                 function fmtSize(n) {
-                    return n >= 1000 ? (n / 1000).toFixed(1) + 'K' : n.toString();
+                    return n >= 1000
+                        ? (n / 1000).toFixed(1) + 'K'
+                        : Number(n.toFixed(2)).toString();
                 }
 
                 function fmtDelta(prev, curr) {
@@ -406,6 +573,8 @@
 
                 // ===== RENDER TABLE =====
                 const eventsBody = document.getElementById('eventsBody');
+                const marketRowTemplate = eventsBody.querySelector('tr[data-id]')?.cloneNode(true);
+                const marketLazyLoader = document.querySelector('[data-market-lazy-loader]');
                 const terminal = document.getElementById('terminal');
                 const detailPanel = document.getElementById('detailPanel');
                 const emptyPanel = document.getElementById('emptyPanel');
@@ -414,6 +583,198 @@
                 const marketSelect = document.getElementById('marketSelect');
                 let currentEventId = null;
                 let activeMarketFilter = 'active';
+                let activeFootballFilter = document.querySelector('.filter-pill.active')?.dataset.filter || 'all';
+
+                function createEventRow(ev) {
+                    if (!marketRowTemplate) return null;
+
+                    const row = marketRowTemplate.cloneNode(true);
+                    const cells = row.children;
+                    const favorite = ev.runners[ev.favIdx] || ev.favorite;
+                    if (!favorite) return null;
+
+                    row.dataset.id = ev.id;
+                    cells[0].innerHTML = ev.status === 'LIVE'
+                        ? '<span class="status-live">● LIVE</span> '
+                        : '<span class="status-up">▲ UP</span> ';
+                    const eventTime = String(ev.time || '');
+                    if (ev.status === 'LIVE' && eventTime.endsWith("'")) {
+                        cells[0].append(document.createTextNode(eventTime.slice(0, -1)));
+                        const minuteTick = document.createElement('span');
+                        minuteTick.className = 'minute-tick-blink';
+                        minuteTick.textContent = "'";
+                        cells[0].append(minuteTick);
+                    } else {
+                        cells[0].append(document.createTextNode(eventTime));
+                    }
+                    cells[1].textContent = `${ev.sportIcon || '⚽'} ${ev.comp || ''}`;
+                    cells[2].textContent = ev.match || '';
+                    cells[3].innerHTML = getMarketTag(ev.market);
+                    cells[4].innerHTML = '';
+                    const favoriteIcon = document.createElement('span');
+                    favoriteIcon.className = 'fav-icon';
+                    favoriteIcon.textContent = ev.market === 'correct_score' ? '⚽' : '⭐';
+                    cells[4].append(favoriteIcon, document.createTextNode(ev.market === 'correct_score'
+                        ? (ev.marketDisplayScore || ev.score || '—')
+                        : favorite.name));
+                    cells[5].querySelector('span').textContent = Number(favorite.back || 0).toFixed(2);
+                    cells[6].querySelector('span').textContent = fmtSize(Number(ev.totalBackSize || 0));
+                    cells[7].querySelector('span').textContent = Number(favorite.lay || 0).toFixed(2);
+                    cells[8].querySelector('span').textContent = fmtSize(Number(ev.totalLaySize || 0));
+
+                    const indicatorClasses = [
+                        'ind-back-heavy', 'ind-lay-heavy', 'ind-balanced',
+                        'ind-mom-strong-back', 'ind-mom-back', 'ind-mom-neutral', 'ind-mom-lay', 'ind-mom-strong-lay',
+                        'ind-delta-pos', 'ind-delta-neg', 'ind-delta-zero',
+                        'ind-vol-low', 'ind-vol-med', 'ind-vol-high',
+                    ];
+                    [[9, balanceClass(ev.balance), balanceText(ev.balance)],
+                        [10, momentumClass(ev.momentum), momentumText(ev.momentum)],
+                        [11, deltaClass(ev.delta), ev.delta],
+                        [12, volClass(ev.volatility), volText(ev.volatility)]
+                    ].forEach(([index, className, label]) => {
+                        const indicator = cells[index].querySelector('span');
+                        indicator.classList.remove(...indicatorClasses);
+                        indicator.classList.add(className);
+                        indicator.textContent = label;
+                    });
+                    cells[13].querySelector('[data-id]').dataset.id = ev.id;
+
+                    return row;
+                }
+
+                let marketLoading = false;
+                let marketHasMore = marketLazyLoader?.dataset.hasMore === 'true';
+                let marketNextPage = Number(marketLazyLoader?.dataset.nextPage || 2);
+
+                function updateMarketLoader(hasMore, nextPage) {
+                    marketHasMore = Boolean(hasMore);
+                    marketNextPage = Number(nextPage || marketNextPage);
+                    if (!marketLazyLoader) return;
+                    marketLazyLoader.classList.toggle('hidden', !marketHasMore);
+                    marketLazyLoader.dataset.hasMore = marketHasMore ? 'true' : 'false';
+                    marketLazyLoader.querySelector('[data-market-loader-text]').textContent = '↓ Scroll for more matches ↓';
+                }
+
+                function replaceMarketActivityRows(data) {
+                    const selectedEventId = currentEventId;
+                    const detailWasOpen = detailPanel.classList.contains('open');
+                    const detailWasExpanded = terminal.classList.contains('panel-expanded');
+
+                    events.splice(0, events.length, ...data);
+                    eventsBody.innerHTML = '';
+                    data.forEach(function(ev) {
+                        const row = createEventRow(ev);
+                        if (row) eventsBody.appendChild(row);
+                    });
+
+                    if (detailWasOpen && events.some(function(ev) { return ev.id === selectedEventId; })) {
+                        openDetail(selectedEventId);
+                        if (detailWasExpanded) toggleExpand();
+                    } else {
+                        currentEventId = null;
+                        detailPanel.classList.remove('open');
+                        terminal.classList.remove('with-panel', 'panel-expanded');
+                        detailContent.style.display = 'none';
+                        emptyPanel.style.display = 'flex';
+                    }
+                }
+
+                function marketActivityUrl(page, perPage = 20) {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('page', page);
+                    url.searchParams.set('per_page', perPage);
+                    url.searchParams.set('type', activeFootballFilter);
+                    url.searchParams.set('market_name', activeMarketFilter);
+
+                    return url;
+                }
+
+                async function reloadMarketActivity() {
+                    if (marketLoading) return;
+
+                    marketLoading = true;
+                    try {
+                        const loadedRowCount = Math.max(20, events.length);
+                        const response = await fetch(marketActivityUrl(1, loadedRowCount), {
+                            headers: { 'Accept': 'application/json' },
+                        });
+                        if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+
+                        const payload = await response.json();
+                        replaceMarketActivityRows(payload.data);
+                        updateMarketLoader(payload.has_more, Math.floor(payload.data.length / 20) + 1);
+                    } catch (error) {
+                        console.error('Market activity filter request failed:', error);
+                    } finally {
+                        marketLoading = false;
+                    }
+                }
+
+                async function loadMoreMarketActivity() {
+                    if (marketLoading || !marketHasMore) return;
+
+                    marketLoading = true;
+                    marketLazyLoader.querySelector('[data-market-loader-text]').textContent = 'Loading matches…';
+
+                    try {
+                        const response = await fetch(marketActivityUrl(marketNextPage), {
+                            headers: { 'Accept': 'application/json' },
+                        });
+                        if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+
+                        const payload = await response.json();
+                        payload.data.forEach(function(ev) {
+                            const row = createEventRow(ev);
+                            if (row) eventsBody.appendChild(row);
+                        });
+                        events.push(...payload.data);
+                        updateMarketLoader(payload.has_more, payload.next_page);
+                    } catch (error) {
+                        console.error('Market activity request failed:', error);
+                        updateMarketLoader(marketHasMore, marketNextPage);
+                    } finally {
+                        marketLoading = false;
+                    }
+                }
+
+                document.querySelectorAll('.filter-pill').forEach(function(pill) {
+                    pill.addEventListener('click', function() {
+                        document.querySelectorAll('.filter-pill').forEach(function(item) {
+                            item.classList.remove('active');
+                        });
+                        pill.classList.add('active');
+                        activeFootballFilter = pill.dataset.filter || 'all';
+                        reloadMarketActivity();
+                    });
+                });
+
+                marketSelect?.addEventListener('change', function() {
+                    activeMarketFilter = marketSelect.value || 'active';
+                    reloadMarketActivity();
+                });
+
+                if (marketLazyLoader) {
+                    const marketObserver = new IntersectionObserver(function(entries) {
+                        if (entries[0]?.isIntersecting) loadMoreMarketActivity();
+                    }, { rootMargin: '200px 0px' });
+                    marketObserver.observe(marketLazyLoader);
+                }
+
+                let marketRealtimeRefreshTimer = null;
+                window.addEventListener('load', function() {
+                    if (!window.Echo) return;
+
+                    window.Echo.channel('sports.football.live')
+                        .listen('.score.updated', function() {
+                            if (marketRealtimeRefreshTimer !== null) return;
+
+                            marketRealtimeRefreshTimer = window.setTimeout(function() {
+                                marketRealtimeRefreshTimer = null;
+                                reloadMarketActivity();
+                            }, 500);
+                        });
+                }, { once: true });
 
                 // function renderEvents(list) {
                 //     eventsBody.innerHTML = '';
@@ -433,10 +794,10 @@
                 //     <td class="col-match font-semibold [color:#0b2a40] dark:[color:#e8edf2] [&_.fav-star]:[color:#e6b422] [&_.fav-star]:[margin-left:4px] [&_.fav-star]:[font-size:12px]">${ev.match}${favMark}</td>
                 //     <td class="col-market font-semibold [font-size:12px]">${getMarketTag(ev.market)}</td>
                 //     <td class="col-fav font-bold [font-size:12.5px] [color:#0b2a40] dark:[color:#e8edf2] [&_.fav-icon]:[color:#e6b422] [&_.fav-icon]:[font-size:11px] [&_.fav-icon]:[margin-right:4px]">${getFavDisplay(ev)}</td>
-                //     <td class="col-odds"><span class="odds-cell odds-cell-back [background:#72bbef] [color:#0b2a40] [border:1px_solid_#4a9fd8] dark:[background:#72bbef] dark:[color:#0b2a40] dark:[border-color:#4a9fd8] [text-align:center] [font-weight:800] [font-size:13.5px] [border-radius:4px] [padding:5px_8px]! [min-width:55px] [display:inline-block] [transition:background_0.4s_ease,_color_0.4s_ease] [margin:0_auto] [font-variant-numeric:tabular-nums] max-[768px]:[font-size:12.5px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">${favRunner.back.toFixed(2)}</span></td>
-                //     <td class="col-odds"><span class="size-cell size-cell-back [background:rgba(114,_187,_239,_0.18)] [color:#1a6b9c] dark:[background:rgba(114,_187,_239,_0.15)] dark:[color:#72bbef] [text-align:center] [font-weight:700] [font-size:12px] [border-radius:4px] [padding:5px_8px]! [min-width:60px] [display:inline-block] [margin:0_auto] [font-variant-numeric:tabular-nums] [transition:background_0.4s_ease,_color_0.4s_ease] max-[768px]:[font-size:11px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">${fmtSize(favRunner.backSize)}</span></td>
-                //     <td class="col-odds"><span class="odds-cell odds-cell-lay [background:#faa9ba] [color:#4a1520] [border:1px_solid_#e8889a] dark:[background:#faa9ba] dark:[color:#4a1520] dark:[border-color:#e8889a] [text-align:center] [font-weight:800] [font-size:13.5px] [border-radius:4px] [padding:5px_8px]! [min-width:55px] [display:inline-block] [transition:background_0.4s_ease,_color_0.4s_ease] [margin:0_auto] [font-variant-numeric:tabular-nums] max-[768px]:[font-size:12.5px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">${favRunner.lay.toFixed(2)}</span></td>
-                //     <td class="col-odds"><span class="size-cell size-cell-lay [background:rgba(250,_169,_186,_0.18)] [color:#a8425a] dark:[background:rgba(250,_169,_186,_0.15)] dark:[color:#faa9ba] [text-align:center] [font-weight:700] [font-size:12px] [border-radius:4px] [padding:5px_8px]! [min-width:60px] [display:inline-block] [margin:0_auto] [font-variant-numeric:tabular-nums] [transition:background_0.4s_ease,_color_0.4s_ease] max-[768px]:[font-size:11px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">${fmtSize(favRunner.laySize)}</span></td>
+                //     <td data-label="{{ __('Back') }}" class="col-odds"><span class="odds-cell odds-cell-back [background:#72bbef] [color:#0b2a40] [border:1px_solid_#4a9fd8] dark:[background:#72bbef] dark:[color:#0b2a40] dark:[border-color:#4a9fd8] [text-align:center] [font-weight:800] [font-size:13.5px] [border-radius:4px] [padding:5px_8px]! [min-width:55px] [display:inline-block] [transition:background_0.4s_ease,_color_0.4s_ease] [margin:0_auto] [font-variant-numeric:tabular-nums] max-[768px]:[font-size:12.5px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">${favRunner.back.toFixed(2)}</span></td>
+                //     <td data-label="{{ __('Back Size') }}" class="col-odds"><span class="size-cell size-cell-back [background:rgba(114,_187,_239,_0.18)] [color:#1a6b9c] dark:[background:rgba(114,_187,_239,_0.15)] dark:[color:#72bbef] [text-align:center] [font-weight:700] [font-size:12px] [border-radius:4px] [padding:5px_8px]! [min-width:60px] [display:inline-block] [margin:0_auto] [font-variant-numeric:tabular-nums] [transition:background_0.4s_ease,_color_0.4s_ease] max-[768px]:[font-size:11px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">${fmtSize(favRunner.backSize)}</span></td>
+                //     <td data-label="{{ __('Lay') }}" class="col-odds"><span class="odds-cell odds-cell-lay [background:#faa9ba] [color:#4a1520] [border:1px_solid_#e8889a] dark:[background:#faa9ba] dark:[color:#4a1520] dark:[border-color:#e8889a] [text-align:center] [font-weight:800] [font-size:13.5px] [border-radius:4px] [padding:5px_8px]! [min-width:55px] [display:inline-block] [transition:background_0.4s_ease,_color_0.4s_ease] [margin:0_auto] [font-variant-numeric:tabular-nums] max-[768px]:[font-size:12.5px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">${favRunner.lay.toFixed(2)}</span></td>
+                //     <td data-label="{{ __('Lay Size') }}" class="col-odds"><span class="size-cell size-cell-lay [background:rgba(250,_169,_186,_0.18)] [color:#a8425a] dark:[background:rgba(250,_169,_186,_0.15)] dark:[color:#faa9ba] [text-align:center] [font-weight:700] [font-size:12px] [border-radius:4px] [padding:5px_8px]! [min-width:60px] [display:inline-block] [margin:0_auto] [font-variant-numeric:tabular-nums] [transition:background_0.4s_ease,_color_0.4s_ease] max-[768px]:[font-size:11px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">${fmtSize(favRunner.laySize)}</span></td>
                 //     <td><span class="ind ${balanceClass(ev.balance)} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">${balanceText(ev.balance)}</span></td>
                 //     <td><span class="ind ${momentumClass(ev.momentum)} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">${momentumText(ev.momentum)}</span></td>
                 //     <td><span class="ind ${deltaClass(ev.delta)} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">${ev.delta}</span></td>
@@ -616,4 +977,5 @@
             })();
         </script>
     @endpush
+@endif
 @endsection

@@ -63,7 +63,7 @@
         <span class="btn-primary cursor-default rounded-full bg-[#0b2a40] px-4 py-1 text-[13px] text-white dark:[background:#4a8ab5] dark:[color:white] [background:#0b2a40] [border:none] [padding:5px_18px] [border-radius:60px] [font-weight:500] [font-size:13px] [color:white] [cursor:default] [transition:0.3s] [padding:5px_16px] [font-size:12.5px] [cursor:pointer] [text-decoration:none] [display:inline-block]">{{ __('Start Free Trial') }}</span>
     </div>
 </header>
-<div id="navLinks" class="hidden flex-wrap !p-[12px] items-center gap-3 border-b border-[#e3ecf5] p-3 text-[15px] font-medium lg:flex max-[480px]:!px-0 [&>a:nth-child(-n+2)]:max-[480px]:min-w-0 [&>a:nth-child(-n+2)]:max-[480px]:w-full [&>a]:max-[480px]:break-words max-[480px]:gap-2">
+<div id="navLinks" class="hidden flex-wrap !p-[12px] items-center gap-3 border-b border-[#e3ecf5] p-3 text-[15px] font-medium lg:flex max-[480px]:!px-0 [&>a:nth-child(-n+3)]:max-[480px]:min-w-0 [&>a:nth-child(-n+3)]:max-[480px]:w-full [&>a]:max-[480px]:break-words max-[480px]:gap-2">
     <a href="{{ route('football.home') }}" @class(['group flex min-w-[190px] items-center gap-3 rounded-lg border bg-white !p-[8px] transition duration-200','border-[#d7e4f2] hover:border-[#1687d9] hover:shadow-sm','border-l-[3px] !border-l-[#1687d9] shadow-sm' => request()->routeIs('football.home')])>
         <span class="flex size-10 shrink-0 items-center justify-center rounded-md bg-[#eaf4ff] text-[#1687d9]">
             <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -94,6 +94,16 @@
             <span class="mt-1 text-xs font-normal text-[#5d7c99]">
                 {{ __('Live market signals') }}
             </span>
+        </span>
+    </a>
+
+    <a href="{{ route('football.pinnacle-odds') }}" @class(['group flex min-w-[190px] items-center gap-3 rounded-lg border bg-white !p-[8px] transition duration-200','border-[#d7e4f2] hover:border-[#dc4c64] hover:shadow-sm','border-l-[3px] !border-l-[#dc4c64] shadow-sm' => request()->routeIs('football.pinnacle-odds')])>
+        <span class="flex size-10 shrink-0 items-center justify-center rounded-md bg-[#fff0f2] text-[#dc4c64]">
+            <i class="fas fa-arrow-trend-down" aria-hidden="true"></i>
+        </span>
+        <span class="flex flex-col leading-tight">
+            <span class="font-semibold text-[#12324a]">{{ __('Pinnacle Odds') }}</span>
+            <span class="mt-1 text-xs font-normal text-[#5d7c99]">{{ __('Realtime odds drops') }}</span>
         </span>
     </a>
 
