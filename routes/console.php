@@ -11,16 +11,16 @@ Artisan::command('inspire', function () {
 
 Schedule::call(function () {
     app(FootballSyncController::class)->syncBetFairLiveData();
-})->name('football-betfair-live')->everyMinute()->withoutOverlapping(2);
+})->name('football-betfair-live')->everyFiveMinutes()->withoutOverlapping(2);
 
 Schedule::call(function () {
     app(FootballSyncController::class)->syncSportsApiProLiveData();
-})->name('football-sportApiPro-live')->everyMinute()->withoutOverlapping(2);
+})->name('football-sportApiPro-live')->everyFiveMinutes()->withoutOverlapping(2);
 
 Schedule::call(function () {
     app(FootballSyncController::class)->syncBetFairPrematchData();
-})->name('football-betfair-prematch')->everyFiveMinutes()->withoutOverlapping(10);
+})->name('football-betfair-prematch')->everyFifteenMinutes()->withoutOverlapping(10);
 
 Schedule::call(function () {
     app(FootballSyncController::class)->syncSportsApiProPrematchData();
-})->name('football-sportApiPro-prematch')->everyFiveMinutes()->withoutOverlapping(10);
+})->name('football-sportApiPro-prematch')->everyFifteenMinutes()->withoutOverlapping(10);

@@ -17,6 +17,8 @@
 /public/build
 /public/fonts-manifest.dev.json
 /public/hot
+/public/images/football/teams
+/public/images/football/tournaments
 /public/storage
 /storage/*.key
 /storage/pail

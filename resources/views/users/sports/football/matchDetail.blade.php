@@ -15,12 +15,22 @@
         <div class="bg-gradient-to-r from-[#0b2a40] to-[#1a6b9c] px-4 py-6 text-white sm:px-8">
             <div class="mb-3 text-center text-xs font-bold uppercase tracking-[0.14em] text-[#b9def3]">{{ $match['tournament'] }}</div>
             <div class="flex items-center justify-center gap-3 text-center sm:gap-8">
-                <h1 class="max-w-[38%] text-base font-bold sm:text-2xl">{{ $match['team1'] }}</h1>
+                <h1 class="flex max-w-[38%] min-w-0 items-center justify-end gap-2 text-right text-base font-bold sm:text-2xl">
+                    @if ($match['home_team_logo'] ?? null)
+                        <img src="{{ $match['home_team_logo'] }}" alt="" width="32" height="32" decoding="async" onerror="this.remove()" class="h-6 w-6 shrink-0 object-contain sm:h-8 sm:w-8">
+                    @endif
+                    <span class="min-w-0 break-words">{{ $match['team1'] }}</span>
+                </h1>
                 <div>
                     <div class="text-2xl font-extrabold sm:text-4xl">{{ $match['score'] }}</div>
                     <div class="mt-1 text-xs font-bold uppercase tracking-wide text-[#b9def3]">{{ $match['status'] }} · {{ $match['minutes'] }}@if ($match['status'] === 'Live' && preg_match('/^\d+(?:\+\d*)?$/', (string) $match['minutes']) === 1)<span class="minute-tick-blink">'</span>@endif</div>
                 </div>
-                <h1 class="max-w-[38%] text-base font-bold sm:text-2xl">{{ $match['team2'] }}</h1>
+                <h1 class="flex max-w-[38%] min-w-0 items-center justify-start gap-2 text-left text-base font-bold sm:text-2xl">
+                    <span class="min-w-0 break-words">{{ $match['team2'] }}</span>
+                    @if ($match['away_team_logo'] ?? null)
+                        <img src="{{ $match['away_team_logo'] }}" alt="" width="32" height="32" decoding="async" onerror="this.remove()" class="h-6 w-6 shrink-0 object-contain sm:h-8 sm:w-8">
+                    @endif
+                </h1>
             </div>
         </div>
 

@@ -5,7 +5,14 @@
         <div class="no-fixtures-message [padding:10px_0] [text-align:center] [font-size:13px] [color:#1e4763] dark:[color:#8aaccc]">No data available.</div>
     @endif
     @foreach ($data as $league => $matches)
-        <div class="league-header break-words [font-size:13px] font-bold uppercase [letter-spacing:0.5px] [color:#1e4763] [padding:10px_0_6px_0] [border-bottom:2px_solid_#e6edf6] [margin-top:8px] [transition:0.3s] bg-white [z-index:2] dark:[color:#8aaccc] dark:[border-bottom-color:#2a3f50] dark:[background:#1a2a38] [&:first-of-type]:[margin-top:0] max-[480px]:text-[11px]" data-league-header="{{ $league }}">{{ $matches['tournament_name'] }} · {{ $matches['status'] }}</div>
+        <div class="league-header break-words [font-size:13px] font-bold uppercase [letter-spacing:0.5px] [color:#1e4763] [padding:10px_0_6px_0] [border-bottom:2px_solid_#e6edf6] [margin-top:8px] [transition:0.3s] bg-white [z-index:2] dark:[color:#8aaccc] dark:[border-bottom-color:#2a3f50] dark:[background:#1a2a38] [&:first-of-type]:[margin-top:0] max-[480px]:text-[11px]" data-league-header="{{ $league }}">
+            <span class="inline-flex items-center gap-1.5">
+                @if ($matches['tournament_logo'] ?? null)
+                    <img src="{{ $matches['tournament_logo'] }}" alt="" width="18" height="18" loading="lazy" decoding="async" onerror="this.remove()" class="h-[18px] w-[18px] shrink-0 object-contain">
+                @endif
+                <span>{{ $matches['tournament_name'] }} · {{ $matches['status'] }}</span>
+            </span>
+        </div>
         @foreach ($matches['matches'] as $event)
             @php
                 $goalHighlightActive = ($event['goal_highlight_until'] ?? 0) > time();
@@ -86,9 +93,19 @@
                         <span class="text-center text-xs text-[#e6b422] max-[480px]:text-[10px] {{ ($homeCards['yellow'] ?? 0) > 0 ? '' : 'invisible' }}" title="Home yellow cards"><i class="fas fa-square"></i> {{ $homeCards['yellow'] ?? 0 }}</span>
                         <span class="text-center text-xs text-[#c74e4e] max-[480px]:text-[10px] {{ ($homeCards['total_red'] ?? 0) > 0 ? '' : 'invisible' }}" title="Direct red: {{ $homeCards['direct_red'] ?? 0 }}, second yellow: {{ $homeCards['second_yellow'] ?? 0 }}"><i class="fas fa-square"></i> {{ $homeCards['total_red'] ?? 0 }}</span>
 
-                        <span class="team-name w-full min-w-0 truncate pr-1 text-right font-semibold [transition:color_0.3s] dark:text-[#e8edf2]" title="{{ $event['team1'] }}">{{ $event['team1'] }}</span>
+                        <span class="team-name flex w-full min-w-0 items-center justify-end gap-1 pr-1 text-right font-semibold [transition:color_0.3s] dark:text-[#e8edf2]" title="{{ $event['team1'] }}">
+                            @if ($event['home_team_logo'] ?? null)
+                                <img src="{{ $event['home_team_logo'] }}" alt="" width="18" height="18" loading="lazy" decoding="async" onerror="this.remove()" class="h-[18px] w-[18px] shrink-0 object-contain">
+                            @endif
+                            <span class="min-w-0 truncate">{{ $event['team1'] }}</span>
+                        </span>
                         <span class="score-badge live-score block w-[44px] min-w-[44px] max-w-[44px] justify-self-center whitespace-nowrap px-1 text-center text-[16px] font-bold tabular-nums [font-variant-numeric:tabular-nums] [transition:color_0.3s] dark:text-[#e8edf2] dark:[&.live-score]:text-[#ff6b6b] dark:[&.finished-score]:text-[#e8edf2] [&.live-score]:text-[#d63e3e] [&.finished-score]:text-[#0b2a40] [&.upcoming-score]:text-[#8aaccc] dark:[&.upcoming-score]:text-[#5a7d99] max-[480px]:text-[14px]">{{ $event['score'] ?? '—' }}</span>
-                        <span class="team-name away w-full min-w-0 truncate pl-1 text-left font-normal text-[#1f4b66] [transition:color_0.3s] dark:text-[#b0c8dd]" title="{{ $event['team2'] }}">{{ $event['team2'] }}</span>
+                        <span class="team-name away flex w-full min-w-0 items-center justify-start gap-1 pl-1 text-left font-normal text-[#1f4b66] [transition:color_0.3s] dark:text-[#b0c8dd]" title="{{ $event['team2'] }}">
+                            <span class="min-w-0 truncate">{{ $event['team2'] }}</span>
+                            @if ($event['away_team_logo'] ?? null)
+                                <img src="{{ $event['away_team_logo'] }}" alt="" width="18" height="18" loading="lazy" decoding="async" onerror="this.remove()" class="h-[18px] w-[18px] shrink-0 object-contain">
+                            @endif
+                        </span>
 
                         <span class="text-center text-xs text-[#e6b422] max-[480px]:text-[10px] {{ ($awayCards['yellow'] ?? 0) > 0 ? '' : 'invisible' }}" title="Away yellow cards"><i class="fas fa-square"></i> {{ $awayCards['yellow'] ?? 0 }}</span>
                         <span class="text-center text-xs text-[#c74e4e] max-[480px]:text-[10px] {{ ($awayCards['total_red'] ?? 0) > 0 ? '' : 'invisible' }}" title="Direct red: {{ $awayCards['direct_red'] ?? 0 }}, second yellow: {{ $awayCards['second_yellow'] ?? 0 }}"><i class="fas fa-square"></i> {{ $awayCards['total_red'] ?? 0 }}</span>

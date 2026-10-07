@@ -6,7 +6,10 @@ use App\Http\Controllers\Controller;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Throwable;
 
 class FootballSyncController extends Controller
 {
@@ -57,9 +60,10 @@ class FootballSyncController extends Controller
 
     public function syncSportsApiProLiveData()
     {
-        $url = 'https://api.sportsapipro.com/v2/football/live';
+        $url = 'https://api.sportsapipro.com/v2/football/live/all';
         $key = 'x-api-key: '.$this->getsportsAPIProKeys;
         $liveData = ApiCall($url, $key);
+        $liveData = is_array($liveData['data'] ?? null) ? $liveData['data'] : $liveData;
         $cacheKey = $this->sports.':matches';
 
         $matches = withRedisLock(
@@ -360,6 +364,52 @@ class FootballSyncController extends Controller
         }
         $getExistingRecords = getInRedis($cacheKey) ?? [];
         $databaseMatches = [];
+        $getSportsImage = static function (string $type, mixed $entityId): ?string {
+            if (! in_array($type, ['teams', 'tournaments'], true) || ! is_numeric($entityId) || (int) $entityId <= 0) {
+                return null;
+            }
+
+            $entityId = (int) $entityId;
+            $relativeDirectory = "images/football/{$type}";
+            $absoluteDirectory = public_path($relativeDirectory);
+            $existingImage = glob("{$absoluteDirectory}/{$entityId}.*");
+
+            if ($existingImage !== false && isset($existingImage[0]) && File::isFile($existingImage[0])) {
+                return '/'.$relativeDirectory.'/'.basename($existingImage[0]);
+            }
+
+            try {
+                recordSportsApiProRestRequest("/v2/football/images/{$type}/{id}");
+                $response = Http::withHeaders([
+                    'x-api-key' => GetSportApiProKey(),
+                    'Accept' => 'image/png,image/jpeg,image/webp,image/gif',
+                ])
+                    ->connectTimeout(3)
+                    ->timeout(10)
+                    ->get("https://api.sportsapipro.com/v2/football/images/{$type}/{$entityId}");
+                $contentType = strtolower(trim(explode(';', (string) $response->header('Content-Type'))[0]));
+                $extension = [
+                    'image/png' => 'png',
+                    'image/jpeg' => 'jpg',
+                    'image/webp' => 'webp',
+                    'image/gif' => 'gif',
+                ][$contentType] ?? null;
+                $content = $response->body();
+
+                if (! $response->successful() || $extension === null || $content === '' || strlen($content) > 5_000_000) {
+                    return null;
+                }
+
+                File::ensureDirectoryExists($absoluteDirectory);
+                $fileName = "{$entityId}.{$extension}";
+                File::replace("{$absoluteDirectory}/{$fileName}", $content);
+
+                return "/{$relativeDirectory}/{$fileName}";
+            } catch (Throwable) {
+                return null;
+            }
+        };
+
         foreach (($payloads['events'] ?? []) as $payloadKey => $payload) {
             $homeTeam = is_array($payload['homeTeam'] ?? null)
                 ? ($payload['homeTeam']['name'] ?? null)
@@ -383,15 +433,18 @@ class FootballSyncController extends Controller
             $tempArray = [];
             $uniqueKey = $this->generateUniqueKey($homeTeam, $awayTeam, (string) $startTimestamp);
             $checkIsExists = $this->checkIfRecordExistsOnAnotherApi($uniqueKey, $homeTeam, $awayTeam, $startTimestamp, $getExistingRecords);
+            $existingRecord = $checkIsExists === null ? [] : ($getExistingRecords[$checkIsExists] ?? []);
 
             $minutesStatus = $this->sportsApiMinuteStatus(
                 $statusCode,
-                $getExistingRecords[$checkIsExists]['minutes_status'] ?? ($isLive ? 'Live' : 'Prematch')
+                $existingRecord['minutes_status'] ?? ($isLive ? 'Live' : 'Prematch')
             );
             if ($minutesStatus === 'Live' && (int) floor((time() - $startTimestamp) / 60) >= 60) {
                 $minutesStatus = '2nd half';
             }
-            $resultStatus = $isLive == true ? 'Live' : 'Prematch';
+            $resultStatus = $isLive
+                ? $this->sportsApiResultStatus($statusCode, $statusType, $existingRecord['result_status'] ?? 'Live')
+                : 'Prematch';
             $minutesStatus = $this->alignMinuteStatusWithResult($minutesStatus, $resultStatus);
             $homeScore = is_array($payload['homeScore'] ?? null)
                 ? ($payload['homeScore']['current'] ?? 0)
@@ -399,21 +452,61 @@ class FootballSyncController extends Controller
             $awayScore = is_array($payload['awayScore'] ?? null)
                 ? ($payload['awayScore']['current'] ?? 0)
                 : ($payload['awayScore'] ?? 0);
-            $tournament = is_array($payload['tournament'] ?? null)
-                ? ($payload['tournament']['name'] ?? '')
-                : ($payload['tournament'] ?? '');
+            $homeTeamId = is_array($payload['homeTeam'] ?? null) ? ($payload['homeTeam']['id'] ?? null) : null;
+            $awayTeamId = is_array($payload['awayTeam'] ?? null) ? ($payload['awayTeam']['id'] ?? null) : null;
+            $tournamentData = is_array($payload['tournament'] ?? null) ? $payload['tournament'] : [];
+            $tournament = $tournamentData !== [] ? ($tournamentData['name'] ?? '') : ($payload['tournament'] ?? '');
+            $tournamentId = $tournamentData['id'] ?? null;
+            $countryId = $tournamentData['category']['country']['id'] ?? null;
+            $timeData = is_array($payload['time'] ?? null) ? $payload['time'] : [];
+            $currentPeriodStartTimestamp = $timeData['currentPeriodStartTimestamp'] ?? null;
+            $lastPeriodEndTimestamp = $timeData['lastPeriodEndTimestamp'] ?? null;
+            $addedTime = array_filter([
+                'first_half' => isset($timeData['injuryTime1']) && is_numeric($timeData['injuryTime1'])
+                    ? (int) $timeData['injuryTime1']
+                    : null,
+                'second_half' => isset($timeData['injuryTime2']) && is_numeric($timeData['injuryTime2'])
+                    ? (int) $timeData['injuryTime2']
+                    : null,
+            ], static fn (mixed $value): bool => $value !== null);
+            $homeTeamLogo = $existingRecord['home_team_logo'] ?? null;
+            $awayTeamLogo = $existingRecord['away_team_logo'] ?? null;
+            $tournamentLogo = $existingRecord['tournament_logo'] ?? null;
+            $homeTeamLogo = is_string($homeTeamLogo) && File::isFile(public_path(ltrim($homeTeamLogo, '/')))
+                ? $homeTeamLogo
+                : $getSportsImage('teams', $homeTeamId);
+            $awayTeamLogo = is_string($awayTeamLogo) && File::isFile(public_path(ltrim($awayTeamLogo, '/')))
+                ? $awayTeamLogo
+                : $getSportsImage('teams', $awayTeamId);
+            $tournamentLogo = is_string($tournamentLogo) && File::isFile(public_path(ltrim($tournamentLogo, '/')))
+                ? $tournamentLogo
+                : $getSportsImage('tournaments', $tournamentId);
 
             if ($checkIsExists) {
                 $data_sync_complete = isset($getExistingRecords[$checkIsExists]['betfair_match_id']);
-                $additionalData = [
+                $additionalData = array_filter([
                     'data_sync_complete' => $data_sync_complete,
                     'home_score' => $homeScore,
                     'sportsApiPro_match_id' => $payload['id'],
                     'away_score' => $awayScore,
                     'minutes_status' => $minutesStatus,
                     'result_status' => $resultStatus,
+                    'home_team_id' => $homeTeamId,
+                    'away_team_id' => $awayTeamId,
+                    'home_team_logo' => $homeTeamLogo,
+                    'away_team_logo' => $awayTeamLogo,
+                    'tournament_logo' => $tournamentLogo,
+                    'tournament_id' => $tournamentId,
+                    'country_id' => $countryId,
+                    'current_period_start_timestamp' => is_numeric($currentPeriodStartTimestamp) && (int) $currentPeriodStartTimestamp > 0
+                        ? (int) $currentPeriodStartTimestamp
+                        : null,
+                    'last_period_end_timestamp' => is_numeric($lastPeriodEndTimestamp) && (int) $lastPeriodEndTimestamp > 0
+                        ? (int) $lastPeriodEndTimestamp
+                        : null,
+                    'added_time' => $addedTime !== [] ? array_replace($getExistingRecords[$checkIsExists]['added_time'] ?? [], $addedTime) : null,
                     // 'status_type' => $payload['status']['type'] ?? null,
-                ];
+                ], static fn (mixed $value): bool => $value !== null);
                 $getExistingRecords[$checkIsExists] = array_merge($getExistingRecords[$checkIsExists], $additionalData);
                 unset($getExistingRecords[$checkIsExists]['status_description']);
                 unset($getExistingRecords[$checkIsExists]['events'], $getExistingRecords[$checkIsExists]['goals'], $getExistingRecords[$checkIsExists]['goal_counts']);
@@ -431,6 +524,22 @@ class FootballSyncController extends Controller
                 $tempArray['team1'] = $homeTeam;
                 $tempArray['team2'] = $awayTeam;
                 $tempArray['tournament'] = $tournament;
+                $tempArray['home_team_id'] = $homeTeamId;
+                $tempArray['away_team_id'] = $awayTeamId;
+                $tempArray['home_team_logo'] = $homeTeamLogo;
+                $tempArray['away_team_logo'] = $awayTeamLogo;
+                $tempArray['tournament_logo'] = $tournamentLogo;
+                $tempArray['tournament_id'] = $tournamentId;
+                $tempArray['country_id'] = $countryId;
+                if (is_numeric($currentPeriodStartTimestamp) && (int) $currentPeriodStartTimestamp > 0) {
+                    $tempArray['current_period_start_timestamp'] = (int) $currentPeriodStartTimestamp;
+                }
+                if (is_numeric($lastPeriodEndTimestamp) && (int) $lastPeriodEndTimestamp > 0) {
+                    $tempArray['last_period_end_timestamp'] = (int) $lastPeriodEndTimestamp;
+                }
+                if ($addedTime !== []) {
+                    $tempArray['added_time'] = $addedTime;
+                }
                 $getExistingRecords[$uniqueKey] = $tempArray;
                 $databaseMatches[$uniqueKey] = $tempArray;
             }
@@ -460,7 +569,7 @@ class FootballSyncController extends Controller
             $matchKey = (string) $match['unique_key'];
             $matchKeys[] = $matchKey;
             $matchPayload = $match;
-            unset($matchPayload['markets']);
+            unset($matchPayload['markets'], $matchPayload['home_team_logo'], $matchPayload['away_team_logo'], $matchPayload['tournament_logo']);
 
             $matchRows[] = [
                 'unique_key' => $match['unique_key'],

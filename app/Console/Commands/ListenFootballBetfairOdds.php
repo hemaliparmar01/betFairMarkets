@@ -24,11 +24,11 @@ class ListenFootballBetfairOdds extends Command
     public function handle(): int
     {
         $listenerLock = Cache::store('redis')->lock('Football:betfair-odds-listener', 120);
-        if (! $listenerLock->get()) {
-            $this->warn('Betfair Odds listener is already running.');
+        // if (! $listenerLock->get()) {
+        //     $this->warn('Betfair Odds listener is already running.');
 
-            return self::SUCCESS;
-        }
+        //     return self::SUCCESS;
+        // }
 
         EventLoop::repeat(60, function () use ($listenerLock): void {
             if (! $listenerLock->refresh(120)) {

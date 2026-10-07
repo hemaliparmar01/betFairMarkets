@@ -42,7 +42,8 @@ trait FootballTrait
 
         $today = Carbon::now(getCurrentUserTimezone())->toDateString();
         $getData = array_values(array_filter($getData, static fn (array $match): bool => isset($match['timestamp'])
-            && Carbon::createFromTimestamp((int) $match['timestamp'], getCurrentUserTimezone())->toDateString() === $today
+            && (($match['result_status'] ?? null) !== 'Prematch'
+                || Carbon::createFromTimestamp((int) $match['timestamp'], getCurrentUserTimezone())->toDateString() === $today)
         ));
 
         if ($type) {
@@ -81,7 +82,8 @@ trait FootballTrait
                             $match['minutes_status'] ?? $match['result_status'],
                             (int) ($match['timestamp'] ?? time()),
                             $match['result_status'],
-                            $match['added_time'] ?? []
+                            $match['added_time'] ?? [],
+                            $match['current_period_start_timestamp'] ?? null
                         );
 
                         return is_numeric($minute) ? (int) $minute >= 70 : str_starts_with((string) $minute, '90+');
@@ -125,7 +127,8 @@ trait FootballTrait
                                 $match['minutes_status'] ?? $match['result_status'],
                                 (int) ($match['timestamp'] ?? time()),
                                 $match['result_status'],
-                                $match['added_time'] ?? []
+                                $match['added_time'] ?? [],
+                                $match['current_period_start_timestamp'] ?? null
                             );
 
                             if ($minute === 'HT') {
@@ -317,6 +320,9 @@ trait FootballTrait
             if (! isset($mainArray[$tournamentName])) {
                 $mainArray[$tournamentName] = [
                     'tournament_name' => $tournamentName,
+                    'tournament_id' => $data['tournament_id'] ?? null,
+                    'tournament_logo' => $data['tournament_logo'] ?? null,
+                    'country_id' => $data['country_id'] ?? null,
                     'unique_key' => $data['unique_key'],
                     'status' => $data['result_status'],
                     'matches' => [],
@@ -327,12 +333,16 @@ trait FootballTrait
                 'is_favorite' => isset($favoriteKeys[$data['unique_key']]),
                 'team1' => $data['team1'],
                 'team2' => $data['team2'],
+                'home_team_id' => $data['home_team_id'] ?? null,
+                'away_team_id' => $data['away_team_id'] ?? null,
+                'home_team_logo' => $data['home_team_logo'] ?? null,
+                'away_team_logo' => $data['away_team_logo'] ?? null,
                 'status' => $data['result_status'],
                 'sportsApiPro_match_id' => $data['sportsApiPro_match_id'],
                 'betfair_match_id' => $data['betfair_match_id'],
                 'score' => $this->getScore($data),
                 'timestamp' => $data['timestamp'],
-                'minutes' => $this->calculateMinutes($data['minutes_status'] ?? $data['result_status'], $data['timestamp'], $data['result_status'], $data['added_time'] ?? []),
+                'minutes' => $this->calculateMinutes($data['minutes_status'] ?? $data['result_status'], $data['timestamp'], $data['result_status'], $data['added_time'] ?? [], $data['current_period_start_timestamp'] ?? null),
                 // 'status_type' => $data['status_type'] ?? null,
                 'cards' => $data['cards'] ?? [],
                 'card_counts' => $data['card_counts'] ?? [],
@@ -350,7 +360,7 @@ trait FootballTrait
         return $mainArray;
     }
 
-    public function calculateMinutes(?string $minute_status, int $timestamp, string $result_status, array $added_time = [])
+    public function calculateMinutes(?string $minute_status, int $timestamp, string $result_status, array $added_time = [], ?int $current_period_start_timestamp = null)
     {
         if ($minute_status == 'Prematch' || $result_status == 'Prematch') {
             $time = Carbon::parse($timestamp)->timezone(getCurrentUserTimezone())->format('H:i');
@@ -371,13 +381,19 @@ trait FootballTrait
         }
 
         $elapsedMinutes = max(0, (int) floor((time() - $timestamp) / 60));
+        $periodElapsedMinutes = $current_period_start_timestamp !== null && $current_period_start_timestamp > 0
+            ? max(0, (int) floor((time() - $current_period_start_timestamp) / 60))
+            : null;
 
+        $isExplicitSecondHalf = $minute_status === '2nd half';
         if ($minute_status === 'Live' && $elapsedMinutes >= 60) {
             $minute_status = '2nd half';
         }
 
         if ($minute_status == '2nd half') {
-            $currentMinute = max(46, $elapsedMinutes - 15);
+            $currentMinute = $isExplicitSecondHalf && $periodElapsedMinutes !== null
+                ? 45 + $periodElapsedMinutes
+                : max(46, $elapsedMinutes - 15);
             if ($currentMinute > 90) {
                 $extraMinutes = $added_time['second_half'] ?? ($currentMinute - 90);
 
@@ -387,19 +403,23 @@ trait FootballTrait
             return $currentMinute;
         }
 
-        if ($minute_status == 'Live' && $elapsedMinutes > 45) {
+        $firstHalfElapsedMinutes = $minute_status === '1st half' && $periodElapsedMinutes !== null
+            ? $periodElapsedMinutes
+            : $elapsedMinutes;
+
+        if ($minute_status == 'Live' && $firstHalfElapsedMinutes > 45) {
             $extraMinutes = $added_time['first_half'] ?? null;
 
             return $extraMinutes === null ? '45+' : "45+{$extraMinutes}";
         }
 
-        if ($elapsedMinutes > 45) {
-            $extraMinutes = $added_time['first_half'] ?? ($elapsedMinutes - 45);
+        if ($firstHalfElapsedMinutes > 45) {
+            $extraMinutes = $added_time['first_half'] ?? ($firstHalfElapsedMinutes - 45);
 
             return "45+{$extraMinutes}";
         }
 
-        return $elapsedMinutes;
+        return $firstHalfElapsedMinutes;
     }
 
     public function getScore(array $match)
@@ -546,6 +566,8 @@ trait FootballTrait
             'id' => $matchId,
             'team1' => $match['team1'],
             'team2' => $match['team2'],
+            'home_team_logo' => $match['home_team_logo'] ?? null,
+            'away_team_logo' => $match['away_team_logo'] ?? null,
             'tournament' => $match['tournament'] ?? '',
             'status' => $match['result_status'],
             'score' => $this->getScore($match),
@@ -553,7 +575,8 @@ trait FootballTrait
                 $match['minutes_status'] ?? $match['result_status'],
                 (int) $match['timestamp'],
                 $match['result_status'],
-                $match['added_time'] ?? []
+                $match['added_time'] ?? [],
+                $match['current_period_start_timestamp'] ?? null
             ),
             'timestamp' => (int) $match['timestamp'],
             'markets' => $orderedMarkets,
@@ -618,7 +641,8 @@ trait FootballTrait
                         $match['minutes_status'] ?? $match['result_status'],
                         (int) ($match['timestamp'] ?? time()),
                         $match['result_status'],
-                        $match['added_time'] ?? []
+                        $match['added_time'] ?? [],
+                        $match['current_period_start_timestamp'] ?? null
                     );
 
                     return is_numeric($minute) ? (int) $minute >= 70 : str_starts_with((string) $minute, '90+');
@@ -644,7 +668,8 @@ trait FootballTrait
                             $match['minutes_status'] ?? $match['result_status'],
                             (int) ($match['timestamp'] ?? time()),
                             $match['result_status'],
-                            $match['added_time'] ?? []
+                            $match['added_time'] ?? [],
+                            $match['current_period_start_timestamp'] ?? null
                         );
 
                         if ($minute === 'HT') {
@@ -833,7 +858,8 @@ trait FootballTrait
                         $data['minutes_status'] ?? $data['result_status'],
                         (int) $data['timestamp'],
                         $data['result_status'],
-                        $data['added_time'] ?? []
+                        $data['added_time'] ?? [],
+                        $data['current_period_start_timestamp'] ?? null
                     )
                     : null;
                 $displayTime = $isLive
