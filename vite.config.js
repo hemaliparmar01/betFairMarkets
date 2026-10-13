@@ -10,6 +10,7 @@ export default defineConfig({
                 'resources/users/css/app.css',
                 'resources/users/js/app.js',
                 'resources/users/js/sports/football.js',
+                'resources/users/js/sports/cricket.js',
             ],
             refresh: true,
             fonts: [

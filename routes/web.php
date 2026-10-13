@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Users\AuthController;
 use App\Http\Controllers\Users\ContactController;
+use App\Http\Controllers\Users\Cricket\CricketController;
+use App\Http\Controllers\Users\Cricket\CricketSyncController;
 use App\Http\Controllers\Users\FavoriteController;
 use App\Http\Controllers\Users\FeatureRequestController;
 use App\Http\Controllers\Users\Football\FootballController;
@@ -51,6 +53,18 @@ Route::prefix('football')->name('football.')->group(function () {
     Route::get('sync/sportsApiPro/prematch-feed', [FootballSyncController::class, 'syncSportsApiProPrematchData'])->name('sync.sports-api-pro.prematch');
     Route::post('websocket-football', [FootballController::class, 'websocketFootball']);
     Route::get('get-cache-store-data', [FootballSyncController::class, 'getCacheStoreData']);
+});
+
+Route::prefix('cricket')->name('cricket.')->group(function () {
+    Route::get('/', [CricketController::class, 'cricket'])->name('home');
+    Route::get('matches/{matchId}', [CricketController::class, 'matchDetail'])->name('matches.show');
+    Route::get('market-activity', [CricketController::class, 'marketActivity'])->name('market-activity');
+    Route::post('filter-cricket', [CricketController::class, 'filterCricket'])->name('filter-cricket');
+    Route::post('websocket-cricket', [CricketController::class, 'websocketCricket'])->name('websocket-cricket');
+    Route::get('sync/betfair/live-feed', [CricketSyncController::class, 'syncBetFairLiveData'])->name('sync.live.data');
+    Route::get('sync/betfair/prematch-feed', [CricketSyncController::class, 'syncBetFairPrematchData'])->name('sync.prematch.data');
+    Route::get('sync/sportsApiPro/live-feed', [CricketSyncController::class, 'syncSportsApiProLiveData'])->name('sync.sports-api-pro.live');
+    Route::get('sync/sportsApiPro/prematch-feed', [CricketSyncController::class, 'syncSportsApiProPrematchData'])->name('sync.sports-api-pro.prematch');
 });
 
 Route::get('delete-cache-key/{forgot_cache_key}', function (Request $request) {

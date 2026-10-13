@@ -23,7 +23,7 @@
                         <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#d7e7f3] p-4 dark:border-[#365165]">
                             <div class="min-w-0"><p class="break-words font-semibold text-[#0b2a40] dark:text-white">{{ $favorite->team1 ?: 'Team A' }} vs {{ $favorite->team2 ?: 'Team B' }}</p><p class="mt-1 text-xs capitalize text-[#5a7d99] dark:text-[#a9bfd0]">{{ $favorite->sport }}</p></div>
                             @if (strtolower($favorite->sport) === 'football' && $favorite->event_id)
-                                <a href="{{ route('football.matches.show', $favorite->event_id) }}" class="rounded-lg bg-[#0b2a40] px-4 py-2 text-sm font-semibold text-white">Open Match →</a>
+                                <a href="{{ route($favorite->sport.'.matches.show', $favorite->event_id) }}" class="rounded-lg bg-[#0b2a40] px-4 py-2 text-sm font-semibold text-white">Open Match →</a>
                             @endif
                         </div>
                     @empty

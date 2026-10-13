@@ -3,7 +3,9 @@
 namespace App\Console\Commands;
 
 use Amp\Websocket\Client\WebsocketHandshake;
+use App\Events\CricketSportsScoreUpdated;
 use App\Events\FootballSportsScoreUpdated;
+use App\Http\Controllers\Users\Cricket\CricketSyncController;
 use App\Models\FootballMarket;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -104,11 +106,11 @@ class ListenFootballBetfairOdds extends Command
                         $socket->sendText(json_encode([
                             'action' => 'subscribe',
                             'feeds' => ['live', 'prematch'],
-                            'sports' => ['soccer'],
+                            'sports' => ['soccer', 'cricket'],
                             'mode' => 'delta',
                         ], JSON_THROW_ON_ERROR));
 
-                        $this->info('Authenticated; subscribed to live and prematch soccer odds in delta mode.');
+                        $this->info('Authenticated; subscribed to live and prematch soccer and cricket odds in delta mode.');
 
                         continue;
                     }
@@ -315,10 +317,19 @@ class ListenFootballBetfairOdds extends Command
 
             $events = $pendingChanges[$feed];
             try {
-                $feedUpdated = withRedisLock(
+                $footballEvents = array_filter($events, static fn (array $event): bool => strtolower((string) ($event['sport'] ?? 'soccer')) === 'soccer');
+                $cricketEvents = array_filter($events, static fn (array $event): bool => strtolower((string) ($event['sport'] ?? '')) === 'cricket');
+                $feedUpdated = $footballEvents !== [] && withRedisLock(
                     'Football:matches',
-                    fn (): bool => $this->updateFootballCache($events, $isLive)
+                    fn (): bool => $this->updateFootballCache($footballEvents, $isLive)
                 );
+                if ($cricketEvents !== [] && app(CricketSyncController::class)->mergeBetfairWebSocketData($cricketEvents, $isLive)) {
+                    try {
+                        Event::dispatch(new CricketSportsScoreUpdated);
+                    } catch (Throwable $e) {
+                        Log::warning('Cricket odds refresh broadcast failed', ['exception' => $e::class]);
+                    }
+                }
             } catch (LockTimeoutException $e) {
                 Log::warning('Betfair Odds cache write lock timed out; pending odds will be retried without reconnecting.', [
                     'feed' => $feed,

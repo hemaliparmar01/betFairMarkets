@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Users\Cricket\CricketSyncController;
 use App\Http\Controllers\Users\Football\FootballSyncController;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -24,3 +25,19 @@ Schedule::call(function () {
 Schedule::call(function () {
     app(FootballSyncController::class)->syncSportsApiProPrematchData();
 })->name('football-sportApiPro-prematch')->everyFifteenMinutes()->withoutOverlapping(10);
+
+Schedule::call(function () {
+    app(CricketSyncController::class)->syncBetFairLiveData();
+})->name('cricket-betfair-live')->everyFiveMinutes()->withoutOverlapping(2);
+
+Schedule::call(function () {
+    app(CricketSyncController::class)->syncSportsApiProLiveData();
+})->name('cricket-sportApiPro-live')->everyFiveMinutes()->withoutOverlapping(2);
+
+Schedule::call(function () {
+    app(CricketSyncController::class)->syncBetFairPrematchData();
+})->name('cricket-betfair-prematch')->everyFifteenMinutes()->withoutOverlapping(10);
+
+Schedule::call(function () {
+    app(CricketSyncController::class)->syncSportsApiProPrematchData();
+})->name('cricket-sportApiPro-prematch')->everyFifteenMinutes()->withoutOverlapping(10);
