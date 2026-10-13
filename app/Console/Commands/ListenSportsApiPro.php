@@ -25,20 +25,58 @@ class ListenSportsApiPro extends Command
 
     public function handle(): int
     {
-        $listenerLock = Cache::store('redis')->lock('Football:sports-api-pro-listener', 120);
+        $listenerLockSeconds = 300;
+        $listenerLock = Cache::store('redis')->lock('Football:sports-api-pro-listener', $listenerLockSeconds);
         if (! $listenerLock->get()) {
             $this->warn('SportsAPI Pro listener is already running.');
 
             return self::SUCCESS;
         }
 
-        EventLoop::repeat(60, function () use ($listenerLock): void {
-            if (! $listenerLock->refresh(120)) {
-                Log::critical('SportsAPI Pro listener lost its singleton lock and is stopping.');
-                exit(self::FAILURE);
+        $hasListenerLock = true;
+        $lastListenerLockRefreshAt = time();
+        $releaseListenerLock = static function () use ($listenerLock): void {
+            try {
+                $listenerLock->release();
+            } catch (Throwable $e) {
+                Log::error('SportsAPI Pro listener singleton lock release failed.', [
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+        };
+
+        $stopListener = static function (string $watcherId) use ($releaseListenerLock): void {
+            EventLoop::cancel($watcherId);
+            $releaseListenerLock();
+
+            exit(self::SUCCESS);
+        };
+
+        EventLoop::onSignal(SIGINT, $stopListener);
+        EventLoop::onSignal(SIGTERM, $stopListener);
+
+        EventLoop::repeat(30, function () use ($listenerLock, $listenerLockSeconds, &$hasListenerLock, &$lastListenerLockRefreshAt): void {
+            try {
+                $hasListenerLock = $listenerLock->refresh($listenerLockSeconds) || $listenerLock->get();
+
+                if ($hasListenerLock) {
+                    $lastListenerLockRefreshAt = time();
+
+                    return;
+                }
+
+                Log::warning('SportsAPI Pro listener singleton lock is unavailable; the listener will wait and retry without stopping.');
+            } catch (Throwable $e) {
+                $hasListenerLock = false;
+
+                Log::error('SportsAPI Pro listener singleton lock refresh failed; the listener will retry without stopping.', [
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                ]);
             }
         });
-        register_shutdown_function(static fn () => $listenerLock->release());
+        register_shutdown_function($releaseListenerLock);
 
         $key = GetSportApiProKey();
 
@@ -53,6 +91,26 @@ class ListenSportsApiPro extends Command
         $initialLiveRecoveryQueued = false;
 
         while (true) {
+            while (! $hasListenerLock) {
+                try {
+                    $hasListenerLock = $listenerLock->get();
+
+                    if ($hasListenerLock) {
+                        $lastListenerLockRefreshAt = time();
+                        Log::info('SportsAPI Pro listener singleton lock was reacquired.');
+
+                        break;
+                    }
+                } catch (Throwable $e) {
+                    Log::error('SportsAPI Pro listener singleton lock reacquisition failed.', [
+                        'exception' => $e::class,
+                        'message' => $e->getMessage(),
+                    ]);
+                }
+
+                delay(5);
+            }
+
             $pingTimer = null;
             $subscriptionRefreshTimer = null;
             $matchSubscriptions = [];
@@ -247,7 +305,11 @@ class ListenSportsApiPro extends Command
                                 $matchFound = false;
 
                                 foreach ($matches as $match) {
-                                    if (($match['data_sync_complete'] ?? false) === true && (string) ($match['sportsApiPro_match_id'] ?? '') === (string) $matchId) {
+                                    if (
+                                        ($match['data_sync_complete'] ?? false) === true
+                                        && ($match['result_status'] ?? null) === 'Live'
+                                        && (string) ($match['sportsApiPro_match_id'] ?? '') === (string) $matchId
+                                    ) {
                                         $matchFound = true;
                                         break;
                                     }
@@ -324,6 +386,29 @@ class ListenSportsApiPro extends Command
                 });
 
                 foreach ($socket as $message) {
+                    if (time() - $lastListenerLockRefreshAt >= 30) {
+                        try {
+                            $hasListenerLock = $listenerLock->refresh($listenerLockSeconds) || $listenerLock->get();
+
+                            if ($hasListenerLock) {
+                                $lastListenerLockRefreshAt = time();
+                            }
+                        } catch (Throwable $e) {
+                            $hasListenerLock = false;
+
+                            Log::error('SportsAPI Pro listener singleton lock heartbeat failed.', [
+                                'exception' => $e::class,
+                                'message' => $e->getMessage(),
+                            ]);
+                        }
+
+                        if (! $hasListenerLock) {
+                            Log::warning('SportsAPI Pro listener paused because its singleton lock is unavailable; it will retry without stopping.');
+
+                            break;
+                        }
+                    }
+
                     $frame = json_decode($message->buffer(), true);
 
                     if (! is_array($frame)) {
@@ -492,6 +577,10 @@ class ListenSportsApiPro extends Command
         }
 
         foreach ($matches as &$match) {
+            if (($match['result_status'] ?? null) === 'Finished') {
+                continue;
+            }
+
             unset($match['events'], $match['goals'], $match['goal_counts'], $match['status_description']);
             if (($match['minutes_status'] ?? null) === 'Finished') {
                 $match['result_status'] = 'Finished';
@@ -528,7 +617,20 @@ class ListenSportsApiPro extends Command
                 continue;
             }
 
+            if (($match['result_status'] ?? null) === 'Finished') {
+                return false;
+            }
+
+            $statusCode = $this->eventValue($event, 'status.code');
+            $statusType = $this->eventValue($event, 'status.type');
             if ($this->isDuplicateChange($match, $event, $channel)) {
+                if ($statusCode == 100 || $statusType === 'finished') {
+                    $match['minutes_status'] = 'Finished';
+                    $match['result_status'] = 'Finished';
+
+                    return true;
+                }
+
                 return false;
             }
 
@@ -590,8 +692,6 @@ class ListenSportsApiPro extends Command
                 $match['added_time']['second_half'] = (int) $secondHalfAddedTime;
             }
 
-            $statusCode = $this->eventValue($event, 'status.code');
-            $statusType = $this->eventValue($event, 'status.type');
             if ($statusCode == 6 && ($match['result_status'] ?? null) !== 'Finished') {
                 $match['minutes_status'] = '1st half';
                 $match['result_status'] = 'Live';
@@ -651,11 +751,35 @@ class ListenSportsApiPro extends Command
                 continue;
             }
 
-            if ($this->isDuplicateChange($match, $frameData, $channel)) {
+            if (($match['result_status'] ?? null) === 'Finished') {
                 return;
             }
 
             $incidents = $this->normalizeIncidents($frameData);
+            $finishedPeriod = array_find($incidents, static fn (array $incident): bool => ($incident['incidentType'] ?? null) === 'period'
+                && strtoupper(trim((string) ($incident['text'] ?? ''))) === 'FT'
+                && ($incident['isLive'] ?? null) === false
+            );
+            $isDuplicateChange = $this->isDuplicateChange($match, $frameData, $channel);
+            if ($isDuplicateChange && $finishedPeriod === null) {
+                return;
+            }
+
+            if ($finishedPeriod !== null) {
+                $match['minutes_status'] = 'Finished';
+                $match['result_status'] = 'Finished';
+                if (isset($finishedPeriod['homeScore'])) {
+                    $match['home_score'] = $finishedPeriod['homeScore'];
+                }
+                if (isset($finishedPeriod['awayScore'])) {
+                    $match['away_score'] = $finishedPeriod['awayScore'];
+                }
+            }
+
+            if ($isDuplicateChange) {
+                return;
+            }
+
             $cards = ['home' => null, 'away' => null];
             $cardCounts = [
                 'home' => ['yellow' => 0, 'direct_red' => 0, 'second_yellow' => 0, 'total_red' => 0],
@@ -736,10 +860,10 @@ class ListenSportsApiPro extends Command
                     'away_score' => $latestGoal['awayScore'] ?? null,
                 ];
 
-                if (isset($latestGoal['homeScore'])) {
+                if ($finishedPeriod === null && isset($latestGoal['homeScore'])) {
                     $match['home_score'] = $latestGoal['homeScore'];
                 }
-                if (isset($latestGoal['awayScore'])) {
+                if ($finishedPeriod === null && isset($latestGoal['awayScore'])) {
                     $match['away_score'] = $latestGoal['awayScore'];
                 }
             } else {
@@ -782,6 +906,10 @@ class ListenSportsApiPro extends Command
         foreach ($matches as &$match) {
             if (($match['data_sync_complete'] ?? false) !== true || ($match['sportsApiPro_match_id'] ?? null) != $matchId) {
                 continue;
+            }
+
+            if (($match['result_status'] ?? null) === 'Finished') {
+                return;
             }
 
             if ($this->isDuplicateChange($match, $frameData, $channel)) {
@@ -865,7 +993,11 @@ class ListenSportsApiPro extends Command
         $matchIds = [];
 
         foreach ($matches ?? [] as $match) {
-            if (($match['data_sync_complete'] ?? false) !== true || ! isset($match['sportsApiPro_match_id'])) {
+            if (
+                ($match['data_sync_complete'] ?? false) !== true
+                || ($match['result_status'] ?? null) !== 'Live'
+                || ! isset($match['sportsApiPro_match_id'])
+            ) {
                 continue;
             }
             $matchIds[(string) $match['sportsApiPro_match_id']] = true;

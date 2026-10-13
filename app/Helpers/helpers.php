@@ -79,11 +79,11 @@ if (! function_exists('getInRedis')) {
 }
 
 if (! function_exists('withRedisLock')) {
-    function withRedisLock(string $cacheKey, callable $callback)
+    function withRedisLock(string $cacheKey, callable $callback, int $waitSeconds = 5): mixed
     {
         return Cache::store('redis')
             ->lock("{$cacheKey}:write-lock", 30)
-            ->block(5, $callback);
+            ->block($waitSeconds, $callback);
     }
 }
 
@@ -91,5 +91,45 @@ if (! function_exists('getCurrentUserTimezone')) {
     function getCurrentUserTimezone()
     {
         return 'Asia/Kolkata';
+    }
+}
+
+
+if (! function_exists('checkAuthAndSubscription')) {
+    function checkAuthAndSubscription()
+    {
+        if (! auth()->guard('customers')->check()) {
+            return ['is_authenticated' => false, 'has_active_subscription' => false, 'display_odds' => false];
+        }
+
+        $customer = auth()->guard('customers')->user();
+        $adminFreeDays = (int) $customer->admin_free_days;
+
+        if ($adminFreeDays != null) {
+            if ($adminFreeDays == -1) {
+                return ['is_authenticated' => true, 'has_active_subscription' => true, 'display_odds' => true];
+            }
+            if ($adminFreeDays > 0) {
+                $currentExpireDate = $customer->subscription_ends_at ?? $customer->trial_ends_at;
+
+                if ($currentExpireDate) {
+                    $timezone = get_current_user_timezone();
+                    $extendedExpireDate = Carbon::parse($currentExpireDate)->timezone($timezone)->addDays($adminFreeDays);
+                    $currentDate = Carbon::now($timezone);
+                    if ($currentDate->lte($extendedExpireDate)) {
+                        return ['is_authenticated' => true, 'has_active_subscription' => true, 'display_odds' => true];
+                    }
+                }
+            }
+        }
+        if ($customer->hasActiveSubscription()) {
+            return ['is_authenticated' => true, 'has_active_subscription' => true, 'display_odds' => true];
+        }
+
+        if ($customer->hasActiveTrial()) {
+            return ['is_authenticated' => true, 'has_active_subscription' => true, 'display_odds' => true];
+        }
+
+        return ['is_authenticated' => true, 'has_active_subscription' => false, 'display_odds' => false];
     }
 }

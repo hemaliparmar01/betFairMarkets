@@ -126,6 +126,13 @@ const restorePredictionPanel = () => {
 };
 
 document.addEventListener('click', (event) => {
+    const loginRequiredAction = event.target.closest('[data-requires-login="true"]');
+    if (loginRequiredAction) {
+        event.stopImmediatePropagation();
+        window.location.href = loginRequiredAction.dataset.loginUrl;
+        return;
+    }
+
     const matchRow = event.target.closest('[data-match-url]');
     if (matchRow && !event.target.closest('button, a, input, select, textarea')) {
         window.location.href = matchRow.dataset.matchUrl;
@@ -258,6 +265,11 @@ const callFixtureData = async (value, options = {}) => {
             }),
         });
 
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
         if (!response.ok) {
             throw new Error(`HTTP error: ${response.status}`);
         }
@@ -387,6 +399,11 @@ document.addEventListener('click', async (event) => {
                     start_timestamp: Number(favoriteButton.dataset.startTimestamp),
                 }),
             });
+
+            if (response.status === 401) {
+                window.location.href = favoriteButton.dataset.loginUrl || '/login';
+                return;
+            }
 
             if (!response.ok) {
                 throw new Error(`HTTP error: ${response.status}`);

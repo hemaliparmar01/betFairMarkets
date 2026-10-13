@@ -280,4 +280,5 @@
             <span data-lazy-loader-text>↓ {{ __('Scroll for more matches') }} ↓</span>
         </div>
     </div>
+    @include('popup')
 @endsection

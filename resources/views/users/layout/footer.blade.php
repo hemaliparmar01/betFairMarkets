@@ -43,7 +43,7 @@
     </div>
 
     <div class="footer-trustpilot text-center [margin-bottom:20px] [&_a]:[display:inline-flex] [&_a]:[align-items:center] [&_a]:[gap:6px] [&_a]:[padding:8px_16px] [&_a]:[border-radius:30px] [&_a]:[font-size:13px] [&_a]:[font-weight:600] [&_a]:[color:#1f4b66] [&_a]:[text-decoration:none] [&_a]:[transition:0.2s] [&_a]:[border:1px_solid_transparent] [&_a:hover]:[background:#f0f6fc] [&_a:hover]:[border-color:#e3ecf5] [&_a:hover]:[text-decoration:none] dark:[&_a]:[color:#b0c8dd] dark:[&_a:hover]:[background:#1f3444] dark:[&_a:hover]:[border-color:#3a5568] [&_.star]:[color:#00B67A] [&_.star]:[font-size:16px]">
-        <a href="https://www.trustpilot.com/review/betfairmarkets.com" target="_blank" rel="noopener noreferrer">
+        <a href="https://www.trustpilot.com/review/bfmarketsanalytics.com" target="_blank" rel="noopener noreferrer">
             {{ __('Review us on') }} <span class="star">★</span> {{ __('Trustpilot') }}
         </a>
     </div>

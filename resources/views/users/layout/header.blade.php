@@ -59,8 +59,31 @@
         <button type="button" class="theme-toggle cursor-pointer rounded-full border border-[#d4e0ec] px-3.5 py-1 dark:[border-color:#3a5568] dark:[color:#b0c8dd] [background:none] [border:1px_solid_#d4e0ec] [border-radius:30px] [padding:3px_12px] [font-size:16px] [cursor:pointer] [color:#1f4b66] [transition:0.2s] [padding:4px_14px] [font-size:15px]" id="themeToggle" title="Dark/Light mode"><i class="fas fa-moon"></i></button>
         <button type="button" class="lang-btn active-lang cursor-pointer rounded-full border border-[#d4e0ec] px-3.5 py-1 text-[13px] dark:[border-color:#3a5568] dark:[color:#b0c8dd] dark:[&.active-lang]:[background:#4a8ab5] dark:[&.active-lang]:[border-color:#4a8ab5] dark:[&.active-lang]:[color:white] [background:none] [border:1px_solid_#d4e0ec] [padding:3px_12px] [border-radius:30px] [font-size:13px] [font-weight:500] [color:#1f4b66] [cursor:pointer] [transition:0.2s] [&.active-lang]:[background:#0b2a40] [&.active-lang]:[color:white] [&.active-lang]:[border-color:#0b2a40] [padding:4px_14px] [text-decoration:none]" data-lang="en">EN</button>
         <button type="button" class="lang-btn cursor-pointer rounded-full border border-[#d4e0ec] px-3.5 py-1 text-[13px] dark:[border-color:#3a5568] dark:[color:#b0c8dd] dark:[&.active-lang]:[background:#4a8ab5] dark:[&.active-lang]:[border-color:#4a8ab5] dark:[&.active-lang]:[color:white] [background:none] [border:1px_solid_#d4e0ec] [padding:3px_12px] [border-radius:30px] [font-size:13px] [font-weight:500] [color:#1f4b66] [cursor:pointer] [transition:0.2s] [&.active-lang]:[background:#0b2a40] [&.active-lang]:[color:white] [&.active-lang]:[border-color:#0b2a40] [padding:4px_14px] [text-decoration:none]" data-lang="ka">KA</button>
-        <span class="btn-outline cursor-default rounded-full border border-[#b8cdde] px-4 py-1 text-[13px] dark:[border-color:#3a5568] dark:[color:#b0c8dd] [border:1px_solid_#b8cdde] [background:transparent] [padding:4px_16px] [border-radius:60px] [font-weight:500] [font-size:13px] [color:#1f4b66] [cursor:default] [transition:0.3s] [padding:5px_16px] [font-size:12.5px] [cursor:pointer] [text-decoration:none] [display:inline-block]">{{ __('Login') }}</span>
-        <span class="btn-primary cursor-default rounded-full bg-[#0b2a40] px-4 py-1 text-[13px] text-white dark:[background:#4a8ab5] dark:[color:white] [background:#0b2a40] [border:none] [padding:5px_18px] [border-radius:60px] [font-weight:500] [font-size:13px] [color:white] [cursor:default] [transition:0.3s] [padding:5px_16px] [font-size:12.5px] [cursor:pointer] [text-decoration:none] [display:inline-block]">{{ __('Start Free Trial') }}</span>
+        @auth('customers')
+            @php $accountCustomer = auth('customers')->user(); @endphp
+            <details id="customerAccountMenu" class="relative">
+                <summary class="flex cursor-pointer list-none items-center gap-2 rounded-full border border-[#b8cdde] px-4 py-2 text-sm font-semibold text-[#1f4b66] dark:border-[#3a5568] dark:text-[#b0c8dd] [&::-webkit-details-marker]:hidden">
+                    <span class="relative flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#edf6fc] text-sm font-bold text-[#1a6b9c] dark:bg-[#29465b] dark:text-[#b0c8dd]" aria-hidden="true">
+                        {{ mb_strtoupper(mb_substr(trim($accountCustomer->name), 0, 1)) }}
+                        @if ($accountCustomer->avatar_path)
+                            <img src="{{ route('customers.avatar') }}" alt="" class="absolute inset-0 size-full object-cover" onerror="this.remove()" />
+                        @endif
+                    </span>
+                    {{ $accountCustomer->name }}
+                    <i class="fas fa-chevron-down text-xs" aria-hidden="true"></i>
+                </summary>
+                <div class="absolute right-0 top-full z-50 mt-2 w-44 rounded-xl border border-[#d7e7f3] bg-white p-2 shadow-lg dark:border-[#365165] dark:bg-[#1d3040]">
+                    <a href="{{ route('customers.profile') }}" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-[#1f4b66] hover:bg-[#edf6fc] dark:text-white dark:hover:bg-[#29465b]"><i class="fas fa-user" aria-hidden="true"></i>{{ __('My Profile') }}</a>
+                    <form action="{{ route('logout') }}" method="post">
+                        @csrf
+                        <button type="submit" class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-[#29465b]"><i class="fas fa-right-from-bracket" aria-hidden="true"></i>{{ __('Logout') }}</button>
+                    </form>
+                </div>
+            </details>
+        @else
+            <a href="{{ route('login') }}" class="rounded-full border border-[#b8cdde] px-4 py-1 text-sm font-medium text-[#1f4b66] dark:border-[#3a5568] dark:text-[#b0c8dd]">{{ __('Login') }}</a>
+            <a href="{{ route('register') }}" class="rounded-full bg-[#0b2a40] px-4 py-1 text-sm font-medium text-white dark:bg-[#4a8ab5]">{{ __('Start Free Trial') }}</a>
+        @endauth
     </div>
 </header>
 <div id="navLinks" class="hidden flex-wrap !p-[12px] items-center gap-3 border-b border-[#e3ecf5] p-3 text-[15px] font-medium lg:flex max-[480px]:!px-0 [&>a:nth-child(-n+3)]:max-[480px]:min-w-0 [&>a:nth-child(-n+3)]:max-[480px]:w-full [&>a]:max-[480px]:break-words max-[480px]:gap-2">
@@ -115,6 +138,16 @@
 </div>
 <script>
     (() => {
+        const accountMenu = document.getElementById('customerAccountMenu');
+        document.addEventListener('click', (event) => {
+            if (accountMenu?.open && !accountMenu.contains(event.target)) accountMenu.open = false;
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && accountMenu?.open) {
+                accountMenu.open = false;
+                accountMenu.querySelector('summary').focus();
+            }
+        });
         const toggle = document.getElementById('mobileNavToggle');
         const nav = document.getElementById('navLinks');
         if (!toggle || !nav) return;

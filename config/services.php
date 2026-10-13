@@ -2,6 +2,11 @@
 
 return [
 
+    'pinnodds' => [
+        'key' => env('PINACLE_ODDS_KEY'),
+        'url' => 'https://pinnodds.com',
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

@@ -2,8 +2,10 @@
 
 namespace App\Traits;
 
+use App\Models\Favorite;
+use App\Models\FootballMatch;
+use App\Models\PredictionVote;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
 
 trait FootballTrait
 {
@@ -18,16 +20,11 @@ trait FootballTrait
     public function getFootballMatches()
     {
         $getData = getInRedis('Football:matches') ?? [];
-        $favoriteQuery = DB::table('favorites')->where('sport', 'football');
-        $userId = request()->user()?->getAuthIdentifier();
-
-        if ($userId === null) {
-            $favoriteQuery->where('session_id', request()->session()->getId());
-        } else {
-            $favoriteQuery->where('user_id', $userId);
-        }
-
-        $favoriteKeys = array_fill_keys($favoriteQuery->pluck('event_key')->all(), true);
+        $customerId = request()->user('customers')?->getAuthIdentifier();
+        $favoriteKeys = $customerId === null ? [] : array_fill_keys(
+            Favorite::query()->where('sport', 'football')->where('customer_id', $customerId)->pluck('event_key')->all(),
+            true
+        );
 
         if (request()->has('market_name')) {
             $marketName = request()->market_name;
@@ -232,7 +229,7 @@ trait FootballTrait
         $storedPredictionVotes = [];
 
         if ($matchIds !== []) {
-            $countRows = DB::table('prediction_votes')
+            $countRows = PredictionVote::query()
                 ->select(['match_id', 'poll', 'value'])
                 ->selectRaw('COUNT(*) as total')
                 ->where('sport', 'football')
@@ -244,19 +241,16 @@ trait FootballTrait
                 $predictionCounts[$row->match_id][$row->poll][$row->value] = (int) $row->total;
             }
 
-            $voteQuery = DB::table('prediction_votes')
-                ->select(['match_id', 'poll', 'value'])
-                ->where('sport', 'football')
-                ->whereIn('match_id', $matchIds);
+            if ($customerId !== null) {
+                $voteQuery = PredictionVote::query()
+                    ->select(['match_id', 'poll', 'value'])
+                    ->where('sport', 'football')
+                    ->where('customer_id', $customerId)
+                    ->whereIn('match_id', $matchIds);
 
-            if ($userId === null) {
-                $voteQuery->where('session_id', request()->session()->getId());
-            } else {
-                $voteQuery->where('user_id', $userId);
-            }
-
-            foreach ($voteQuery->get() as $row) {
-                $storedPredictionVotes[$row->match_id][$row->poll] = $row->value;
+                foreach ($voteQuery->get() as $row) {
+                    $storedPredictionVotes[$row->match_id][$row->poll] = $row->value;
+                }
             }
         }
 
@@ -266,7 +260,7 @@ trait FootballTrait
                 continue;
             }
             $markets = $data['markets'];
-            $marketKey = array_key_first(array_filter($markets, fn ($key) => str_contains($key, $marketName), ARRAY_FILTER_USE_KEY));
+            $marketKey = array_key_first(array_filter($markets, fn ($key) => $key === $marketName || str_ends_with($key, '_'.$marketName), ARRAY_FILTER_USE_KEY));
             $selectedMarketRunners = $markets[$marketKey] ?? [];
 
             if ($marketName === 'MATCH_ODDS') {
@@ -308,8 +302,8 @@ trait FootballTrait
             $predictionVotes = [];
 
             foreach (['1x2', 'uo'] as $poll) {
-                $sessionKey = "football_predictions.{$matchId}.{$poll}";
-                $predictionVotes[$poll] = request()->session()->get($sessionKey);
+                $sessionKey = "football_predictions.{$customerId}.{$matchId}.{$poll}";
+                $predictionVotes[$poll] = $customerId === null ? null : request()->session()->get($sessionKey);
 
                 if ($predictionVotes[$poll] === null && isset($storedPredictionVotes[$matchId][$poll])) {
                     $predictionVotes[$poll] = $storedPredictionVotes[$matchId][$poll];
@@ -487,6 +481,43 @@ trait FootballTrait
         }
 
         if ($match === null) {
+            $storedMatch = FootballMatch::query()
+                ->with('markets')
+                ->where('sports_api_pro_match_id', $matchId)
+                ->where('data_sync_complete', true)
+                ->first();
+
+            if ($storedMatch !== null) {
+                $match = array_replace($storedMatch->payload ?? [], [
+                    'unique_key' => $storedMatch->unique_key,
+                    'sportsApiPro_match_id' => $storedMatch->sports_api_pro_match_id,
+                    'betfair_match_id' => $storedMatch->betfair_match_id,
+                    'team1' => $storedMatch->team1,
+                    'team2' => $storedMatch->team2,
+                    'tournament' => $storedMatch->tournament,
+                    'result_status' => $storedMatch->result_status,
+                    'minutes_status' => $storedMatch->minutes_status,
+                    'timestamp' => $storedMatch->start_timestamp,
+                    'data_sync_complete' => $storedMatch->data_sync_complete,
+                    'markets' => [],
+                ]);
+
+                foreach ($storedMatch->markets->sortBy('sort_priority') as $storedMarket) {
+                    $match['markets'][$storedMarket->market_id.'_'.$storedMarket->market_type][] = $storedMarket->payload;
+                }
+
+                foreach (['home_team_logo' => 'home_team_id', 'away_team_logo' => 'away_team_id'] as $logoKey => $teamIdKey) {
+                    $teamId = (int) ($match[$teamIdKey] ?? 0);
+                    $localImages = $teamId > 0 ? glob(public_path("images/football/teams/{$teamId}.*")) : [];
+
+                    if ($localImages !== false && isset($localImages[0]) && is_file($localImages[0])) {
+                        $match[$logoKey] = '/images/football/teams/'.basename($localImages[0]);
+                    }
+                }
+            }
+        }
+
+        if ($match === null) {
             return null;
         }
 
@@ -600,16 +631,11 @@ trait FootballTrait
                 break;
 
             case 'favorites':
-                $favoriteQuery = DB::table('favorites')->where('sport', 'football');
-                $userId = request()->user()?->getAuthIdentifier();
-
-                if ($userId === null) {
-                    $favoriteQuery->where('session_id', request()->session()->getId());
-                } else {
-                    $favoriteQuery->where('user_id', $userId);
-                }
-
-                $favoriteKeys = array_fill_keys($favoriteQuery->pluck('event_key')->all(), true);
+                $customerId = request()->user('customers')?->getAuthIdentifier();
+                $favoriteKeys = $customerId === null ? [] : array_fill_keys(
+                    Favorite::query()->where('sport', 'football')->where('customer_id', $customerId)->pluck('event_key')->all(),
+                    true
+                );
                 $getData = array_values(array_filter(
                     $getData,
                     static fn (array $match): bool => isset($favoriteKeys[$match['unique_key'] ?? ''])

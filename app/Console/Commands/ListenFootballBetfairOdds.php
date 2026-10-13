@@ -4,9 +4,10 @@ namespace App\Console\Commands;
 
 use Amp\Websocket\Client\WebsocketHandshake;
 use App\Events\FootballSportsScoreUpdated;
+use App\Models\FootballMarket;
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Revolt\EventLoop;
@@ -24,11 +25,11 @@ class ListenFootballBetfairOdds extends Command
     public function handle(): int
     {
         $listenerLock = Cache::store('redis')->lock('Football:betfair-odds-listener', 120);
-        // if (! $listenerLock->get()) {
-        //     $this->warn('Betfair Odds listener is already running.');
+        if (! $listenerLock->get()) {
+            $this->warn('Betfair Odds listener is already running.');
 
-        //     return self::SUCCESS;
-        // }
+            return self::SUCCESS;
+        }
 
         EventLoop::repeat(60, function () use ($listenerLock): void {
             if (! $listenerLock->refresh(120)) {
@@ -36,7 +37,24 @@ class ListenFootballBetfairOdds extends Command
                 exit(self::FAILURE);
             }
         });
-        register_shutdown_function(static fn () => $listenerLock->release());
+        $socket = null;
+        register_shutdown_function(static function () use ($listenerLock, &$socket): void {
+            try {
+                $socket?->close();
+            } catch (Throwable $e) {
+                Log::warning('Betfair Odds WebSocket shutdown close failed.', [
+                    'message' => $e->getMessage(),
+                ]);
+            } finally {
+                $listenerLock->release();
+            }
+        });
+
+        $stopListener = static function (): void {
+            exit(self::SUCCESS);
+        };
+        EventLoop::onSignal(SIGINT, $stopListener);
+        EventLoop::onSignal(SIGTERM, $stopListener);
 
         $key = GetBetfairKey();
 
@@ -48,10 +66,12 @@ class ListenFootballBetfairOdds extends Command
 
         $backoff = 1;
         $books = ['live' => [], 'prematch' => []];
+        $pendingChanges = ['live' => [], 'prematch' => []];
 
         while (true) {
+            $socket = null;
             $flushTimer = null;
-            $pendingChanges = ['live' => [], 'prematch' => []];
+            $nextFlushAt = 0.0;
 
             try {
                 $socket = connect(new WebsocketHandshake('wss://betfair-odds.com/betfair/v1/stream'));
@@ -219,12 +239,28 @@ class ListenFootballBetfairOdds extends Command
                     }
 
                     if ($flushTimer === null) {
-                        $flushTimer = EventLoop::delay(0.25, function () use (&$flushTimer, &$pendingChanges): void {
-                            if ($this->flushPendingChanges($pendingChanges)) {
-                                Event::dispatch(new FootballSportsScoreUpdated);
+                        $flushTimer = EventLoop::repeat(0.25, function () use (&$flushTimer, &$pendingChanges, &$nextFlushAt): void {
+                            if (microtime(true) < $nextFlushAt) {
+                                return;
                             }
 
-                            $flushTimer = null;
+                            try {
+                                if ($this->flushPendingChanges($pendingChanges)) {
+                                    Event::dispatch(new FootballSportsScoreUpdated);
+                                }
+                            } catch (Throwable $e) {
+                                Log::error('Betfair Odds pending update processing failed; the WebSocket remains connected.', [
+                                    'exception' => $e::class,
+                                    'message' => $e->getMessage(),
+                                ]);
+                            }
+
+                            if ($pendingChanges['live'] === [] && $pendingChanges['prematch'] === []) {
+                                EventLoop::cancel($flushTimer);
+                                $flushTimer = null;
+                            } else {
+                                $nextFlushAt = microtime(true) + 2;
+                            }
                         });
                     }
                 }
@@ -238,10 +274,28 @@ class ListenFootballBetfairOdds extends Command
             } finally {
                 if ($flushTimer !== null) {
                     EventLoop::cancel($flushTimer);
+                    $flushTimer = null;
                 }
 
-                if ($this->flushPendingChanges($pendingChanges)) {
-                    Event::dispatch(new FootballSportsScoreUpdated);
+                try {
+                    $socket?->close();
+                } catch (Throwable $e) {
+                    Log::warning('Betfair Odds WebSocket close before reconnect failed.', [
+                        'message' => $e->getMessage(),
+                    ]);
+                } finally {
+                    $socket = null;
+                }
+
+                try {
+                    if ($this->flushPendingChanges($pendingChanges)) {
+                        Event::dispatch(new FootballSportsScoreUpdated);
+                    }
+                } catch (Throwable $e) {
+                    Log::error('Betfair Odds pending update processing during reconnect failed.', [
+                        'exception' => $e::class,
+                        'message' => $e->getMessage(),
+                    ]);
                 }
             }
 
@@ -260,11 +314,21 @@ class ListenFootballBetfairOdds extends Command
             }
 
             $events = $pendingChanges[$feed];
+            try {
+                $feedUpdated = withRedisLock(
+                    'Football:matches',
+                    fn (): bool => $this->updateFootballCache($events, $isLive)
+                );
+            } catch (LockTimeoutException $e) {
+                Log::warning('Betfair Odds cache write lock timed out; pending odds will be retried without reconnecting.', [
+                    'feed' => $feed,
+                    'pending_events' => count($pendingChanges[$feed]),
+                ]);
+
+                continue;
+            }
+
             $pendingChanges[$feed] = [];
-            $feedUpdated = withRedisLock(
-                'Football:matches',
-                fn (): bool => $this->updateFootballCache($events, $isLive)
-            );
             $updated = $feedUpdated || $updated;
         }
 
@@ -288,7 +352,11 @@ class ListenFootballBetfairOdds extends Command
 
         $matchKeys = [];
         foreach ($matches as $matchKey => $match) {
-            if (($match['data_sync_complete'] ?? false) === true && isset($match['betfair_match_id'])) {
+            if (
+                ($match['data_sync_complete'] ?? false) === true
+                && ($match['result_status'] ?? null) !== 'Finished'
+                && isset($match['betfair_match_id'])
+            ) {
                 $matchKeys[(string) $match['betfair_match_id']] = $matchKey;
             }
         }
@@ -312,12 +380,12 @@ class ListenFootballBetfairOdds extends Command
         }
 
         if ($missingMarketMatchKeys !== []) {
-            $databaseRows = DB::table('football_markets')
+            $databaseRows = FootballMarket::query()
                 ->whereIn('football_match_unique_key', array_keys($missingMarketMatchKeys))
                 ->get(['football_match_unique_key', 'payload']);
 
             foreach ($databaseRows as $databaseRow) {
-                $payload = json_decode($databaseRow->payload, true);
+                $payload = $databaseRow->payload;
                 if (is_array($payload)) {
                     $databaseMarkets[$databaseRow->football_match_unique_key][] = $payload;
                 }
@@ -326,7 +394,11 @@ class ListenFootballBetfairOdds extends Command
 
         foreach ($events as $eventId => $event) {
             $matchKey = $matchKeys[(string) $eventId] ?? null;
-            if ($matchKey === null || ! is_array($event['markets'] ?? null)) {
+            if (
+                $matchKey === null
+                || ($matches[$matchKey]['result_status'] ?? null) === 'Finished'
+                || ! is_array($event['markets'] ?? null)
+            ) {
                 continue;
             }
 

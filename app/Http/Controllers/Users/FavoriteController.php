@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Users;
 
 use App\Http\Controllers\Controller;
+use App\Models\Favorite;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -11,6 +12,9 @@ class FavoriteController extends Controller
 {
     public function toggle(Request $request): JsonResponse
     {
+        $customer = $request->user('customers');
+        abort_if($customer === null, 401, 'Please log in to save favorites.');
+
         $data = $request->validate([
             'sport' => ['required', 'string', 'max:50'],
             'event_key' => ['required', 'string', 'max:512'],
@@ -21,27 +25,25 @@ class FavoriteController extends Controller
         ]);
 
         $sport = strtolower(trim($data['sport']));
-        $userId = $request->user()?->getAuthIdentifier();
-        $sessionId = $userId === null ? $request->session()->getId() : null;
+        $customerId = (int) $customer->getAuthIdentifier();
         $favoriteKey = hash('sha256', implode('|', [
-            $userId === null ? 'session' : 'user',
-            $userId ?? $sessionId,
+            'user',
+            $customerId,
             $sport,
             $data['event_key'],
         ]));
 
-        $isFavorite = DB::transaction(function () use ($data, $favoriteKey, $sessionId, $sport, $userId): bool {
-            $removed = DB::table('favorites')->where('favorite_key', $favoriteKey)->delete();
+        $isFavorite = DB::transaction(function () use ($data, $favoriteKey, $sport, $customerId): bool {
+            $removed = Favorite::query()->where('customer_id', $customerId)->where('favorite_key', $favoriteKey)->delete();
 
             if ($removed > 0) {
                 return false;
             }
 
             $now = now();
-            DB::table('favorites')->insertOrIgnore([
+            Favorite::query()->insertOrIgnore([
                 'favorite_key' => $favoriteKey,
-                'user_id' => $userId,
-                'session_id' => $sessionId,
+                'customer_id' => $customerId,
                 'sport' => $sport,
                 'event_key' => $data['event_key'],
                 'event_id' => $data['event_id'] ?? null,

@@ -68,32 +68,52 @@
 
                                 <div>
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Initial</span>
-                                    <span class="font-mono text-base font-bold tabular-nums text-slate-500 dark:text-slate-300">{{ number_format($runner['initial_back_odds'], 2) }}</span>
+                                    <span class="font-mono text-base font-bold tabular-nums text-slate-500 dark:text-slate-300">
+                                        @if ($checkAuthAndSubscription['display_odds'])
+                                            {{ number_format($runner['initial_back_odds'], 2) }}
+                                        @else
+                                            @include('lock_icon')
+                                        @endif
+                                    </span>
                                 </div>
 
                                 <div class="text-right md:text-left">
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Current</span>
                                     <span class="inline-flex min-w-[72px] items-center justify-center gap-1 rounded-lg border border-[#b9d8ee] bg-[#e8f5ff] px-2.5 py-1.5 font-mono text-base font-extrabold tabular-nums text-[#0b2a40] dark:border-[#3d6d8d] dark:bg-[#17364b] dark:text-white">
-                                        {{ number_format($runner['current_back_odds'], 2) }}
+                                        @if ($checkAuthAndSubscription['display_odds'])
+                                            {{ number_format($runner['current_back_odds'], 2) }}
+                                        @else
+                                            @include('lock_icon')
+                                        @endif
                                     </span>
                                 </div>
 
                                 <div class="col-span-2 md:col-span-1">
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Movement</span>
-                                    <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-extrabold {{ $runner['direction'] < 0 ? 'bg-red-50 text-[#c74e4e] dark:bg-red-950/30' : ($runner['direction'] > 0 ? 'bg-emerald-50 text-[#1f9a6e] dark:bg-emerald-950/30' : 'bg-slate-100 text-slate-500 dark:bg-slate-700') }}">
-                                        @if ($runner['direction'] < 0)
-                                            <i class="fas fa-arrow-down"></i>
-                                        @elseif ($runner['direction'] > 0)
-                                            <i class="fas fa-arrow-up"></i>
-                                        @else
-                                            <i class="fas fa-minus"></i>
-                                        @endif
-                                        {{ $runner['change_percent'] > 0 ? '+' : '' }}{{ number_format($runner['change_percent'], 1) }}%
-                                    </span>
+                                    @if ($checkAuthAndSubscription['display_odds'])
+                                        <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-extrabold {{ $runner['direction'] < 0 ? 'bg-red-50 text-[#c74e4e] dark:bg-red-950/30' : ($runner['direction'] > 0 ? 'bg-emerald-50 text-[#1f9a6e] dark:bg-emerald-950/30' : 'bg-slate-100 text-slate-500 dark:bg-slate-700') }}">
+                                            @if ($runner['direction'] < 0)
+                                                <i class="fas fa-arrow-down"></i>
+                                            @elseif ($runner['direction'] > 0)
+                                                <i class="fas fa-arrow-up"></i>
+                                            @else
+                                                <i class="fas fa-minus"></i>
+                                            @endif
+                                            {{ $runner['change_percent'] > 0 ? '+' : '' }}{{ number_format($runner['change_percent'], 1) }}%
+                                        </span>
+                                    @else
+                                        <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-extrabold">
+                                            @include('lock_icon')
+                                        </span>
+                                    @endif
                                 </div>
 
                                 <div class="col-span-2 md:col-span-1">
-                                    @include('users.sports.football.partials.marketChart', ['history' => $runner['history']])
+                                    @if ($checkAuthAndSubscription['display_odds'])
+                                        @include('users.sports.football.partials.marketChart', ['history' => $runner['history']])
+                                    @else
+                                        @include('lock_icon')
+                                    @endif
                                 </div>
                             </article>
                         @endforeach
@@ -106,7 +126,6 @@
             @endforelse
         </div>
     </section>
-
     @push('js')
         <script>
             (function() {

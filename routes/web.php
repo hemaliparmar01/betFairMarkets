@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Users\AuthController;
 use App\Http\Controllers\Users\ContactController;
 use App\Http\Controllers\Users\FavoriteController;
 use App\Http\Controllers\Users\FeatureRequestController;
@@ -12,10 +13,33 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
 
+Route::get('popup', function () {
+    return view('popup');
+});
+
+Route::middleware('guest:customers')->group(function () {
+    Route::get('login', [AuthController::class, 'login'])->name('login');
+    Route::get('register', [AuthController::class, 'register'])->name('register');
+    Route::get('verify-email', [AuthController::class, 'verification'])->name('customers.verification');
+    Route::post('verify-email', [AuthController::class, 'verifyEmail'])->middleware('throttle:20,10')->name('customers.verification.verify');
+    Route::post('verify-email/resend', [AuthController::class, 'resendVerification'])->middleware('throttle:5,60')->name('customers.verification.resend');
+    Route::post('login', [AuthController::class, 'authenticate'])->name('login.store');
+    Route::post('register', [AuthController::class, 'store'])->name('register.store');
+    Route::post('login/logout-previous-sessions', [AuthController::class, 'confirmLogin'])->name('login.sessions.confirm');
+    // Route::post('login', [AuthController::class, 'authenticate'])->middleware('throttle:30,1')->name('login.store');
+    // Route::post('register', [AuthController::class, 'store'])->middleware('throttle:5,60')->name('register.store');
+    // Route::post('login/logout-previous-sessions', [AuthController::class, 'confirmLogin'])->middleware('throttle:10,1')->name('login.sessions.confirm');
+    Route::post('login/cancel', [AuthController::class, 'cancelLogin'])->name('login.sessions.cancel');
+});
+Route::post('logout', [AuthController::class, 'logout'])->middleware('auth:customers')->name('logout');
+Route::get('my-profile', [AuthController::class, 'profile'])->middleware('auth:customers')->name('customers.profile');
+Route::put('my-profile', [AuthController::class, 'updateProfile'])->middleware('auth:customers')->name('customers.profile.update');
+Route::get('my-profile/avatar', [AuthController::class, 'avatar'])->middleware('auth:customers')->name('customers.avatar');
+
 Route::get('temp-data-merge', [FootballController::class, 'tempDataMerge']);
 
 Route::get('/', [FootballController::class, 'football'])->name('football.home');
-Route::post('favorites/toggle', [FavoriteController::class, 'toggle'])->name('favorites.toggle');
+Route::post('favorites/toggle', [FavoriteController::class, 'toggle'])->middleware('auth:customers')->name('favorites.toggle');
 Route::prefix('football')->name('football.')->group(function () {
     Route::get('/matches/{matchId}', [FootballController::class, 'matchDetail'])->name('matches.show');
     Route::get('/market-activity', [FootballController::class, 'marketActivity'])->name('market-activity');
@@ -47,4 +71,4 @@ Route::get('refund-policy', [StaticPageController::class, 'refundPolicy'])->name
 Route::get('faq', [StaticPageController::class, 'faq'])->name('faq');
 Route::get('manifesto', [StaticPageController::class, 'manifesto'])->name('manifesto');
 Route::get('filter-guide', [StaticPageController::class, 'filterGuide'])->name('filter-guide');
-Route::get('market-activity-guide',[StaticPageController::class, 'marketActivityGuide'])->name('market-activity-guide');
+Route::get('market-activity-guide', [StaticPageController::class, 'marketActivityGuide'])->name('market-activity-guide');
