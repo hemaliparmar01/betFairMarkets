@@ -3,9 +3,23 @@
 namespace App\Console\Commands;
 
 use Amp\Websocket\Client\WebsocketHandshake;
+use App\Events\AmericanFootballSportsScoreUpdated;
+use App\Events\BaseballSportsScoreUpdated;
+use App\Events\BasketballSportsScoreUpdated;
 use App\Events\CricketSportsScoreUpdated;
 use App\Events\FootballSportsScoreUpdated;
+use App\Events\GreyhoundsSportsScoreUpdated;
+use App\Events\HorseRacingSportsScoreUpdated;
+use App\Events\IceHockeySportsScoreUpdated;
+use App\Events\TennisSportsScoreUpdated;
+use App\Http\Controllers\Users\AmericanFootball\AmericanFootballSyncController;
+use App\Http\Controllers\Users\Baseball\BaseballSyncController;
+use App\Http\Controllers\Users\Basketball\BasketballSyncController;
 use App\Http\Controllers\Users\Cricket\CricketSyncController;
+use App\Http\Controllers\Users\Greyhounds\GreyhoundsSyncController;
+use App\Http\Controllers\Users\HorseRacing\HorseRacingSyncController;
+use App\Http\Controllers\Users\IceHockey\IceHockeySyncController;
+use App\Http\Controllers\Users\Tennis\TennisSyncController;
 use App\Models\FootballMarket;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -18,11 +32,13 @@ use Throwable;
 use function Amp\delay;
 use function Amp\Websocket\Client\connect;
 
-class ListenFootballBetfairOdds extends Command
+class ListenBetfairOdds extends Command
 {
-    protected $signature = 'football:odds-listen';
+    protected $signature = 'betfair:listen';
 
-    protected $description = 'Listen to Betfair football odds updates';
+    protected $aliases = ['football:odds-listen'];
+
+    protected $description = 'Listen to Betfair odds updates for all supported sports';
 
     public function handle(): int
     {
@@ -67,8 +83,8 @@ class ListenFootballBetfairOdds extends Command
         }
 
         $backoff = 1;
-        $books = ['live' => [], 'prematch' => []];
-        $pendingChanges = ['live' => [], 'prematch' => []];
+        $books = ['live' => [], 'prematch' => [], 'greyhounds' => [], 'horse_prematch' => []];
+        $pendingChanges = ['live' => [], 'prematch' => [], 'greyhounds' => [], 'horse_prematch' => []];
 
         while (true) {
             $socket = null;
@@ -77,9 +93,9 @@ class ListenFootballBetfairOdds extends Command
 
             try {
                 $socket = connect(new WebsocketHandshake('wss://betfair-odds.com/betfair/v1/stream'));
-                $books = ['live' => [], 'prematch' => []];
-                $snapshotStarted = ['live' => false, 'prematch' => false];
-                $snapshotChanges = ['live' => [], 'prematch' => []];
+                $books = ['live' => [], 'prematch' => [], 'greyhounds' => [], 'horse_prematch' => []];
+                $snapshotStarted = ['live' => false, 'prematch' => false, 'greyhounds' => false, 'horse_prematch' => false];
+                $snapshotChanges = ['live' => [], 'prematch' => [], 'greyhounds' => [], 'horse_prematch' => []];
 
                 $socket->sendText(json_encode([
                     'action' => 'authenticate',
@@ -105,12 +121,12 @@ class ListenFootballBetfairOdds extends Command
 
                         $socket->sendText(json_encode([
                             'action' => 'subscribe',
-                            'feeds' => ['live', 'prematch'],
-                            'sports' => ['soccer', 'cricket'],
+                            'feeds' => ['live', 'prematch', 'greyhounds', 'horse_prematch'],
+                            'sports' => ['soccer', 'cricket', 'ice hockey', 'american football', 'baseball', 'basketball', 'tennis', 'greyhounds', 'horse_racing'],
                             'mode' => 'delta',
                         ], JSON_THROW_ON_ERROR));
 
-                        $this->info('Authenticated; subscribed to live and prematch soccer and cricket odds in delta mode.');
+                        $this->info('Authenticated; subscribed to live, prematch, greyhounds and horse racing feeds in delta mode.');
 
                         continue;
                     }
@@ -181,6 +197,13 @@ class ListenFootballBetfairOdds extends Command
 
                         $changedEvents = $snapshotChanges[$feed];
                         $snapshotChanges[$feed] = [];
+                        if (in_array($feed, ['greyhounds', 'horse_prematch'], true) && ($frame['meta']['stale'] ?? false) === false) {
+                            foreach (getInRedis($feed === 'greyhounds' ? 'Greyhounds:matches' : 'HorseRacing:matches') ?? [] as $race) {
+                                if (($race['result_status'] ?? '') !== 'Finished' && ! isset($books[$feed][(string) $race['betfair_match_id']])) {
+                                    $changedEvents[(string) $race['betfair_match_id']] = ['removed' => true];
+                                }
+                            }
+                        }
                     } elseif ($type === 'update') {
                         foreach (($frame['changed'] ?? []) as $eventId => $event) {
                             if (! is_array($event)) {
@@ -221,6 +244,13 @@ class ListenFootballBetfairOdds extends Command
                             }
 
                             $event['markets'] = array_values($rows);
+                            if (in_array($feed, ['greyhounds', 'horse_prematch'], true) && ($eventDelta['status'] ?? null) !== null) {
+                                $event['status'] = $eventDelta['status'];
+                                if (array_any($eventDelta['rows'] ?? [], static fn (array $row): bool => (string) ($row['marketId'] ?? '') === $eventId)
+                                    || array_any($eventDelta['removedRows'] ?? [], static fn (string $row): bool => str_starts_with($row, $eventId.' '))) {
+                                    $event['win_market_status'] = $eventDelta['status'];
+                                }
+                            }
                             $books[$feed][$eventId] = $event;
                             $changedEvents[$eventId] = $event;
                         }
@@ -230,6 +260,9 @@ class ListenFootballBetfairOdds extends Command
 
                     foreach (($frame['removed'] ?? []) as $removedEventId) {
                         unset($books[$feed][(string) $removedEventId]);
+                        if (in_array($feed, ['greyhounds', 'horse_prematch'], true)) {
+                            $changedEvents[(string) $removedEventId] = ['removed' => true];
+                        }
                     }
 
                     if ($changedEvents === []) {
@@ -257,7 +290,7 @@ class ListenFootballBetfairOdds extends Command
                                 ]);
                             }
 
-                            if ($pendingChanges['live'] === [] && $pendingChanges['prematch'] === []) {
+                            if ($pendingChanges['live'] === [] && $pendingChanges['prematch'] === [] && ($pendingChanges['greyhounds'] ?? []) === [] && ($pendingChanges['horse_prematch'] ?? []) === []) {
                                 EventLoop::cancel($flushTimer);
                                 $flushTimer = null;
                             } else {
@@ -310,15 +343,44 @@ class ListenFootballBetfairOdds extends Command
     {
         $updated = false;
 
-        foreach (['live' => true, 'prematch' => false] as $feed => $isLive) {
-            if ($pendingChanges[$feed] === []) {
+        foreach (['live' => true, 'prematch' => false, 'greyhounds' => false, 'horse_prematch' => false] as $feed => $isLive) {
+            if (($pendingChanges[$feed] ?? []) === []) {
                 continue;
             }
 
             $events = $pendingChanges[$feed];
             try {
+                if ($feed === 'greyhounds') {
+                    if (app(GreyhoundsSyncController::class)->mergeBetfairWebSocketData($events)) {
+                        try {
+                            Event::dispatch(new GreyhoundsSportsScoreUpdated);
+                        } catch (Throwable $e) {
+                            Log::warning('Greyhounds odds refresh broadcast failed', ['exception' => $e::class]);
+                        }
+                    }
+                    $pendingChanges[$feed] = [];
+
+                    continue;
+                }
+                if ($feed === 'horse_prematch') {
+                    if (app(HorseRacingSyncController::class)->mergeBetfairWebSocketData($events)) {
+                        try {
+                            Event::dispatch(new HorseRacingSportsScoreUpdated);
+                        } catch (Throwable $e) {
+                            Log::warning('HorseRacing odds refresh broadcast failed', ['exception' => $e::class]);
+                        }
+                    }
+                    $pendingChanges[$feed] = [];
+
+                    continue;
+                }
                 $footballEvents = array_filter($events, static fn (array $event): bool => strtolower((string) ($event['sport'] ?? 'soccer')) === 'soccer');
                 $cricketEvents = array_filter($events, static fn (array $event): bool => strtolower((string) ($event['sport'] ?? '')) === 'cricket');
+                $iceHockeyEvents = array_filter($events, static fn (array $event): bool => strtolower((string) ($event['sport'] ?? '')) === 'ice hockey');
+                $americanFootballEvents = array_filter($events, static fn (array $event): bool => strtolower((string) ($event['sport'] ?? '')) === 'american football');
+                $baseballEvents = array_filter($events, static fn (array $event): bool => strtolower((string) ($event['sport'] ?? '')) === 'baseball');
+                $basketballEvents = array_filter($events, static fn (array $event): bool => strtolower((string) ($event['sport'] ?? '')) === 'basketball');
+                $tennisEvents = array_filter($events, static fn (array $event): bool => strtolower((string) ($event['sport'] ?? '')) === 'tennis');
                 $feedUpdated = $footballEvents !== [] && withRedisLock(
                     'Football:matches',
                     fn (): bool => $this->updateFootballCache($footballEvents, $isLive)
@@ -328,6 +390,41 @@ class ListenFootballBetfairOdds extends Command
                         Event::dispatch(new CricketSportsScoreUpdated);
                     } catch (Throwable $e) {
                         Log::warning('Cricket odds refresh broadcast failed', ['exception' => $e::class]);
+                    }
+                }
+                if ($iceHockeyEvents !== [] && app(IceHockeySyncController::class)->mergeBetfairWebSocketData($iceHockeyEvents, $isLive)) {
+                    try {
+                        Event::dispatch(new IceHockeySportsScoreUpdated);
+                    } catch (Throwable $e) {
+                        Log::warning('Ice Hockey odds refresh broadcast failed', ['exception' => $e::class]);
+                    }
+                }
+                if ($americanFootballEvents !== [] && app(AmericanFootballSyncController::class)->mergeBetfairWebSocketData($americanFootballEvents, $isLive)) {
+                    try {
+                        Event::dispatch(new AmericanFootballSportsScoreUpdated);
+                    } catch (Throwable $e) {
+                        Log::warning('American Football odds refresh broadcast failed', ['exception' => $e::class]);
+                    }
+                }
+                if ($baseballEvents !== [] && app(BaseballSyncController::class)->mergeBetfairWebSocketData($baseballEvents, $isLive)) {
+                    try {
+                        Event::dispatch(new BaseballSportsScoreUpdated);
+                    } catch (Throwable $e) {
+                        Log::warning('Baseball odds refresh broadcast failed', ['exception' => $e::class]);
+                    }
+                }
+                if ($basketballEvents !== [] && app(BasketballSyncController::class)->mergeBetfairWebSocketData($basketballEvents, $isLive)) {
+                    try {
+                        Event::dispatch(new BasketballSportsScoreUpdated);
+                    } catch (Throwable $e) {
+                        Log::warning('Basketball odds refresh broadcast failed', ['exception' => $e::class]);
+                    }
+                }
+                if ($tennisEvents !== [] && app(TennisSyncController::class)->mergeBetfairWebSocketData($tennisEvents, $isLive)) {
+                    try {
+                        Event::dispatch(new TennisSportsScoreUpdated);
+                    } catch (Throwable $e) {
+                        Log::warning('Tennis odds refresh broadcast failed', ['exception' => $e::class]);
                     }
                 }
             } catch (LockTimeoutException $e) {

@@ -11,6 +11,13 @@ export default defineConfig({
                 'resources/users/js/app.js',
                 'resources/users/js/sports/football.js',
                 'resources/users/js/sports/cricket.js',
+                'resources/users/js/sports/icehockey.js',
+                'resources/users/js/sports/americanfootball.js',
+                'resources/users/js/sports/baseball.js',
+                'resources/users/js/sports/basketball.js',
+                'resources/users/js/sports/tennis.js',
+                'resources/users/js/sports/greyhounds.js',
+                'resources/users/js/sports/horseracing.js',
             ],
             refresh: true,
             fonts: [

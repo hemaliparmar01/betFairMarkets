@@ -21,6 +21,14 @@
 /public/images/football/tournaments
 /public/images/cricket/teams
 /public/images/cricket/tournaments
+/public/images/icehockey/teams
+/public/images/icehockey/tournaments
+/public/images/americanfootball/teams
+/public/images/americanfootball/tournaments
+/public/images/baseball/teams
+/public/images/baseball/tournaments
+/public/images/basketball/teams
+/public/images/basketball/tournaments
 /public/storage
 /storage/*.key
 /storage/pail
@@ -29,3 +37,6 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+/public/images/tennis/teams/
+/public/images/tennis/tournaments/

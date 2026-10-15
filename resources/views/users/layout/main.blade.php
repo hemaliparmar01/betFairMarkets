@@ -13,7 +13,7 @@
     @vite(['resources/users/css/app.css', 'resources/users/js/app.js'])
     @stack('head')
 </head>
-<body class="min-w-0 max-[480px]:!px-2 max-[480px]:!pt-2 @if (request()->routeIs('cricket.*')) [&_a]:cursor-pointer [&_button:enabled]:cursor-pointer [&_select]:cursor-pointer [&_summary]:cursor-pointer @endif">
+<body class="min-w-0 max-[480px]:!px-2 max-[480px]:!pt-2 @if (request()->routeIs('cricket.*', 'icehockey.*', 'americanfootball.*', 'baseball.*', 'basketball.*', 'tennis.*', 'greyhounds.*', 'horseracing.*')) [&_a]:cursor-pointer [&_button:enabled]:cursor-pointer [&_select]:cursor-pointer [&_summary]:cursor-pointer @endif">
     <div class="app mx-auto w-full rounded-3xl bg-white px-6 pb-6 pt-[18px] shadow-[0_16px_48px_rgba(0,20,40,0.06)] max-[800px]:p-3.5 dark:[background:#1a2a38] dark:[border-color:#2a3f50] [max-width:1480px] [margin:0_auto] [background:white] [border-radius:32px] [box-shadow:0_16px_48px_rgba(0,_20,_40,_0.06)] [padding:20px_28px_32px] [transition:background_0.3s] max-[800px]:[padding:14px] [width:100%] [max-width:100%] [border-radius:24px] [padding:18px_24px_24px] max-[768px]:[padding:14px_14px_20px] max-[768px]:[border-radius:16px]">
         @unless (request()->routeIs('login', 'register', 'customers.verification*'))
             @include('users.layout.header')

@@ -8,7 +8,6 @@ use App\Models\CricketMatch;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
@@ -62,7 +61,7 @@ class CricketSyncController extends Controller
 
     public function syncSportsApiProLiveData(): array
     {
-        $url = 'https://api.sportsapipro.com/v2/cricket/api/live';
+        $url = 'https://api.sportsapipro.com/v2/cricket/api/live/all';
         $key = 'x-api-key: '.$this->getsportsAPIProKeys;
         $liveData = ApiCall($url, $key) ?? [];
         $liveData = is_array($liveData['data'] ?? null) ? $liveData['data'] : ($liveData ?? []);
@@ -442,16 +441,19 @@ class CricketSyncController extends Controller
                             if ($images && File::isFile($images[0])) {
                                 return '/'.$directory.'/'.basename($images[0]);
                             }
-                            recordSportsApiProRestRequest("/v2/cricket/images/{$type}/{id}");
-                            $response = Http::withHeaders(['x-api-key' => $this->getsportsAPIProKeys])->connectTimeout(3)->timeout(8)
-                                ->get("https://api.sportsapipro.com/v2/cricket/images/{$type}/{$entityId}");
-                            $contentType = strtolower(trim(explode(';', (string) $response->header('Content-Type'))[0]));
+                            $response = ApiCall("https://api.sportsapipro.com/v2/cricket/images/{$type}/{$entityId}", ['x-api-key' => $this->getsportsAPIProKeys], [
+                                'connect_timeout' => 3,
+                                'timeout' => 8,
+                                'raw_response' => true,
+                                'follow_redirects' => true,
+                            ]);
+                            $contentType = strtolower(trim(explode(';', $response['content_type'])[0]));
                             $extension = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp', 'image/gif' => 'gif'][$contentType] ?? null;
-                            if (! $response->successful() || $extension === null || $response->body() === '' || strlen($response->body()) > 5_000_000) {
+                            if (! $response['successful'] || $extension === null || $response['body'] === '' || strlen($response['body']) > 5_000_000) {
                                 return null;
                             }
                             File::ensureDirectoryExists(public_path($directory));
-                            File::replace(public_path("{$directory}/{$entityId}.{$extension}"), $response->body());
+                            File::replace(public_path("{$directory}/{$entityId}.{$extension}"), $response['body']);
 
                             return "/{$directory}/{$entityId}.{$extension}";
                         });

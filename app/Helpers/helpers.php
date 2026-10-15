@@ -41,20 +41,53 @@ if (! function_exists('recordSportsApiProRestRequest')) {
 }
 
 if (! function_exists('ApiCall')) {
-    function ApiCall(string $url, string $key)
+    /**
+     * @param  string|array<string, string>|list<string>  $key
+     * @param  array{query?: array<string, mixed>, connect_timeout?: int, timeout?: int, raw_response?: bool, follow_redirects?: bool}  $options
+     */
+    function ApiCall(string $url, string|array $key, array $options = []): mixed
     {
+        $query = http_build_query($options['query'] ?? [], '', '&', PHP_QUERY_RFC3986);
+        if ($query !== '') {
+            $url .= (str_contains($url, '?') ? '&' : '?').$query;
+        }
+
         if (parse_url($url, PHP_URL_HOST) === 'api.sportsapipro.com') {
             recordSportsApiProRestRequest((string) parse_url($url, PHP_URL_PATH));
         }
 
+        $headers = [];
+        foreach ((array) $key as $name => $value) {
+            $headers[] = is_string($name) ? $name.': '.$value : $value;
+        }
+
         $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [$key]);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        $data = json_decode(curl_exec($ch), true);
+        try {
+            curl_setopt_array($ch, [
+                CURLOPT_HTTPHEADER => $headers,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => $options['connect_timeout'] ?? 0,
+                CURLOPT_TIMEOUT => $options['timeout'] ?? 0,
+                CURLOPT_FOLLOWLOCATION => $options['follow_redirects'] ?? false,
+                CURLOPT_MAXREDIRS => 5,
+            ]);
+            $body = curl_exec($ch);
 
-        curl_close($ch);
+            if ($options['raw_response'] ?? false) {
+                $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 
-        return $data;
+                return [
+                    'body' => $body === false ? '' : $body,
+                    'status' => $status,
+                    'content_type' => (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE),
+                    'successful' => $body !== false && $status >= 200 && $status < 300,
+                ];
+            }
+
+            return $body === false ? null : json_decode($body, true);
+        } finally {
+            curl_close($ch);
+        }
     }
 }
 
@@ -93,7 +126,6 @@ if (! function_exists('getCurrentUserTimezone')) {
         return 'Asia/Kolkata';
     }
 }
-
 
 if (! function_exists('checkAuthAndSubscription')) {
     function checkAuthAndSubscription()

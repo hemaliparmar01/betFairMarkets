@@ -8,7 +8,6 @@ use App\Models\FootballMatch;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -396,24 +395,25 @@ class FootballSyncController extends Controller
                             return '/'.$relativeDirectory.'/'.basename($existingImage[0]);
                         }
 
-                        recordSportsApiProRestRequest("/v2/football/images/{$type}/{id}");
-                        $response = Http::withHeaders([
+                        $response = ApiCall("https://api.sportsapipro.com/v2/football/images/{$type}/{$entityId}", [
                             'x-api-key' => GetSportApiProKey(),
                             'Accept' => 'image/png,image/jpeg,image/webp,image/gif',
-                        ])
-                            ->connectTimeout(3)
-                            ->timeout(10)
-                            ->get("https://api.sportsapipro.com/v2/football/images/{$type}/{$entityId}");
-                        $contentType = strtolower(trim(explode(';', (string) $response->header('Content-Type'))[0]));
+                        ], [
+                            'connect_timeout' => 3,
+                            'timeout' => 10,
+                            'raw_response' => true,
+                            'follow_redirects' => true,
+                        ]);
+                        $contentType = strtolower(trim(explode(';', $response['content_type'])[0]));
                         $extension = [
                             'image/png' => 'png',
                             'image/jpeg' => 'jpg',
                             'image/webp' => 'webp',
                             'image/gif' => 'gif',
                         ][$contentType] ?? null;
-                        $content = $response->body();
+                        $content = $response['body'];
 
-                        if (! $response->successful() || $extension === null || $content === '' || strlen($content) > 5_000_000) {
+                        if (! $response['successful'] || $extension === null || $content === '' || strlen($content) > 5_000_000) {
                             return null;
                         }
 

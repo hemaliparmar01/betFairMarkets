@@ -1,3 +1,4 @@
+@php $marketActivitySport = $marketActivitySport ?? 'football'; @endphp
 @extends('users.layout.main')
 
 @section('title', request()->routeIs('football.pinnacle-odds') ? 'Pinnacle Odds · BF Markets' : 'Market Activity Terminal · BF Markets')
@@ -188,6 +189,48 @@
     @endpush
 @else
 @php
+    $checkAuthAndSubscription = checkAuthAndSubscription();
+    $raceActivity = in_array($marketActivitySport, ['greyhounds', 'horseracing'], true);
+    if ($marketActivitySport !== 'football') {
+        $icons = ['cricket' => '🏏', 'icehockey' => '🏒', 'americanfootball' => '🏈', 'baseball' => '⚾', 'basketball' => '🏀', 'tennis' => '🎾', 'greyhounds' => '🐕', 'horseracing' => '🏇'];
+        $marketActivites = array_map(static function (array $row) use ($marketActivitySport, $raceActivity, $icons, $checkAuthAndSubscription): array {
+            $available = $row['details_available'] ?? true;
+            $locked = ! $available || ! $checkAuthAndSubscription['display_odds'];
+            $selections = $available ? array_values($raceActivity ? ($row['win_runners'] ?? []) : ($row['runners'] ?? [])) : [];
+            $favorite = $raceActivity ? ($row['favorite_runner'] ?? []) : ($row['favorite'] ?? []);
+            $favoriteIndex = array_find_key($selections, static fn (array $runner): bool => (string) ($runner['runnerId'] ?? '') === (string) ($favorite['runnerId'] ?? '')) ?? 0;
+            $runners = array_map(static fn (array $runner): array => [
+                'name' => $runner['runner'] ?? '—',
+                'back' => $locked ? 0 : (float) ($runner['currentBackOdds'] ?? $runner['backOdds'] ?? 0),
+                'lay' => $locked ? 0 : (float) ($runner['layOdds'] ?? 0),
+                'backSize' => $locked ? 0 : (float) ($runner['backSize'] ?? 0),
+                'laySize' => $locked ? 0 : (float) ($runner['laySize'] ?? 0),
+            ], $selections);
+            $indicator = $row['indicators'] ?? [];
+            return [
+                'id' => (string) $row['id'], 'sport' => $marketActivitySport, 'sportIcon' => $icons[$marketActivitySport],
+                'comp' => $row['tournament'] ?? '', 'country' => $row['country'] ?? null,
+                'match' => $row['team1'].($raceActivity ? ' · ' : ' vs ').$row['team2'],
+                'status' => strtoupper($row['status']), 'time' => $row['status'] === 'Finished' ? '' : ($row['minutes'] ?? ''), 'score' => $row['score'] ?? '',
+                'market' => $raceActivity ? 'win_market' : $row['marketType'], 'marketLabel' => $raceActivity ? 'Win Market' : $row['marketName'],
+                'runners' => $runners ?: [['name' => '—', 'back' => 0, 'lay' => 0, 'backSize' => 0, 'laySize' => 0]], 'favIdx' => $favoriteIndex,
+                'totalBackSize' => array_sum(array_column($runners, 'backSize')), 'totalLaySize' => array_sum(array_column($runners, 'laySize')),
+                'balance' => $indicator['balance'] ?? 'unknown', 'momentum' => $indicator['momentum'] ?? 'unknown',
+                'delta' => isset($indicator['delta']) && ! $locked ? number_format((float) $indicator['delta'], 1).'%' : '—', 'volatility' => $indicator['volatility'] ?? 'unknown',
+                'locked' => $locked, 'available' => $available,
+                'unlockAt' => $available ? null : (int) $row['timestamp'] - 300,
+            ];
+        }, $marketActivites);
+    }
+    if (! $checkAuthAndSubscription['display_odds']) {
+        $marketActivites = array_map(static function (array $event): array {
+            $event['locked'] = true;
+            $event['runners'] = array_map(static fn (array $runner): array => array_replace($runner, ['back' => 0, 'lay' => 0, 'backSize' => 0, 'laySize' => 0]), $event['runners']);
+            $event['totalBackSize'] = 0;
+            $event['totalLaySize'] = 0;
+            return $event;
+        }, $marketActivites);
+    }
     $marketTags = [
         'match_odds' => [
             'label' => 'Match Odds',
@@ -260,6 +303,15 @@
         ['value' => 'fh_ou_0_5', 'label' => 'First Half O/U 0.5'],
         ['value' => 'fh_ou_1_5', 'label' => 'First Half O/U 1.5'],
     ];
+    if ($marketActivitySport !== 'football') {
+        $marketOptions = [['value' => '', 'label' => 'Active Markets'], ...($getAllMarkets['options'] ?? [])];
+        if ($raceActivity) {
+            $marketOptions[] = ['value' => 'WIN', 'label' => 'Win Market'];
+        }
+        foreach ($marketActivites as $event) {
+            $marketTags[$event['market']] = ['label' => $event['marketLabel'], 'cls' => 'mo'];
+        }
+    }
 @endphp
 
     <div class="page-header my-[18px] flex min-w-0 flex-wrap items-center justify-between gap-3 [display:flex] [align-items:center] [justify-content:space-between] [flex-wrap:wrap] [gap:12px] [margin:18px_0_14px] [margin:28px_0_8px] max-[480px]:items-start">
@@ -295,7 +347,7 @@
 
         @include('users.layout.sports')
 
-        @include('users.sports.football.football_filter')
+        @include('users.sports.'.$marketActivitySport.'.'.$marketActivitySport.'_filter')
 
         <!-- MARKET CONTAINER (football only) -->
         <div class="market-container flex flex-wrap items-center gap-2.5 border-b py-3   [gap:10px] [padding:10px_0_14px] [border-bottom:1px_solid_#e6edf6] [margin-bottom:14px] [transition:border-color_0.3s] dark:[border-bottom-color:#2a3f50] [&[hidden]]:[display:none] max-[768px]:[gap:6px] max-[480px]:items-stretch max-[480px]:[&_.market-container-label]:w-full max-[480px]:[&_.market-select]:w-full max-[480px]:[&_.market-select]:min-w-0" id="marketContainer">
@@ -337,20 +389,27 @@
                     </tr>
                 </thead>
                 <tbody id="eventsBody">
+                @fragment($marketActivitySport.'MarketRows')
+                    @php $previousCountry = null; @endphp
                     @foreach ($marketActivites as $event)
+                        @if ($marketActivitySport === 'greyhounds' && $previousCountry !== $event['country'])
+                            <tr data-market-country="{{ $event['country'] }}"><td colspan="14" class="bg-[#f0f6fc] font-bold dark:bg-[#1f3444]">{{ $event['country'] }}</td></tr>
+                            @php $previousCountry = $event['country']; @endphp
+                        @endif
                         @php
+                            $eventDisplayOdds = $checkAuthAndSubscription['display_odds'] && ! ($event['locked'] ?? false);
                             $favorite = $event['runners'][$event['favIdx']];
                             $marketTag = $marketTags[$event['market']] ?? ['label' => $event['market'], 'cls' => 'mo'];
                             $balanceClass = ['back' => 'ind-back-heavy', 'lay' => 'ind-lay-heavy', 'balanced' => 'ind-balanced'][$event['balance']] ?? 'ind-balanced';
-                            $balanceLabel = ['back' => 'Back ↑', 'lay' => 'Lay ↓', 'balanced' => 'Balanced →'][$event['balance']] ?? 'Balanced →';
+                            $balanceLabel = ['back' => 'Back ↑', 'lay' => 'Lay ↓', 'balanced' => 'Balanced →'][$event['balance']] ?? '—';
                             $momentumClass = ['strong_back' => 'ind-mom-strong-back', 'back' => 'ind-mom-back', 'strong_lay' => 'ind-mom-strong-lay', 'lay' => 'ind-mom-lay', 'neutral' => 'ind-mom-neutral'][$event['momentum']] ?? 'ind-mom-neutral';
-                            $momentumLabel = ['strong_back' => '↑↑', 'back' => '↑', 'strong_lay' => '↓↓', 'lay' => '↓', 'neutral' => '→'][$event['momentum']] ?? '→';
+                            $momentumLabel = ['strong_back' => '↑↑', 'back' => '↑', 'strong_lay' => '↓↓', 'lay' => '↓', 'neutral' => '→'][$event['momentum']] ?? '—';
                             $volatilityClass = ['low' => 'ind-vol-low', 'medium' => 'ind-vol-med', 'high' => 'ind-vol-high'][$event['volatility']] ?? 'ind-vol-med';
-                            $volatilityLabel = ['low' => 'Low', 'medium' => 'Med', 'high' => 'High'][$event['volatility']] ?? 'Med';
+                            $volatilityLabel = ['low' => 'Low', 'medium' => 'Med', 'high' => 'High'][$event['volatility']] ?? '—';
                         @endphp
-                        <tr data-id="{{ $event['id'] }}" @unless ($checkAuthAndSubscription['display_odds']) class="cursor-default!" aria-disabled="true" @endunless>
+                        <tr data-id="{{ $event['id'] }}" @unless ($eventDisplayOdds) class="cursor-default!" aria-disabled="true" @endunless>
                             <td data-label="{{ __('Time') }}" class="col-time font-bold [color:#0b2a40] dark:[color:#e8edf2] [&_.status-live]:[color:#c74e4e] [&_.status-live]:[font-weight:800] [&_.status-live]:[margin-right:4px] dark:[&_.status-live]:[color:#e08080] [&_.status-up]:[color:#1a6b9c] [&_.status-up]:[font-weight:700] [&_.status-up]:[margin-right:4px] dark:[&_.status-up]:[color:#6aafdf]">
-                                @if ($event['status'] === 'LIVE')<span class="status-live">● LIVE</span>@else<span class="status-up">▲ UP</span>@endif
+                                @if ($event['status'] === 'LIVE')<span class="status-live">● LIVE</span>@elseif ($event['status'] === 'FINISHED')<span>FT</span>@else<span class="status-up">▲ UP</span>@endif
                                 @if ($event['status'] === 'LIVE' && str_ends_with((string) $event['time'], "'"))
                                     {{ substr((string) $event['time'], 0, -1) }}<span class="minute-tick-blink">'</span>
                                 @else
@@ -362,70 +421,75 @@
                             <td data-label="{{ __('Market') }}" class="col-market font-semibold [font-size:12px]"><span class="market-tag {{ $marketTag['cls'] }} inline-flex items-center [gap:4px] [padding:3px_10px] [border-radius:20px] [font-size:11px] font-bold whitespace-nowrap [&.mo]:[background:linear-gradient(135deg,_#e8f2fc,_#d4e8f8)] [&.mo]:[color:#1a6b9c] [&.mo]:[border:1px_solid_#b8d4ec] dark:[&.mo]:[background:linear-gradient(135deg,_#1a2e44,_#1f3444)] dark:[&.mo]:[color:#6aafdf] dark:[&.mo]:[border-color:#2a4a5e] [&.ou]:[background:linear-gradient(135deg,_#fff8e6,_#fef3d6)] [&.ou]:[color:#b8860b] [&.ou]:[border:1px_solid_#f0dfa8] dark:[&.ou]:[background:linear-gradient(135deg,_#3a2e1a,_#2e2414)] dark:[&.ou]:[color:#e6b422] dark:[&.ou]:[border-color:#5a4a1a] [&.btts]:[background:linear-gradient(135deg,_#e8f7ee,_#d6f0e0)] [&.btts]:[color:#1f9a6e] [&.btts]:[border:1px_solid_#c6e8d3] dark:[&.btts]:[background:linear-gradient(135deg,_#1a3a2a,_#14301f)] dark:[&.btts]:[color:#5ab88a] dark:[&.btts]:[border-color:#2a5a3e] [&.cs]:[background:linear-gradient(135deg,_#fce8ee,_#f8d9e2)] [&.cs]:[color:#d44a6a] [&.cs]:[border:1px_solid_#f0c9d4] dark:[&.cs]:[background:linear-gradient(135deg,_#3a1f2a,_#2e1a22)] dark:[&.cs]:[color:#e0809a] dark:[&.cs]:[border-color:#5a2a3e] [&.fh]:[background:linear-gradient(135deg,_#f0e8fc,_#e8dcf8)] [&.fh]:[color:#7a4a9c] [&.fh]:[border:1px_solid_#d8c4ec] dark:[&.fh]:[background:linear-gradient(135deg,_#2e1a44,_#251535)] dark:[&.fh]:[color:#b888df] dark:[&.fh]:[border-color:#4a2a5e] [&.win]:[background:linear-gradient(135deg,_#fde8e8,_#fcd9d9)] [&.win]:[color:#c74e4e] [&.win]:[border:1px_solid_#f0c9c9] dark:[&.win]:[background:linear-gradient(135deg,_#3a1f1f,_#2e1a1a)] dark:[&.win]:[color:#e08080] dark:[&.win]:[border-color:#5a2a2a]">{{ $marketTag['label'] }}</span></td>
                             <td data-label="{{ __('Favourite') }}" class="col-fav font-bold [font-size:12.5px] [color:#0b2a40] dark:[color:#e8edf2] [&_.fav-icon]:[color:#e6b422] [&_.fav-icon]:[font-size:11px] [&_.fav-icon]:[margin-right:4px]"><span class="fav-icon">{{ $event['market'] === 'correct_score' ? '⚽' : '⭐' }}</span>{{ $event['market'] === 'correct_score' ? ($event['marketDisplayScore'] ?? $event['score'] ?? '—') : $favorite['name'] }}</td>
                             <td data-label="{{ __('Back') }}" class="col-odds"><span class="odds-cell odds-cell-back [background:#72bbef] [color:#0b2a40] [border:1px_solid_#4a9fd8] dark:[background:#72bbef] dark:[color:#0b2a40] dark:[border-color:#4a9fd8] [text-align:center] [font-weight:800] [font-size:13.5px] [border-radius:4px] [padding:5px_8px]! [min-width:55px] [display:inline-block] [transition:background_0.4s_ease,_color_0.4s_ease] [margin:0_auto] [font-variant-numeric:tabular-nums] max-[768px]:[font-size:12.5px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">
-                                    @if ($checkAuthAndSubscription['display_odds'])
+                                    @if ($eventDisplayOdds)
                                         {{ number_format($favorite['back'], 2) }}
                                     @else
-                                        <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@include('lock_icon')</span>
+                                        <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@if (($event['available'] ?? true) === false)<span title="{{ __('Available five minutes before start') }}">—</span>@else @include('lock_icon') @endif</span>
                                     @endif
                                 </span></td>
                             <td data-label="{{ __('Back Size') }}" class="col-odds"><span class="size-cell size-cell-back [background:rgba(114,_187,_239,_0.18)] [color:#1a6b9c] dark:[background:rgba(114,_187,_239,_0.15)] dark:[color:#72bbef] [text-align:center] [font-weight:700] [font-size:12px] [border-radius:4px] [padding:5px_8px]! [min-width:60px] [display:inline-block] [margin:0_auto] [font-variant-numeric:tabular-nums] [transition:background_0.4s_ease,_color_0.4s_ease] max-[768px]:[font-size:11px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">
-                                    @if ($checkAuthAndSubscription['display_odds'])
+                                    @if ($eventDisplayOdds)
                                         {{ $event['totalBackSize'] >= 1000 ? number_format($event['totalBackSize'] / 1000, 1).'K' : $event['totalBackSize'] }}
                                     @else
-                                        <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@include('lock_icon')</span>
+                                        <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@if (($event['available'] ?? true) === false)<span title="{{ __('Available five minutes before start') }}">—</span>@else @include('lock_icon') @endif</span>
                                     @endif
                                 </span></td>
                             <td data-label="{{ __('Lay') }}" class="col-odds"><span class="odds-cell odds-cell-lay [background:#faa9ba] [color:#4a1520] [border:1px_solid_#e8889a] dark:[background:#faa9ba] dark:[color:#4a1520] dark:[border-color:#e8889a] [text-align:center] [font-weight:800] [font-size:13.5px] [border-radius:4px] [padding:5px_8px]! [min-width:55px] [display:inline-block] [transition:background_0.4s_ease,_color_0.4s_ease] [margin:0_auto] [font-variant-numeric:tabular-nums] max-[768px]:[font-size:12.5px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">
-                                    @if ($checkAuthAndSubscription['display_odds'])
+                                    @if ($eventDisplayOdds)
                                         {{ number_format($favorite['lay'], 2) }}
                                     @else
-                                        <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@include('lock_icon')</span>
+                                        <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@if (($event['available'] ?? true) === false)<span title="{{ __('Available five minutes before start') }}">—</span>@else @include('lock_icon') @endif</span>
                                     @endif
                                 </span></td>
                             <td data-label="{{ __('Lay Size') }}" class="col-odds"><span class="size-cell size-cell-lay [background:rgba(250,_169,_186,_0.18)] [color:#a8425a] dark:[background:rgba(250,_169,_186,_0.15)] dark:[color:#faa9ba] [text-align:center] [font-weight:700] [font-size:12px] [border-radius:4px] [padding:5px_8px]! [min-width:60px] [display:inline-block] [margin:0_auto] [font-variant-numeric:tabular-nums] [transition:background_0.4s_ease,_color_0.4s_ease] max-[768px]:[font-size:11px] max-[768px]:[padding:4px_6px]! max-[768px]:[min-width:50px]">
-                                    @if ($checkAuthAndSubscription['display_odds'])
+                                    @if ($eventDisplayOdds)
                                         {{ $event['totalLaySize'] >= 1000 ? number_format($event['totalLaySize'] / 1000, 1).'K' : $event['totalLaySize'] }}
                                     @else
-                                        <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@include('lock_icon')</span>
+                                        <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@if (($event['available'] ?? true) === false)<span title="{{ __('Available five minutes before start') }}">—</span>@else @include('lock_icon') @endif</span>
                                     @endif
                                 </span></td>
                             <td data-label="{{ __('Balance') }}">
-                                @if ($checkAuthAndSubscription['display_odds'])
+                                @if ($eventDisplayOdds)
                                     <span class="ind [&.ind-back-heavy]:[background:#e8f2fc] [&.ind-back-heavy]:[color:#1a6b9c] dark:[&.ind-back-heavy]:[background:#1a2e44] dark:[&.ind-back-heavy]:[color:#6aafdf] [&.ind-lay-heavy]:[background:#fce8ee] [&.ind-lay-heavy]:[color:#d44a6a] dark:[&.ind-lay-heavy]:[background:#3a1f2a] dark:[&.ind-lay-heavy]:[color:#e0809a] [&.ind-balanced]:[background:#f0f0f0] [&.ind-balanced]:[color:#6a8aaa] dark:[&.ind-balanced]:[background:#2a3f50] dark:[&.ind-balanced]:[color:#8aaccc] [&.ind-mom-strong-back]:[background:#e8f2fc] [&.ind-mom-strong-back]:[color:#1a6b9c] [&.ind-mom-strong-back]:[font-weight:800] [&.ind-mom-back]:[background:#e8f2fc] [&.ind-mom-back]:[color:#1a6b9c] [&.ind-mom-neutral]:[background:#f0f0f0] [&.ind-mom-neutral]:[color:#6a8aaa] [&.ind-mom-lay]:[background:#fce8ee] [&.ind-mom-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[background:#fce8ee] [&.ind-mom-strong-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[font-weight:800] dark:[&.ind-mom-strong-back]:[background:#1a2e44] dark:[&.ind-mom-strong-back]:[color:#6aafdf] dark:[&.ind-mom-back]:[background:#1a2e44] dark:[&.ind-mom-back]:[color:#6aafdf] dark:[&.ind-mom-neutral]:[background:#2a3f50] dark:[&.ind-mom-neutral]:[color:#8aaccc] dark:[&.ind-mom-lay]:[background:#3a1f2a] dark:[&.ind-mom-lay]:[color:#e0809a] dark:[&.ind-mom-strong-lay]:[background:#3a1f2a] dark:[&.ind-mom-strong-lay]:[color:#e0809a] [&.ind-delta-pos]:[background:#e8f7ee] [&.ind-delta-pos]:[color:#1f9a6e] dark:[&.ind-delta-pos]:[background:#1a3a2a] dark:[&.ind-delta-pos]:[color:#5ab88a] [&.ind-delta-neg]:[background:#fde8e8] [&.ind-delta-neg]:[color:#c74e4e] dark:[&.ind-delta-neg]:[background:#3a1f1f] dark:[&.ind-delta-neg]:[color:#e08080] [&.ind-delta-zero]:[background:#f0f0f0] [&.ind-delta-zero]:[color:#6a8aaa] dark:[&.ind-delta-zero]:[background:#2a3f50] dark:[&.ind-delta-zero]:[color:#8aaccc] [&.ind-vol-low]:[background:#e8f7ee] [&.ind-vol-low]:[color:#1f9a6e] dark:[&.ind-vol-low]:[background:#1a3a2a] dark:[&.ind-vol-low]:[color:#5ab88a] [&.ind-vol-med]:[background:#fff8e6] [&.ind-vol-med]:[color:#b8860b] dark:[&.ind-vol-med]:[background:#3a2e1a] dark:[&.ind-vol-med]:[color:#e6b422] [&.ind-vol-high]:[background:#fde8e8] [&.ind-vol-high]:[color:#c74e4e] dark:[&.ind-vol-high]:[background:#3a1f1f] dark:[&.ind-vol-high]:[color:#e08080] {{ $balanceClass }} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">{{ $balanceLabel }}</span>
                                 @else
-                                    <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@include('lock_icon')</span>
+                                    <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@if (($event['available'] ?? true) === false)<span title="{{ __('Available five minutes before start') }}">—</span>@else @include('lock_icon') @endif</span>
                                 @endif
                             </td>
                             <td data-label="{{ __('Momentum') }}">
-                                @if ($checkAuthAndSubscription['display_odds'])
+                                @if ($eventDisplayOdds)
                                     <span class="ind [&.ind-back-heavy]:[background:#e8f2fc] [&.ind-back-heavy]:[color:#1a6b9c] dark:[&.ind-back-heavy]:[background:#1a2e44] dark:[&.ind-back-heavy]:[color:#6aafdf] [&.ind-lay-heavy]:[background:#fce8ee] [&.ind-lay-heavy]:[color:#d44a6a] dark:[&.ind-lay-heavy]:[background:#3a1f2a] dark:[&.ind-lay-heavy]:[color:#e0809a] [&.ind-balanced]:[background:#f0f0f0] [&.ind-balanced]:[color:#6a8aaa] dark:[&.ind-balanced]:[background:#2a3f50] dark:[&.ind-balanced]:[color:#8aaccc] [&.ind-mom-strong-back]:[background:#e8f2fc] [&.ind-mom-strong-back]:[color:#1a6b9c] [&.ind-mom-strong-back]:[font-weight:800] [&.ind-mom-back]:[background:#e8f2fc] [&.ind-mom-back]:[color:#1a6b9c] [&.ind-mom-neutral]:[background:#f0f0f0] [&.ind-mom-neutral]:[color:#6a8aaa] [&.ind-mom-lay]:[background:#fce8ee] [&.ind-mom-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[background:#fce8ee] [&.ind-mom-strong-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[font-weight:800] dark:[&.ind-mom-strong-back]:[background:#1a2e44] dark:[&.ind-mom-strong-back]:[color:#6aafdf] dark:[&.ind-mom-back]:[background:#1a2e44] dark:[&.ind-mom-back]:[color:#6aafdf] dark:[&.ind-mom-neutral]:[background:#2a3f50] dark:[&.ind-mom-neutral]:[color:#8aaccc] dark:[&.ind-mom-lay]:[background:#3a1f2a] dark:[&.ind-mom-lay]:[color:#e0809a] dark:[&.ind-mom-strong-lay]:[background:#3a1f2a] dark:[&.ind-mom-strong-lay]:[color:#e0809a] [&.ind-delta-pos]:[background:#e8f7ee] [&.ind-delta-pos]:[color:#1f9a6e] dark:[&.ind-delta-pos]:[background:#1a3a2a] dark:[&.ind-delta-pos]:[color:#5ab88a] [&.ind-delta-neg]:[background:#fde8e8] [&.ind-delta-neg]:[color:#c74e4e] dark:[&.ind-delta-neg]:[background:#3a1f1f] dark:[&.ind-delta-neg]:[color:#e08080] [&.ind-delta-zero]:[background:#f0f0f0] [&.ind-delta-zero]:[color:#6a8aaa] dark:[&.ind-delta-zero]:[background:#2a3f50] dark:[&.ind-delta-zero]:[color:#8aaccc] [&.ind-vol-low]:[background:#e8f7ee] [&.ind-vol-low]:[color:#1f9a6e] dark:[&.ind-vol-low]:[background:#1a3a2a] dark:[&.ind-vol-low]:[color:#5ab88a] [&.ind-vol-med]:[background:#fff8e6] [&.ind-vol-med]:[color:#b8860b] dark:[&.ind-vol-med]:[background:#3a2e1a] dark:[&.ind-vol-med]:[color:#e6b422] [&.ind-vol-high]:[background:#fde8e8] [&.ind-vol-high]:[color:#c74e4e] dark:[&.ind-vol-high]:[background:#3a1f1f] dark:[&.ind-vol-high]:[color:#e08080] {{ $momentumClass }} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">{{ $momentumLabel }}</span>
                                 @else
-                                    <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@include('lock_icon')</span>
+                                    <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@if (($event['available'] ?? true) === false)<span title="{{ __('Available five minutes before start') }}">—</span>@else @include('lock_icon') @endif</span>
                                 @endif
                             </td>
                             <td data-label="{{ __('Delta') }}">
-                                @if ($checkAuthAndSubscription['display_odds'])
+                                @if ($eventDisplayOdds)
                                     <span class="ind [&.ind-back-heavy]:[background:#e8f2fc] [&.ind-back-heavy]:[color:#1a6b9c] dark:[&.ind-back-heavy]:[background:#1a2e44] dark:[&.ind-back-heavy]:[color:#6aafdf] [&.ind-lay-heavy]:[background:#fce8ee] [&.ind-lay-heavy]:[color:#d44a6a] dark:[&.ind-lay-heavy]:[background:#3a1f2a] dark:[&.ind-lay-heavy]:[color:#e0809a] [&.ind-balanced]:[background:#f0f0f0] [&.ind-balanced]:[color:#6a8aaa] dark:[&.ind-balanced]:[background:#2a3f50] dark:[&.ind-balanced]:[color:#8aaccc] [&.ind-mom-strong-back]:[background:#e8f2fc] [&.ind-mom-strong-back]:[color:#1a6b9c] [&.ind-mom-strong-back]:[font-weight:800] [&.ind-mom-back]:[background:#e8f2fc] [&.ind-mom-back]:[color:#1a6b9c] [&.ind-mom-neutral]:[background:#f0f0f0] [&.ind-mom-neutral]:[color:#6a8aaa] [&.ind-mom-lay]:[background:#fce8ee] [&.ind-mom-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[background:#fce8ee] [&.ind-mom-strong-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[font-weight:800] dark:[&.ind-mom-strong-back]:[background:#1a2e44] dark:[&.ind-mom-strong-back]:[color:#6aafdf] dark:[&.ind-mom-back]:[background:#1a2e44] dark:[&.ind-mom-back]:[color:#6aafdf] dark:[&.ind-mom-neutral]:[background:#2a3f50] dark:[&.ind-mom-neutral]:[color:#8aaccc] dark:[&.ind-mom-lay]:[background:#3a1f2a] dark:[&.ind-mom-lay]:[color:#e0809a] dark:[&.ind-mom-strong-lay]:[background:#3a1f2a] dark:[&.ind-mom-strong-lay]:[color:#e0809a] [&.ind-delta-pos]:[background:#e8f7ee] [&.ind-delta-pos]:[color:#1f9a6e] dark:[&.ind-delta-pos]:[background:#1a3a2a] dark:[&.ind-delta-pos]:[color:#5ab88a] [&.ind-delta-neg]:[background:#fde8e8] [&.ind-delta-neg]:[color:#c74e4e] dark:[&.ind-delta-neg]:[background:#3a1f1f] dark:[&.ind-delta-neg]:[color:#e08080] [&.ind-delta-zero]:[background:#f0f0f0] [&.ind-delta-zero]:[color:#6a8aaa] dark:[&.ind-delta-zero]:[background:#2a3f50] dark:[&.ind-delta-zero]:[color:#8aaccc] [&.ind-vol-low]:[background:#e8f7ee] [&.ind-vol-low]:[color:#1f9a6e] dark:[&.ind-vol-low]:[background:#1a3a2a] dark:[&.ind-vol-low]:[color:#5ab88a] [&.ind-vol-med]:[background:#fff8e6] [&.ind-vol-med]:[color:#b8860b] dark:[&.ind-vol-med]:[background:#3a2e1a] dark:[&.ind-vol-med]:[color:#e6b422] [&.ind-vol-high]:[background:#fde8e8] [&.ind-vol-high]:[color:#c74e4e] dark:[&.ind-vol-high]:[background:#3a1f1f] dark:[&.ind-vol-high]:[color:#e08080] {{ str_starts_with($event['delta'], '+') ? 'ind-delta-pos' : (str_starts_with($event['delta'], '-') ? 'ind-delta-neg' : 'ind-delta-zero') }} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">{{ $event['delta'] }}</span>
                                 @else
-                                    <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@include('lock_icon')</span>
+                                    <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@if (($event['available'] ?? true) === false)<span title="{{ __('Available five minutes before start') }}">—</span>@else @include('lock_icon') @endif</span>
                                 @endif
                             </td>
                             <td data-label="{{ __('Volatility') }}">
-                                @if ($checkAuthAndSubscription['display_odds'])
+                                @if ($eventDisplayOdds)
                                     <span class="ind [&.ind-back-heavy]:[background:#e8f2fc] [&.ind-back-heavy]:[color:#1a6b9c] dark:[&.ind-back-heavy]:[background:#1a2e44] dark:[&.ind-back-heavy]:[color:#6aafdf] [&.ind-lay-heavy]:[background:#fce8ee] [&.ind-lay-heavy]:[color:#d44a6a] dark:[&.ind-lay-heavy]:[background:#3a1f2a] dark:[&.ind-lay-heavy]:[color:#e0809a] [&.ind-balanced]:[background:#f0f0f0] [&.ind-balanced]:[color:#6a8aaa] dark:[&.ind-balanced]:[background:#2a3f50] dark:[&.ind-balanced]:[color:#8aaccc] [&.ind-mom-strong-back]:[background:#e8f2fc] [&.ind-mom-strong-back]:[color:#1a6b9c] [&.ind-mom-strong-back]:[font-weight:800] [&.ind-mom-back]:[background:#e8f2fc] [&.ind-mom-back]:[color:#1a6b9c] [&.ind-mom-neutral]:[background:#f0f0f0] [&.ind-mom-neutral]:[color:#6a8aaa] [&.ind-mom-lay]:[background:#fce8ee] [&.ind-mom-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[background:#fce8ee] [&.ind-mom-strong-lay]:[color:#d44a6a] [&.ind-mom-strong-lay]:[font-weight:800] dark:[&.ind-mom-strong-back]:[background:#1a2e44] dark:[&.ind-mom-strong-back]:[color:#6aafdf] dark:[&.ind-mom-back]:[background:#1a2e44] dark:[&.ind-mom-back]:[color:#6aafdf] dark:[&.ind-mom-neutral]:[background:#2a3f50] dark:[&.ind-mom-neutral]:[color:#8aaccc] dark:[&.ind-mom-lay]:[background:#3a1f2a] dark:[&.ind-mom-lay]:[color:#e0809a] dark:[&.ind-mom-strong-lay]:[background:#3a1f2a] dark:[&.ind-mom-strong-lay]:[color:#e0809a] [&.ind-delta-pos]:[background:#e8f7ee] [&.ind-delta-pos]:[color:#1f9a6e] dark:[&.ind-delta-pos]:[background:#1a3a2a] dark:[&.ind-delta-pos]:[color:#5ab88a] [&.ind-delta-neg]:[background:#fde8e8] [&.ind-delta-neg]:[color:#c74e4e] dark:[&.ind-delta-neg]:[background:#3a1f1f] dark:[&.ind-delta-neg]:[color:#e08080] [&.ind-delta-zero]:[background:#f0f0f0] [&.ind-delta-zero]:[color:#6a8aaa] dark:[&.ind-delta-zero]:[background:#2a3f50] dark:[&.ind-delta-zero]:[color:#8aaccc] [&.ind-vol-low]:[background:#e8f7ee] [&.ind-vol-low]:[color:#1f9a6e] dark:[&.ind-vol-low]:[background:#1a3a2a] dark:[&.ind-vol-low]:[color:#5ab88a] [&.ind-vol-med]:[background:#fff8e6] [&.ind-vol-med]:[color:#b8860b] dark:[&.ind-vol-med]:[background:#3a2e1a] dark:[&.ind-vol-med]:[color:#e6b422] [&.ind-vol-high]:[background:#fde8e8] [&.ind-vol-high]:[color:#c74e4e] dark:[&.ind-vol-high]:[background:#3a1f1f] dark:[&.ind-vol-high]:[color:#e08080] {{ $volatilityClass }} inline-flex items-center [gap:4px] [padding:3px_8px] [border-radius:12px] [font-size:11px] font-bold whitespace-nowrap [transition:0.3s]">{{ $volatilityLabel }}</span>
                                 @else
-                                    <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@include('lock_icon')</span>
+                                    <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@if (($event['available'] ?? true) === false)<span title="{{ __('Available five minutes before start') }}">—</span>@else @include('lock_icon') @endif</span>
                                 @endif
                             </td>
                             <td data-label="{{ __('Action') }}">
-                                @if ($checkAuthAndSubscription['display_odds'])
+                                @if ($eventDisplayOdds)
                                     <button type="button" class="open-btn inline-flex items-center [gap:4px] [padding:5px_12px] [border-radius:20px] [background:linear-gradient(135deg,_#0b2a40,_#1a6b9c)] text-white [font-size:11.5px] font-bold border-0 cursor-pointer [transition:transform_0.2s,_box-shadow_0.2s] [font-family:inherit] whitespace-nowrap dark:[background:linear-gradient(135deg,_#1a6b9c,_#4a8ab5)] [&:hover]:[transform:translateY(-1px)] [&:hover]:[box-shadow:0_6px_16px_rgba(26,_107,_156,_0.3)]" data-id="{{ $event['id'] }}">{{ __('Open') }} →</button>
                                 @else
-                                    <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@include('lock_icon')</span>
+                                    <span class="inline-flex items-center justify-center" aria-label="{{ __('Subscription required') }}">@if (($event['available'] ?? true) === false)<span title="{{ __('Available five minutes before start') }}">—</span>@else @include('lock_icon') @endif</span>
                                 @endif
                             </td>
                         </tr>
                     @endforeach
+                    @if ($marketActivites === [])
+                        <tr data-market-empty><td colspan="14" class="py-10 text-center">{{ __('No data available.') }}</td></tr>
+                    @endif
+                    <script type="application/json" data-market-events>@json($marketActivites)</script>
+                @endfragment
                 </tbody>
             </table>
             <div
@@ -458,10 +522,12 @@
                 const collapseToggle = document.getElementById('collapseToggle');
                 if (localStorage.getItem('bf-markets-collapsed') === 'true') {
                     document.body.classList.add('collapsed');
+                    document.getElementById('controlsWrapper').classList.add('hidden');
                 }
                 collapseToggle.addEventListener('click', function() {
                     document.body.classList.toggle('collapsed');
                     const isCollapsed = document.body.classList.contains('collapsed');
+                    document.getElementById('controlsWrapper').classList.toggle('hidden', isCollapsed);
                     localStorage.setItem('bf-markets-collapsed', isCollapsed ? 'true' : 'false');
                     if (typeof ym !== 'undefined') {
                         ym(109087271, 'reachGoal', 'market_activity_collapse_toggle', {
@@ -505,8 +571,9 @@
                 }
 
                 // ===== MARKET TAGS =====
+                const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]));
                 const MARKET_TAGS = @json($marketTags);
-                const events = @json($marketActivites);
+                const events = JSON.parse(document.querySelector('[data-market-events]').textContent);
                 const displayOdds = @json((bool) $checkAuthAndSubscription['display_odds']);
 
                 // ===== SIMULATE =====
@@ -613,6 +680,7 @@
                 }
 
                 function balanceText(bal) {
+                    if (bal === 'unknown') return '—';
                     return bal === 'back' ? 'Back ↑' : bal === 'lay' ? 'Lay ↓' : 'Balanced →';
                 }
 
@@ -625,6 +693,7 @@
                 }
 
                 function momentumText(mom) {
+                    if (mom === 'unknown') return '—';
                     if (mom === 'strong_back') return '↑↑';
                     if (mom === 'back') return '↑';
                     if (mom === 'strong_lay') return '↓↓';
@@ -641,6 +710,7 @@
                 }
 
                 function volText(v) {
+                    if (v === 'unknown') return '—';
                     return v === 'low' ? 'Low' : v === 'high' ? 'High' : 'Med';
                 }
 
@@ -654,7 +724,7 @@
                         label: marketKey,
                         cls: 'mo'
                     };
-                    return '<span class="market-tag ' + tag.cls + ' inline-flex items-center [gap:4px] [padding:3px_10px] [border-radius:20px] [font-size:11px] font-bold whitespace-nowrap [&.mo]:[background:linear-gradient(135deg,_#e8f2fc,_#d4e8f8)] [&.mo]:[color:#1a6b9c] [&.mo]:[border:1px_solid_#b8d4ec] dark:[&.mo]:[background:linear-gradient(135deg,_#1a2e44,_#1f3444)] dark:[&.mo]:[color:#6aafdf] dark:[&.mo]:[border-color:#2a4a5e] [&.ou]:[background:linear-gradient(135deg,_#fff8e6,_#fef3d6)] [&.ou]:[color:#b8860b] [&.ou]:[border:1px_solid_#f0dfa8] dark:[&.ou]:[background:linear-gradient(135deg,_#3a2e1a,_#2e2414)] dark:[&.ou]:[color:#e6b422] dark:[&.ou]:[border-color:#5a4a1a] [&.btts]:[background:linear-gradient(135deg,_#e8f7ee,_#d6f0e0)] [&.btts]:[color:#1f9a6e] [&.btts]:[border:1px_solid_#c6e8d3] dark:[&.btts]:[background:linear-gradient(135deg,_#1a3a2a,_#14301f)] dark:[&.btts]:[color:#5ab88a] dark:[&.btts]:[border-color:#2a5a3e] [&.cs]:[background:linear-gradient(135deg,_#fce8ee,_#f8d9e2)] [&.cs]:[color:#d44a6a] [&.cs]:[border:1px_solid_#f0c9d4] dark:[&.cs]:[background:linear-gradient(135deg,_#3a1f2a,_#2e1a22)] dark:[&.cs]:[color:#e0809a] dark:[&.cs]:[border-color:#5a2a3e] [&.fh]:[background:linear-gradient(135deg,_#f0e8fc,_#e8dcf8)] [&.fh]:[color:#7a4a9c] [&.fh]:[border:1px_solid_#d8c4ec] dark:[&.fh]:[background:linear-gradient(135deg,_#2e1a44,_#251535)] dark:[&.fh]:[color:#b888df] dark:[&.fh]:[border-color:#4a2a5e] [&.win]:[background:linear-gradient(135deg,_#fde8e8,_#fcd9d9)] [&.win]:[color:#c74e4e] [&.win]:[border:1px_solid_#f0c9c9] dark:[&.win]:[background:linear-gradient(135deg,_#3a1f1f,_#2e1a1a)] dark:[&.win]:[color:#e08080] dark:[&.win]:[border-color:#5a2a2a]">' + tag.label + '</span>';
+                    return '<span class="market-tag ' + tag.cls + ' inline-flex items-center [gap:4px] [padding:3px_10px] [border-radius:20px] [font-size:11px] font-bold whitespace-nowrap [&.mo]:[background:linear-gradient(135deg,_#e8f2fc,_#d4e8f8)] [&.mo]:[color:#1a6b9c] [&.mo]:[border:1px_solid_#b8d4ec] dark:[&.mo]:[background:linear-gradient(135deg,_#1a2e44,_#1f3444)] dark:[&.mo]:[color:#6aafdf] dark:[&.mo]:[border-color:#2a4a5e] [&.ou]:[background:linear-gradient(135deg,_#fff8e6,_#fef3d6)] [&.ou]:[color:#b8860b] [&.ou]:[border:1px_solid_#f0dfa8] dark:[&.ou]:[background:linear-gradient(135deg,_#3a2e1a,_#2e2414)] dark:[&.ou]:[color:#e6b422] dark:[&.ou]:[border-color:#5a4a1a] [&.btts]:[background:linear-gradient(135deg,_#e8f7ee,_#d6f0e0)] [&.btts]:[color:#1f9a6e] [&.btts]:[border:1px_solid_#c6e8d3] dark:[&.btts]:[background:linear-gradient(135deg,_#1a3a2a,_#14301f)] dark:[&.btts]:[color:#5ab88a] dark:[&.btts]:[border-color:#2a5a3e] [&.cs]:[background:linear-gradient(135deg,_#fce8ee,_#f8d9e2)] [&.cs]:[color:#d44a6a] [&.cs]:[border:1px_solid_#f0c9d4] dark:[&.cs]:[background:linear-gradient(135deg,_#3a1f2a,_#2e1a22)] dark:[&.cs]:[color:#e0809a] dark:[&.cs]:[border-color:#5a2a3e] [&.fh]:[background:linear-gradient(135deg,_#f0e8fc,_#e8dcf8)] [&.fh]:[color:#7a4a9c] [&.fh]:[border:1px_solid_#d8c4ec] dark:[&.fh]:[background:linear-gradient(135deg,_#2e1a44,_#251535)] dark:[&.fh]:[color:#b888df] dark:[&.fh]:[border-color:#4a2a5e] [&.win]:[background:linear-gradient(135deg,_#fde8e8,_#fcd9d9)] [&.win]:[color:#c74e4e] [&.win]:[border:1px_solid_#f0c9c9] dark:[&.win]:[background:linear-gradient(135deg,_#3a1f1f,_#2e1a1a)] dark:[&.win]:[color:#e08080] dark:[&.win]:[border-color:#5a2a2a]">' + escapeHtml(tag.label) + '</span>';
                 }
 
                 function getFavDisplay(ev) {
@@ -667,7 +737,7 @@
 
                 // ===== RENDER TABLE =====
                 const eventsBody = document.getElementById('eventsBody');
-                const marketRowTemplate = eventsBody.querySelector('tr[data-id]')?.cloneNode(true);
+
                 const marketLazyLoader = document.querySelector('[data-market-lazy-loader]');
                 const terminal = document.getElementById('terminal');
                 const detailPanel = document.getElementById('detailPanel');
@@ -676,76 +746,13 @@
                 const marketContainer = document.getElementById('marketContainer');
                 const marketSelect = document.getElementById('marketSelect');
                 let currentEventId = null;
-                let activeMarketFilter = 'active';
+                let activeMarketFilter = marketSelect?.value ?? 'active';
                 let activeFootballFilter = document.querySelector('.filter-pill.active')?.dataset.filter || 'all';
-
-                function createEventRow(ev) {
-                    if (!marketRowTemplate) return null;
-
-                    const row = marketRowTemplate.cloneNode(true);
-                    const cells = row.children;
-                    const favorite = ev.runners[ev.favIdx] || ev.favorite;
-                    if (!favorite) return null;
-
-                    row.dataset.id = ev.id;
-                    cells[0].innerHTML = ev.status === 'LIVE'
-                        ? '<span class="status-live">● LIVE</span> '
-                        : '<span class="status-up">▲ UP</span> ';
-                    const eventTime = String(ev.time || '');
-                    if (ev.status === 'LIVE' && eventTime.endsWith("'")) {
-                        cells[0].append(document.createTextNode(eventTime.slice(0, -1)));
-                        const minuteTick = document.createElement('span');
-                        minuteTick.className = 'minute-tick-blink';
-                        minuteTick.textContent = "'";
-                        cells[0].append(minuteTick);
-                    } else {
-                        cells[0].append(document.createTextNode(eventTime));
-                    }
-                    cells[1].textContent = `${ev.sportIcon || '⚽'} ${ev.comp || ''}`;
-                    cells[2].textContent = ev.match || '';
-                    cells[3].innerHTML = getMarketTag(ev.market);
-                    cells[4].innerHTML = '';
-                    const favoriteIcon = document.createElement('span');
-                    favoriteIcon.className = 'fav-icon';
-                    favoriteIcon.textContent = ev.market === 'correct_score' ? '⚽' : '⭐';
-                    cells[4].append(favoriteIcon, document.createTextNode(ev.market === 'correct_score'
-                        ? (ev.marketDisplayScore || ev.score || '—')
-                        : favorite.name));
-                    if (displayOdds) {
-                        cells[5].querySelector('span').textContent = Number(favorite.back || 0).toFixed(2);
-                        cells[6].querySelector('span').textContent = fmtSize(Number(ev.totalBackSize || 0));
-                        cells[7].querySelector('span').textContent = Number(favorite.lay || 0).toFixed(2);
-                        cells[8].querySelector('span').textContent = fmtSize(Number(ev.totalLaySize || 0));
-                    }
-
-                    if (displayOdds) {
-                        const indicatorClasses = [
-                            'ind-back-heavy', 'ind-lay-heavy', 'ind-balanced',
-                            'ind-mom-strong-back', 'ind-mom-back', 'ind-mom-neutral', 'ind-mom-lay', 'ind-mom-strong-lay',
-                            'ind-delta-pos', 'ind-delta-neg', 'ind-delta-zero',
-                            'ind-vol-low', 'ind-vol-med', 'ind-vol-high',
-                        ];
-                        [[9, balanceClass(ev.balance), balanceText(ev.balance)],
-                            [10, momentumClass(ev.momentum), momentumText(ev.momentum)],
-                            [11, deltaClass(ev.delta), ev.delta],
-                            [12, volClass(ev.volatility), volText(ev.volatility)]
-                        ].forEach(([index, className, label]) => {
-                            const indicator = cells[index].querySelector('span');
-                            indicator.classList.remove(...indicatorClasses);
-                            indicator.classList.add(className);
-                            indicator.textContent = label;
-                        });
-                    }
-                    if (displayOdds) {
-                        cells[13].querySelector('[data-id]').dataset.id = ev.id;
-                    }
-
-                    return row;
-                }
 
                 let marketLoading = false;
                 let marketHasMore = marketLazyLoader?.dataset.hasMore === 'true';
                 let marketNextPage = Number(marketLazyLoader?.dataset.nextPage || 2);
+                let marketLoadedPages = 1;
 
                 function updateMarketLoader(hasMore, nextPage) {
                     marketHasMore = Boolean(hasMore);
@@ -756,25 +763,47 @@
                     marketLazyLoader.querySelector('[data-market-loader-text]').textContent = '↓ Scroll for more matches ↓';
                 }
 
-                function replaceMarketActivityRows(data) {
+                function receiveMarketRows(payload, append = false) {
+                    const template = document.createElement('template');
+                    template.innerHTML = `<table><tbody>${payload.html}</tbody></table>`;
+                    const body = template.content.querySelector('tbody');
+                    const data = JSON.parse(body.querySelector('[data-market-events]').textContent);
+                    body.querySelector('[data-market-events]').remove();
+                    if (append) {
+                        eventsBody.querySelector('[data-market-empty]')?.remove();
+                        const firstCountry = body.querySelector('tr[data-market-country]');
+                        const lastCountry = [...eventsBody.querySelectorAll('[data-market-country]')].at(-1);
+                        if (firstCountry && firstCountry.dataset.marketCountry === lastCountry?.dataset.marketCountry) firstCountry.remove();
+                        eventsBody.append(...body.children);
+                        events.push(...data);
+                    } else {
+                        replaceMarketActivityRows(data, body);
+                    }
+                    scheduleAvailability();
+                }
+
+                function replaceMarketActivityRows(data, body) {
                     const selectedEventId = currentEventId;
                     const detailWasOpen = detailPanel.classList.contains('open');
                     const detailWasExpanded = terminal.classList.contains('panel-expanded');
 
                     events.splice(0, events.length, ...data);
-                    eventsBody.innerHTML = '';
-                    data.forEach(function(ev) {
-                        const row = createEventRow(ev);
-                        if (row) eventsBody.appendChild(row);
-                    });
+                    const scrollLeft = document.getElementById('eventsWrap').scrollLeft;
+                    eventsBody.replaceChildren(...body.children);
+                    document.getElementById('eventsWrap').scrollLeft = scrollLeft;
 
-                    if (detailWasOpen && events.some(function(ev) { return ev.id === selectedEventId; })) {
+                    if (detailWasOpen && events.some(function(ev) { return String(ev.id) === String(selectedEventId) && !ev.locked; })) {
+                        const scrollTop = detailPanel.scrollTop;
+                        const termsOpen = !document.getElementById('termsSection')?.classList.contains('collapsed');
                         openDetail(selectedEventId);
                         if (detailWasExpanded) toggleExpand();
+                        if (termsOpen) document.getElementById('termsSection')?.classList.remove('collapsed');
+                        detailPanel.scrollTop = scrollTop;
                     } else {
                         currentEventId = null;
                         detailPanel.classList.remove('open');
                         terminal.classList.remove('with-panel', 'panel-expanded');
+                        document.body.style.overflow = '';
                         detailContent.style.display = 'none';
                         emptyPanel.style.display = 'flex';
                     }
@@ -790,24 +819,32 @@
                     return url;
                 }
 
-                async function reloadMarketActivity() {
-                    if (marketLoading) return;
+                let refreshPending = false;
+                let resetPending = false;
+                async function reloadMarketActivity(reset = false) {
+                    if (marketLoading) { refreshPending = true; resetPending ||= reset; return; }
+                    if (document.hidden) { refreshPending = true; resetPending ||= reset; return; }
 
                     marketLoading = true;
                     try {
-                        const loadedRowCount = Math.max(20, events.length);
+                        const loadedRowCount = reset ? 20 : Math.max(20, marketLoadedPages * 20);
                         const response = await fetch(marketActivityUrl(1, loadedRowCount), {
                             headers: { 'Accept': 'application/json' },
                         });
                         if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
 
                         const payload = await response.json();
-                        replaceMarketActivityRows(payload.data);
-                        updateMarketLoader(payload.has_more, Math.floor(payload.data.length / 20) + 1);
+                        receiveMarketRows(payload);
+                        if (reset) marketLoadedPages = 1;
+                        updateMarketLoader(payload.has_more, marketLoadedPages + 1);
                     } catch (error) {
                         console.error('Market activity filter request failed:', error);
                     } finally {
                         marketLoading = false;
+                        if (refreshPending && !document.hidden) {
+                            const reset = resetPending; refreshPending = false; resetPending = false;
+                            reloadMarketActivity(reset);
+                        }
                     }
                 }
 
@@ -824,17 +861,18 @@
                         if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
 
                         const payload = await response.json();
-                        payload.data.forEach(function(ev) {
-                            const row = createEventRow(ev);
-                            if (row) eventsBody.appendChild(row);
-                        });
-                        events.push(...payload.data);
+                        receiveMarketRows(payload, true);
+                        marketLoadedPages++;
                         updateMarketLoader(payload.has_more, payload.next_page);
                     } catch (error) {
                         console.error('Market activity request failed:', error);
                         updateMarketLoader(marketHasMore, marketNextPage);
                     } finally {
                         marketLoading = false;
+                        if (refreshPending && !document.hidden) {
+                            const reset = resetPending; refreshPending = false; resetPending = false;
+                            reloadMarketActivity(reset);
+                        }
                     }
                 }
 
@@ -845,13 +883,13 @@
                         });
                         pill.classList.add('active');
                         activeFootballFilter = pill.dataset.filter || 'all';
-                        reloadMarketActivity();
+                        reloadMarketActivity(true);
                     });
                 });
 
                 marketSelect?.addEventListener('change', function() {
-                    activeMarketFilter = marketSelect.value || 'active';
-                    reloadMarketActivity();
+                    activeMarketFilter = marketSelect.value;
+                    reloadMarketActivity(true);
                 });
 
                 if (marketLazyLoader) {
@@ -865,35 +903,51 @@
                 window.addEventListener('load', function() {
                     if (!window.Echo) return;
 
-                    window.Echo.channel('sports.football.live')
+                    window.Echo.channel(@json('sports.'.$marketActivitySport.'.live'))
                         .listen('.score.updated', function() {
                             if (marketRealtimeRefreshTimer !== null) return;
 
                             marketRealtimeRefreshTimer = window.setTimeout(function() {
                                 marketRealtimeRefreshTimer = null;
                                 reloadMarketActivity();
-                            }, 500);
+                            }, SIM.tickInterval);
                         });
                 }, { once: true });
+
+                let availabilityTimer = null;
+                function scheduleAvailability() {
+                    window.clearTimeout(availabilityTimer);
+                    const future = events.filter(event => event.unlockAt && event.unlockAt * 1000 > Date.now());
+                    if (future.length) availabilityTimer = window.setTimeout(() => reloadMarketActivity(), Math.min(...future.map(event => event.unlockAt * 1000 - Date.now())) + 100);
+                }
+                scheduleAvailability();
+                document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadMarketActivity(); });
+                document.getElementById('speedBar').addEventListener('click', event => {
+                    const button = event.target.closest('[data-speed]');
+                    if (!button) return;
+                    SIM.tickInterval = Number(button.dataset.speed);
+                    SIM.isProMode = SIM.tickInterval === 140;
+                    document.querySelectorAll('#speedBar [data-speed]').forEach(item => item.classList.toggle('active', item === button));
+                });
 
                 eventsBody.addEventListener('click', function(e) {
                     if (!displayOdds) return;
 
                     const row = e.target.closest('tr[data-id]');
-                    if (row && eventsBody.contains(row)) openDetail(Number(row.dataset.id));
+                    if (row && eventsBody.contains(row)) openDetail(row.dataset.id);
                 });
 
                 function openDetail(id) {
                     if (!displayOdds) return;
 
                     const ev = events.find(function(e) {
-                        return e.id === id;
+                        return String(e.id) === String(id);
                     });
-                    if (!ev) return;
+                    if (!ev || ev.locked) return;
                     currentEventId = id;
 
                     document.querySelectorAll('.events-table tbody tr').forEach(function(r) {
-                        r.classList.toggle('selected', parseInt(r.dataset.id) === id);
+                        r.classList.toggle('selected', String(r.dataset.id) === String(id));
                     });
 
                     let totalBack = 0,
@@ -911,21 +965,21 @@
                         const isFav = idx === ev.favIdx;
                         runnersHtml += `
                     <div class="runner-row grid [grid-template-columns:1fr_auto_auto] [gap:10px] items-center [padding:10px_12px] bg-white [border:1px_solid_#e6eff8] [border-radius:10px] [font-size:12.5px] [transition:0.3s] dark:[background:#1a2a38] dark:[border-color:#2a3f50]">
-                        <div class="runner-name font-bold [color:#0b2a40] flex items-center [gap:5px] dark:[color:#e8edf2] [&_.fav-star]:[color:#e6b422] [&_.fav-star]:[font-size:13px]">${r.name}${isFav ? ' <span class="fav-star [color:#b8ccdf] [font-size:15px] cursor-pointer [background:none] border-0 [width:24px] [transition:0.2s] text-center dark:[color:#4a6a88] dark:[&.active-fav]:[color:#f5b342] [&.active-fav]:[color:#f5b342]">⭐</span>' : ''}</div>
-                        <div class="runner-back [background:#72bbef] [color:#0b2a40] [border:1px_solid_#4a9fd8] [border-radius:4px] [padding:5px_10px] font-extrabold text-center [min-width:70px] [font-variant-numeric:tabular-nums]">@if ($checkAuthAndSubscription['display_odds'])${r.back.toFixed(2)}@else@include('lock_icon')@endif<span class="runner-size [font-size:10px] [opacity:0.75] font-semibold block [margin-top:2px]">@if ($checkAuthAndSubscription['display_odds'])${fmtSize(r.backSize)}@else@include('lock_icon')@endif</span></div>
-                        <div class="runner-lay [background:#faa9ba] [color:#4a1520] [border:1px_solid_#e8889a] [border-radius:4px] [padding:5px_10px] font-extrabold text-center [min-width:70px] [font-variant-numeric:tabular-nums]">@if ($checkAuthAndSubscription['display_odds'])${r.lay.toFixed(2)}@else@include('lock_icon')@endif<span class="runner-size [font-size:10px] [opacity:0.75] font-semibold block [margin-top:2px]">@if ($checkAuthAndSubscription['display_odds'])${fmtSize(r.laySize)}@else@include('lock_icon')@endif</span></div>
+                        <div class="runner-name font-bold [color:#0b2a40] flex items-center [gap:5px] dark:[color:#e8edf2] [&_.fav-star]:[color:#e6b422] [&_.fav-star]:[font-size:13px]">${escapeHtml(r.name)}${isFav ? ' <span class="fav-star [color:#b8ccdf] [font-size:15px] cursor-pointer [background:none] border-0 [width:24px] [transition:0.2s] text-center dark:[color:#4a6a88] dark:[&.active-fav]:[color:#f5b342] [&.active-fav]:[color:#f5b342]">⭐</span>' : ''}</div>
+                        <div class="runner-back [background:#72bbef] [color:#0b2a40] [border:1px_solid_#4a9fd8] [border-radius:4px] [padding:5px_10px] font-extrabold text-center [min-width:70px] [font-variant-numeric:tabular-nums]">@if ($checkAuthAndSubscription['display_odds'])${r.back.toFixed(2)}@else @include('lock_icon') @endif<span class="runner-size [font-size:10px] [opacity:0.75] font-semibold block [margin-top:2px]">@if ($checkAuthAndSubscription['display_odds'])${fmtSize(r.backSize)}@else @include('lock_icon') @endif</span></div>
+                        <div class="runner-lay [background:#faa9ba] [color:#4a1520] [border:1px_solid_#e8889a] [border-radius:4px] [padding:5px_10px] font-extrabold text-center [min-width:70px] [font-variant-numeric:tabular-nums]">@if ($checkAuthAndSubscription['display_odds'])${r.lay.toFixed(2)}@else @include('lock_icon') @endif<span class="runner-size [font-size:10px] [opacity:0.75] font-semibold block [margin-top:2px]">@if ($checkAuthAndSubscription['display_odds'])${fmtSize(r.laySize)}@else @include('lock_icon') @endif</span></div>
                     </div>
                 `;
                     });
 
-                    let scoreHtml = ev.score ? `<span>· ${ev.score}</span>` : '';
+                    let scoreHtml = ev.score ? `<span>· ${escapeHtml(ev.score)}</span>` : '';
                     let metaHtml =
-                        `${ev.sportIcon} ${ev.comp} · ${ev.status === 'LIVE' ? '● LIVE' : '▲ UPCOMING'} · ${ev.time} ${scoreHtml}`;
+                        `${escapeHtml(ev.sportIcon)} ${escapeHtml(ev.comp)} · ${ev.status === 'LIVE' ? '● LIVE' : ev.status === 'FINISHED' ? 'FT' : '▲ UPCOMING'} · ${escapeHtml(ev.time)} ${scoreHtml}`;
 
                     detailContent.innerHTML = `
                         <div class="detail-header [background:linear-gradient(135deg,_#0b2a40,_#1a6b9c)] text-white [padding:10px_16px] [position:sticky] [top:0] [z-index:10] max-[480px]:[padding:8px_12px]">
                             <div class="detail-header-top flex items-center justify-between [gap:10px]">
-                                <div class="detail-title [font-size:14.5px] font-extrabold [flex:1] min-w-0 whitespace-nowrap overflow-hidden [text-overflow:ellipsis] max-[480px]:[font-size:13px]">${ev.match}</div>
+                                <div class="detail-title [font-size:14.5px] font-extrabold [flex:1] min-w-0 whitespace-nowrap overflow-hidden [text-overflow:ellipsis] max-[480px]:[font-size:13px]">${escapeHtml(ev.match)}</div>
                                 <div class="detail-header-actions flex [gap:6px] shrink-0">
                                     <button class="detail-action-btn [background:rgba(255,_255,_255,_0.15)] border-0 text-white [width:28px] [height:28px] [border-radius:50%] [font-size:13px] cursor-pointer flex items-center justify-center [transition:background_0.2s,_transform_0.2s] [font-family:inherit] [&:hover]:[background:rgba(255,_255,_255,_0.3)] [&:hover]:[transform:scale(1.08)] [&.expand-active]:[background:rgba(255,_255,_255,_0.35)]" id="expandBtn" title="Expand"><i class="fas fa-expand"></i></button>
                                     <button class="detail-action-btn [background:rgba(255,_255,_255,_0.15)] border-0 text-white [width:28px] [height:28px] [border-radius:50%] [font-size:13px] cursor-pointer flex items-center justify-center [transition:background_0.2s,_transform_0.2s] [font-family:inherit] [&:hover]:[background:rgba(255,_255,_255,_0.3)] [&:hover]:[transform:scale(1.08)] [&.expand-active]:[background:rgba(255,_255,_255,_0.35)]" onclick="closeDetail()" title="Close"><i class="fas fa-times"></i></button>
@@ -940,9 +994,10 @@
                             </div>
                             <div class="detail-section [margin-bottom:20px] [&:last-child]:[margin-bottom:0]">
                                 <div class="detail-section-title [font-size:11px] font-extrabold uppercase [letter-spacing:0.6px] [color:#1a6b9c] [margin-bottom:10px] flex items-center [gap:6px] dark:[color:#6aafdf]"><i class="fas fa-water"></i> Liquidity Distribution</div>
-                                <div class="liquidity-bar flex [height:26px] [border-radius:8px] overflow-hidden [font-size:11px] font-bold [margin-top:6px]">
-                                    <div class="liq-back [background:linear-gradient(135deg,_#1a6b9c,_#4a8ab5)] text-white flex items-center justify-start [padding-left:10px] [transition:width_0.6s_ease]" style="width:${backPct}%;">Back ${backPct.toFixed(0)}%</div>
-                                    <div class="liq-lay [background:linear-gradient(135deg,_#d44a6a,_#e0809a)] text-white flex items-center justify-end [padding-right:10px] [transition:width_0.6s_ease]" style="width:${layPct}%;">Lay ${layPct.toFixed(0)}%</div>
+                                <div class="liquidity-bar relative flex h-[26px] overflow-hidden rounded-lg text-[11px] font-bold mt-1.5" role="img" aria-label="Back ${backPct.toFixed(0)}%, Lay ${layPct.toFixed(0)}%">
+                                    <div class="liq-back min-w-0 shrink-0 [background:linear-gradient(135deg,_#1a6b9c,_#4a8ab5)] [transition:width_0.6s_ease]" style="width:${backPct}%;" aria-hidden="true"></div>
+                                    <div class="liq-lay min-w-0 shrink-0 [background:linear-gradient(135deg,_#d44a6a,_#e0809a)] [transition:width_0.6s_ease]" style="width:${layPct}%;" aria-hidden="true"></div>
+                                    <div class="pointer-events-none absolute inset-0 flex items-center justify-between gap-2 px-2.5 text-white whitespace-nowrap leading-none tabular-nums" aria-hidden="true"><span>Back ${backPct.toFixed(0)}%</span><span>Lay ${layPct.toFixed(0)}%</span></div>
                                 </div>
                             </div>
                             <div class="detail-section [margin-bottom:20px] [&:last-child]:[margin-bottom:0]">

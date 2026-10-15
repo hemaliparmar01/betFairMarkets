@@ -159,6 +159,7 @@ class FootballController extends Controller
         if (request()->expectsJson()) {
             return response()->json([
                 'data' => $marketActivites,
+                'html' => view('users.sports.football.marketActivity', compact('marketActivites', 'hasMore', 'nextPage'))->fragment('footballMarketRows'),
                 'has_more' => $hasMore,
                 'next_page' => $nextPage,
             ]);

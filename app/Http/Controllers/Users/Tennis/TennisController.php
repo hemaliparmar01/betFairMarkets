@@ -1,0 +1,153 @@
+<?php
+
+namespace App\Http\Controllers\Users\Tennis;
+
+use App\Http\Controllers\Controller;
+use App\Models\PredictionVote;
+use App\Traits\TennisTrait;
+use Illuminate\Contracts\View\View;
+use Illuminate\Http\JsonResponse;
+
+class TennisController extends Controller
+{
+    use TennisTrait;
+
+    public function tennis(): View
+    {
+        $data = $this->getTennisMatches();
+        $getAllMarkets = $this->getAllMarkets();
+        $hasMore = $this->tennisHasMore;
+        $nextPage = $this->tennisNextPage;
+
+        return view('users.sports.tennis.tennis', compact('data', 'getAllMarkets', 'hasMore', 'nextPage'));
+    }
+
+    public function marketActivity(): View|JsonResponse
+    {
+        $marketActivites = $this->getMarketActivites();
+        $getAllMarkets = $this->getAllMarkets();
+        $hasMore = $this->marketActivityHasMore;
+        $nextPage = $this->marketActivityNextPage;
+        if (request()->expectsJson()) {
+            return response()->json(['html' => view('users.sports.tennis.marketActivity', compact('marketActivites', 'getAllMarkets', 'hasMore', 'nextPage'))->fragment('tennisMarketRows'), 'has_more' => $hasMore, 'next_page' => $nextPage]);
+        }
+
+        return view('users.sports.tennis.marketActivity', compact('marketActivites', 'getAllMarkets', 'hasMore', 'nextPage'));
+    }
+
+    public function matchDetail(string $matchId): View
+    {
+        $match = $this->getTennisMatchDetail($matchId);
+        abort_if($match === null, 404);
+
+        return view('users.sports.tennis.matchDetail', compact('match'));
+    }
+
+    public function filterTennis(): JsonResponse
+    {
+        $prediction = request()->input('prediction');
+        if (is_array($prediction)) {
+            $customerId = request()->user('customers')?->getAuthIdentifier();
+            abort_if($customerId === null, 401, 'Please log in to submit predictions.');
+            $matchId = $prediction['match_id'] ?? null;
+            $poll = $prediction['poll'] ?? null;
+            $value = $prediction['value'] ?? null;
+            $allowedValues = [
+                '1x2' => ['1', '2'],
+            ];
+            $sessionKey = "tennis_predictions.{$customerId}.{$matchId}.{$poll}";
+
+            if ($matchId !== null && isset($allowedValues[$poll]) && in_array($value, $allowedValues[$poll], true) && ! request()->session()->has($sessionKey)) {
+                withRedisLock('Tennis:matches', function () use ($customerId, $matchId, $poll, $sessionKey, $value): void {
+                    $matches = getInRedis('Tennis:matches') ?? [];
+                    $matchKey = null;
+
+                    foreach ($matches as $key => $match) {
+                        if (
+                            ($match['data_sync_complete'] ?? false) !== true
+                            || ($match['sportsApiPro_match_id'] ?? null) != $matchId
+                            || ($match['result_status'] ?? null) !== 'Prematch'
+                        ) {
+                            continue;
+                        }
+
+                        $matchKey = $key;
+                        break;
+                    }
+
+                    if ($matchKey === null) {
+                        return;
+                    }
+
+                    $ownerQuery = PredictionVote::query()
+                        ->where('customer_id', $customerId)
+                        ->where('sport', 'tennis')
+                        ->where('match_id', (string) $matchId)
+                        ->where('poll', $poll);
+
+                    $storedValue = $ownerQuery->value('value');
+
+                    if ($storedValue !== null) {
+                        request()->session()->put($sessionKey, $storedValue);
+
+                        return;
+                    }
+
+                    $voteKey = hash('sha256', implode('|', [
+                        'user',
+                        $customerId,
+                        'tennis',
+                        $matchId,
+                        $poll,
+                    ]));
+                    $now = now();
+                    $inserted = PredictionVote::query()->insertOrIgnore([
+                        'vote_key' => $voteKey,
+                        'customer_id' => $customerId,
+                        'sport' => 'tennis',
+                        'match_id' => (string) $matchId,
+                        'poll' => $poll,
+                        'value' => $value,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ]);
+
+                    if ($inserted > 0) {
+                        $matches[$matchKey]['predictions'][$poll][$value] = (int) ($matches[$matchKey]['predictions'][$poll][$value] ?? 0) + 1;
+                        storeInRedis('Tennis:matches', $matches, 10);
+                        request()->session()->put($sessionKey, $value);
+                    } else {
+                        $storedValue = $ownerQuery->value('value');
+                        if ($storedValue !== null) {
+                            request()->session()->put($sessionKey, $storedValue);
+                        }
+                    }
+                });
+            }
+        }
+
+        $data = $this->getTennisMatches();
+
+        return response()->json([
+            'html' => view('users.sports.tennis.tennisDetails', [
+                'data' => $data,
+                'append' => request()->boolean('append'),
+            ])->render(),
+            'has_more' => $this->tennisHasMore,
+            'next_page' => $this->tennisNextPage,
+        ]);
+    }
+
+    public function websocketTennis(): JsonResponse
+    {
+        $data = $this->getTennisMatches();
+
+        return response()->json([
+            'html' => view('users.sports.tennis.tennisDetails', [
+                'data' => $data,
+            ])->render(),
+            'has_more' => $this->tennisHasMore,
+            'next_page' => $this->tennisNextPage,
+        ]);
+    }
+}

@@ -48,7 +48,7 @@
 </div> --}}
 <header class="top-bar flex flex-wrap items-center justify-between gap-3.5 border-b border-[#e3ecf5] pb-3.5 dark:[border-bottom-color:#2a3f50] [display:flex] [align-items:center] [justify-content:space-between] [flex-wrap:wrap] [padding-bottom:12px] [border-bottom:1px_solid_#e3ecf5] [transition:border-color_0.3s] [gap:14px] [padding-bottom:14px] max-[480px]:[align-items:center]">
     <div class="logo-area flex flex-col items-start [display:flex] [flex-direction:column] [align-items:flex-start] [gap:0]">
-        <a href="{{ route(request()->routeIs('cricket.*') ? 'cricket.home' : 'football.home') }}" class="flex flex-col items-start">
+        <a href="{{ route(request()->routeIs('horseracing.*') ? 'horseracing.home' : (request()->routeIs('greyhounds.*') ? 'greyhounds.home' : (request()->routeIs('tennis.*') ? 'tennis.home' : (request()->routeIs('basketball.*') ? 'basketball.home' : (request()->routeIs('baseball.*') ? 'baseball.home' : (request()->routeIs('americanfootball.*') ? 'americanfootball.home' : (request()->routeIs('icehockey.*') ? 'icehockey.home' : (request()->routeIs('cricket.*') ? 'cricket.home' : 'football.home')))))))) }}" class="flex flex-col items-start">
             <img src="{{ url('logo.png') }}" class="h-auto max-w-full w-[250px] max-[480px]:w-[190px]" alt="" srcset="">
         </a>
     </div>
@@ -87,7 +87,7 @@
     </div>
 </header>
 <div id="navLinks" class="hidden flex-wrap !p-[12px] items-center gap-3 border-b border-[#e3ecf5] p-3 text-[15px] font-medium lg:flex max-[480px]:!px-0 [&>a:nth-child(-n+3)]:max-[480px]:min-w-0 [&>a:nth-child(-n+3)]:max-[480px]:w-full [&>a]:max-[480px]:break-words max-[480px]:gap-2">
-    <a href="{{ route(request()->routeIs('cricket.*') ? 'cricket.home' : 'football.home') }}" @class(['group flex min-w-[190px] items-center gap-3 rounded-lg border bg-white !p-[8px] transition duration-200','border-[#d7e4f2] hover:border-[#1687d9] hover:shadow-sm','border-l-[3px] !border-l-[#1687d9] shadow-sm' => request()->routeIs('football.home', 'cricket.home')])>
+    <a href="{{ route(request()->routeIs('horseracing.*') ? 'horseracing.home' : (request()->routeIs('greyhounds.*') ? 'greyhounds.home' : (request()->routeIs('tennis.*') ? 'tennis.home' : (request()->routeIs('basketball.*') ? 'basketball.home' : (request()->routeIs('baseball.*') ? 'baseball.home' : (request()->routeIs('americanfootball.*') ? 'americanfootball.home' : (request()->routeIs('icehockey.*') ? 'icehockey.home' : (request()->routeIs('cricket.*') ? 'cricket.home' : 'football.home')))))))) }}" @class(['group flex min-w-[190px] items-center gap-3 rounded-lg border bg-white !p-[8px] transition duration-200','border-[#d7e4f2] hover:border-[#1687d9] hover:shadow-sm','border-l-[3px] !border-l-[#1687d9] shadow-sm' => request()->routeIs('football.home', 'cricket.home', 'icehockey.home', 'americanfootball.home', 'baseball.home', 'basketball.home', 'tennis.home', 'greyhounds.home', 'horseracing.home')])>
         <span class="flex size-10 shrink-0 items-center justify-center rounded-md bg-[#eaf4ff] text-[#1687d9]">
             <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M8 2v3M16 2v3M3 9h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/>
@@ -103,7 +103,7 @@
         </span>
     </a>
 
-    <a href="{{ route(request()->routeIs('cricket.*') ? 'cricket.market-activity' : 'football.market-activity') }}" @class(['group flex min-w-[190px] items-center gap-3 rounded-lg border bg-white !p-[8px]  transition duration-200','border-[#d7e4f2] hover:border-[#e7b629] hover:shadow-sm','border-l-[3px] !border-l-[#e7b629] shadow-sm' => request()->routeIs('football.market-activity', 'cricket.market-activity')])>
+    <a href="{{ route(request()->routeIs('horseracing.*') ? 'horseracing.market-activity' : (request()->routeIs('greyhounds.*') ? 'greyhounds.market-activity' : (request()->routeIs('tennis.*') ? 'tennis.market-activity' : (request()->routeIs('basketball.*') ? 'basketball.market-activity' : (request()->routeIs('baseball.*') ? 'baseball.market-activity' : (request()->routeIs('americanfootball.*') ? 'americanfootball.market-activity' : (request()->routeIs('icehockey.*') ? 'icehockey.market-activity' : (request()->routeIs('cricket.*') ? 'cricket.market-activity' : 'football.market-activity')))))))) }}" @class(['group flex min-w-[190px] items-center gap-3 rounded-lg border bg-white !p-[8px]  transition duration-200','border-[#d7e4f2] hover:border-[#e7b629] hover:shadow-sm','border-l-[3px] !border-l-[#e7b629] shadow-sm' => request()->routeIs('football.market-activity', 'cricket.market-activity', 'icehockey.market-activity', 'americanfootball.market-activity', 'baseball.market-activity', 'basketball.market-activity', 'tennis.market-activity', 'greyhounds.market-activity', 'horseracing.market-activity')])>
         <span class="flex size-10 shrink-0 items-center justify-center rounded-md bg-[#fff6d9] text-[#e7a900]">
             <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M2 12h4l2.5-7 4 14 3-10 2 3H22"/>
