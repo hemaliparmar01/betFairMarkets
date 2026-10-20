@@ -170,3 +170,4 @@
         });
     })();
 </script>
+@include('popup', ['premiumGate' => true])

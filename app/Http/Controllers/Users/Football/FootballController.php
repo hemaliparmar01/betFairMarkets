@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Users\Football;
 use App\Http\Controllers\Controller;
 use App\Models\PredictionVote;
 use App\Traits\FootballTrait;
+use Illuminate\Contracts\View\View;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
 
 class FootballController extends Controller
@@ -21,8 +23,21 @@ class FootballController extends Controller
         return view('users.sports.football.football', compact('data', 'getAllMarkets', 'hasMore', 'nextPage'));
     }
 
-    public function marketActivity()
+    public function marketActivity(): View|JsonResponse
     {
+        $checkAuthAndSubscription = checkAuthAndSubscription();
+        if (! $checkAuthAndSubscription['display_odds']) {
+            if (request()->expectsJson()) {
+                return response()->json([
+                    'message' => __('Register and activate your 7-day free trial (first-time users), or purchase a paid subscription to access Market Activity and Pinnacle Drops.'),
+                    'access_required' => true,
+                    'data' => [],
+                ], 403);
+            }
+
+            return view('users.sports.football.marketActivity', compact('checkAuthAndSubscription'));
+        }
+
         if (request()->routeIs('football.pinnacle-odds')) {
             $pinnaclePayload = getInRedis('Pinnacle:drops');
             $pinnacleAlerts = $pinnaclePayload ?? [];

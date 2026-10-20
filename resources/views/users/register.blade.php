@@ -38,7 +38,7 @@
             <div>
                 <span class="text-xs font-extrabold uppercase tracking-[0.22em] text-[#1a6b9c] dark:text-[#79bde8]">Customer Register</span>
                 <h1 class="mt-3 text-3xl font-extrabold tracking-tight text-[#0b2a40] sm:text-4xl dark:text-white">Start your BF Markets access</h1>
-                <p class="mt-3 max-w-3xl text-sm leading-6 text-[#5a7d99] sm:text-base dark:text-[#a9bfd0]">Register to access live Betfair market monitoring, liquidity insights, and advanced filters built for active users.</p>
+                <p class="mt-3 max-w-3xl text-sm leading-6 text-[#5a7d99] sm:text-base dark:text-[#a9bfd0]">Access real-time sports market activity, Pinnacle odds drop signals, advanced filters, and powerful tools for monitoring sports exchange markets.</p>
             </div>
 
             <div class="mt-7 flex items-start gap-4 rounded-2xl border border-[#bfdaed] bg-gradient-to-r from-[#edf6fc] to-[#f7fbfe] p-4 sm:p-5 dark:border-[#36576f] dark:from-[#162d3d] dark:to-[#1f3444]">

@@ -12,8 +12,12 @@ class GreyhoundsController extends Controller
 {
     use GreyhoundsTrait;
 
-    public function greyhounds(): View
+    public function greyhounds(): View|JsonResponse
     {
+        if (! checkAuthAndSubscription()['display_odds']) {
+            return $this->marketActivity();
+        }
+
         $data = $this->getGreyhoundsMatches();
         $hasMore = $this->greyhoundsHasMore;
         $nextPage = $this->greyhoundsNextPage;
@@ -23,6 +27,19 @@ class GreyhoundsController extends Controller
 
     public function marketActivity(): View|JsonResponse
     {
+        $checkAuthAndSubscription = checkAuthAndSubscription();
+        if (! $checkAuthAndSubscription['display_odds']) {
+            if (request()->expectsJson()) {
+                return response()->json([
+                    'message' => __('Register and activate your 7-day free trial (first-time users), or purchase a paid subscription to access Market Activity and Pinnacle Drops.'),
+                    'access_required' => true,
+                    'data' => [],
+                ], 403);
+            }
+
+            return view('users.sports.greyhounds.marketActivity', compact('checkAuthAndSubscription'));
+        }
+
         $marketActivites = $this->getMarketActivites();
         $hasMore = $this->greyhoundsHasMore;
         $nextPage = $this->greyhoundsNextPage;
@@ -35,6 +52,10 @@ class GreyhoundsController extends Controller
 
     public function matchDetail(string $matchId): View|JsonResponse
     {
+        if (! checkAuthAndSubscription()['display_odds']) {
+            return $this->marketActivity();
+        }
+
         $match = $this->getGreyhoundsMatchDetail($matchId);
         abort_if($match === null, 404);
 
@@ -64,6 +85,8 @@ class GreyhoundsController extends Controller
 
     public function filterGreyhounds(): JsonResponse
     {
+        abort_unless(checkAuthAndSubscription()['display_odds'], 403, __('Registration and an active 7-day free trial or paid subscription are required to access Horse Racing and Greyhounds.'));
+
         $prediction = request()->input('prediction');
         if (is_array($prediction)) {
             $customerId = request()->user('customers')?->getAuthIdentifier();
@@ -165,6 +188,8 @@ class GreyhoundsController extends Controller
 
     public function websocketGreyhounds(): JsonResponse
     {
+        abort_unless(checkAuthAndSubscription()['display_odds'], 403, __('Registration and an active 7-day free trial or paid subscription are required to access Horse Racing and Greyhounds.'));
+
         $data = $this->getGreyhoundsMatches();
 
         return response()->json([

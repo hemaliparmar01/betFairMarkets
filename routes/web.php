@@ -180,3 +180,4 @@ Route::get('faq', [StaticPageController::class, 'faq'])->name('faq');
 Route::get('manifesto', [StaticPageController::class, 'manifesto'])->name('manifesto');
 Route::get('filter-guide', [StaticPageController::class, 'filterGuide'])->name('filter-guide');
 Route::get('market-activity-guide', [StaticPageController::class, 'marketActivityGuide'])->name('market-activity-guide');
+Route::get('pinnacle-odds-drops-guide', [StaticPageController::class, 'pinnacleOddsDropsGuide'])->name('pinnacle-odds-drops-guide');

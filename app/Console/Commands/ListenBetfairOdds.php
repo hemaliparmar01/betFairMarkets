@@ -90,9 +90,11 @@ class ListenBetfairOdds extends Command
             $socket = null;
             $flushTimer = null;
             $nextFlushAt = 0.0;
+            $connectedAt = null;
 
             try {
                 $socket = connect(new WebsocketHandshake('wss://betfair-odds.com/betfair/v1/stream'));
+                $connectedAt = microtime(true);
                 $books = ['live' => [], 'prematch' => [], 'greyhounds' => [], 'horse_prematch' => []];
                 $snapshotStarted = ['live' => false, 'prematch' => false, 'greyhounds' => false, 'horse_prematch' => false];
                 $snapshotChanges = ['live' => [], 'prematch' => [], 'greyhounds' => [], 'horse_prematch' => []];
@@ -114,7 +116,6 @@ class ListenBetfairOdds extends Command
                     $type = $frame['type'] ?? null;
 
                     if ($type === 'authenticated') {
-                        $backoff = 1;
                         if (($frame['ws_addon'] ?? false) !== true) {
                             throw new \RuntimeException('Betfair WebSocket add-on is inactive.');
                         }
@@ -301,7 +302,13 @@ class ListenBetfairOdds extends Command
                 }
             } catch (Throwable $e) {
                 $isDuplicateConnection = str_contains($e->getMessage(), 'duplicate WebSocket connection');
-                Log::log($isDuplicateConnection ? 'warning' : 'error', 'Betfair Odds WebSocket disconnected', [
+                $isAddonInactive = $e->getMessage() === 'Betfair WebSocket add-on is inactive.';
+                if ($isAddonInactive) {
+                    $backoff = 300;
+                } elseif ($connectedAt !== null && microtime(true) - $connectedAt >= 60) {
+                    $backoff = 1;
+                }
+                Log::log($isDuplicateConnection || $isAddonInactive ? 'warning' : 'error', 'Betfair Odds WebSocket disconnected', [
                     'message' => $e->getMessage(),
                     'retry_in_seconds' => $backoff,
                 ]);

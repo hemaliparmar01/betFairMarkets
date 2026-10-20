@@ -13,6 +13,18 @@ window.Echo = new Echo({
     enabledTransports: ['ws', 'wss'],
 });
 
+const realtimeClient = window.Echo.connector.pusher;
+
+window.addEventListener('pagehide', () => {
+    realtimeClient.disconnect();
+});
+
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+        realtimeClient.connect();
+    }
+});
+
 const themeToggle = document.getElementById('themeToggle');
 const themeIcon = themeToggle.querySelector('i');
 if (localStorage.getItem('bf-markets-theme') === 'dark') {

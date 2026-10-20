@@ -14,7 +14,23 @@
             <button type="button" data-action="favorite" data-requires-login="{{ auth('customers')->check() ? 'false' : 'true' }}" data-login-url="{{ route('login') }}" data-sport="greyhounds" data-event-key="{{ $race['unique_key'] }}" data-event-id="{{ $race['id'] }}" data-team1="{{ $race['team1'] }}" data-team2="{{ $race['team2'] }}" data-start-timestamp="{{ $race['timestamp'] }}" aria-pressed="{{ $race['is_favorite'] ? 'true' : 'false' }}" @class(['fav-star cursor-pointer text-lg text-[#b8ccdf]', '!text-[#e6b422]' => $race['is_favorite']])><i class="fas fa-star"></i></button>
             <span class="whitespace-nowrap text-center text-xs font-semibold text-[#5a7d99]">{{ $race['minutes'] }}</span>
             <button type="button" data-action="open-match" class="text-center text-sm font-bold">{{ $race['team1'] }} · {{ $race['team2'] }} @if ($race['details_available'])<span class="text-amber-500" title="{{ $race['favorite_runner']['runner'] ?? '' }}">⭐</span>@endif</button>
-            <div class="flex justify-center gap-3"><button type="button" data-action="market" title="{{ __('Runners and liquidity') }}" class="text-[#46799a]"><i class="fas fa-chart-bar"></i></button><button type="button" data-action="chart" title="{{ __('Chart') }}" class="text-[#46799a]"><i class="fas fa-chart-line"></i></button><button type="button" data-action="prediction" data-requires-login="{{ auth('customers')->check() ? 'false' : 'true' }}" data-login-url="{{ route('login') }}" title="{{ __('Predictions') }}" class="text-[#46799a]"><i class="fas fa-brain"></i></button></div>
+            <div class="flex justify-center gap-3">
+                <button type="button" class="cursor-pointer text-[#46799a] disabled:cursor-not-allowed disabled:opacity-30"
+                    @if ($checkAuthAndSubscription['display_odds'])
+                        data-action="market" title="{{ __('Runners and liquidity') }}"
+                    @else
+                        disabled title="{{ __('Statistics (requires subscription)') }}"
+                    @endif
+                    ><i class="fas fa-chart-bar"></i></button>
+                <button type="button" data-action="chart" title="{{ __('Chart') }}" class="text-[#46799a]"><i class="fas fa-chart-line"></i></button>
+                <button type="button" class="cursor-pointer text-[#46799a] disabled:cursor-not-allowed disabled:opacity-30"
+                    @if ($checkAuthAndSubscription['display_odds'])
+                        data-action="prediction" data-requires-login="{{ auth('customers')->check() ? 'false' : 'true' }}" data-login-url="{{ route('login') }}" title="{{ __('Predictions') }}"
+                    @else
+                        disabled title="{{ __('Prediction (requires subscription)') }}"
+                    @endif
+                    @disabled($race['status'] !== 'Prematch' || $prediction['locked'])><i class="fas fa-brain"></i></button>
+            </div>
             <div class="flex gap-2">
                 @if (! $race['details_available'])<span class="w-full text-center text-xs text-[#5a7d99]">{{ __('Details and odds open 5 minutes before start') }}</span>@else
                 @foreach (array_pad($viewRunners, 3, []) as $runner)

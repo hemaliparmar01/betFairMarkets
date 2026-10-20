@@ -3,39 +3,51 @@
 namespace App\Http\Controllers\Users;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 
 class StaticPageController extends Controller
 {
-    public function disclaimer() {
+    public function disclaimer()
+    {
         return view('users.staticPages.disclaimer');
     }
 
-    public function privacyPolicy() {
+    public function privacyPolicy()
+    {
         return view('users.staticPages.privacyPolicy');
     }
 
-    public function termsOfService() {
+    public function termsOfService()
+    {
         return view('users.staticPages.termsOfService');
     }
 
-    public function refundPolicy() {
+    public function refundPolicy()
+    {
         return view('users.staticPages.refundPolicy');
     }
 
-    public function faq() {
+    public function faq()
+    {
         return view('users.staticPages.faq');
     }
 
-    public function manifesto() {
+    public function manifesto()
+    {
         return view('users.staticPages.manifesto');
     }
 
-    public function filterGuide() {
+    public function filterGuide()
+    {
         return view('users.staticPages.filterGuide');
     }
 
-    public function marketActivityGuide() {
+    public function marketActivityGuide()
+    {
         return view('users.staticPages.marketActivityGuide');
+    }
+
+    public function pinnacleOddsDropsGuide()
+    {
+        return view('users.staticPages.pinnacleOddsDropsGuide');
     }
 }

@@ -24,6 +24,19 @@ class IceHockeyController extends Controller
 
     public function marketActivity(): View|JsonResponse
     {
+        $checkAuthAndSubscription = checkAuthAndSubscription();
+        if (! $checkAuthAndSubscription['display_odds']) {
+            if (request()->expectsJson()) {
+                return response()->json([
+                    'message' => __('Register and activate your 7-day free trial (first-time users), or purchase a paid subscription to access Market Activity and Pinnacle Drops.'),
+                    'access_required' => true,
+                    'data' => [],
+                ], 403);
+            }
+
+            return view('users.sports.icehockey.marketActivity', compact('checkAuthAndSubscription'));
+        }
+
         $marketActivites = $this->getMarketActivites();
         $getAllMarkets = $this->getAllMarkets();
         $hasMore = $this->marketActivityHasMore;

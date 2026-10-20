@@ -1,6 +1,8 @@
 <?php
 
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 
@@ -88,6 +90,111 @@ if (! function_exists('ApiCall')) {
         } finally {
             curl_close($ch);
         }
+    }
+}
+
+if (! function_exists('getSportsApiProImage')) {
+    function getSportsApiProImage(string $sport, string $type, mixed $entityId): ?string
+    {
+        $sports = [
+            'football' => ['football', 'Football'],
+            'cricket' => ['cricket', 'Cricket'],
+            'icehockey' => ['hockey', 'IceHockey'],
+            'americanfootball' => ['american-football', 'AmericanFootball'],
+            'baseball' => ['baseball', 'Baseball'],
+            'basketball' => ['basketball', 'Basketball'],
+            'tennis' => ['tennis', 'Tennis'],
+        ];
+        if (! isset($sports[$sport]) || ! in_array($type, ['teams', 'tournaments'], true) || ! is_numeric($entityId) || (int) $entityId <= 0) {
+            return null;
+        }
+
+        $entityId = (int) $entityId;
+        $directory = "images/{$sport}/{$type}";
+        $images = glob(public_path("{$directory}/{$entityId}.*"));
+        if ($images && File::isFile($images[0])) {
+            return '/'.$directory.'/'.basename($images[0]);
+        }
+
+        $lockName = "SportsAPIPro:image-pending:{$sport}:{$type}:{$entityId}";
+        $missingKey = "SportsAPIPro:image-unavailable:{$sport}:{$type}:{$entityId}";
+        $pendingLock = null;
+        try {
+            if (Cache::store('redis')->has($missingKey)) {
+                return null;
+            }
+            $pendingLock = Cache::store('redis')->lock($lockName, 3600);
+            if (! $pendingLock->get()) {
+                return null;
+            }
+            $owner = $pendingLock->owner();
+            [$apiSport, $prefix] = $sports[$sport];
+            dispatch(static function () use ($sport, $type, $entityId, $directory, $lockName, $missingKey, $owner, $apiSport, $prefix): void {
+                $lock = Cache::store('redis')->restoreLock($lockName, $owner);
+                try {
+                    if (! $lock->isOwnedByCurrentProcess()) {
+                        return;
+                    }
+                    $images = glob(public_path("{$directory}/{$entityId}.*"));
+                    if (! $images || ! File::isFile($images[0])) {
+                        $response = ApiCall("https://api.sportsapipro.com/v2/{$apiSport}/images/{$type}/{$entityId}", [
+                            'x-api-key' => GetSportApiProKey(),
+                            'Accept' => 'image/png,image/jpeg,image/webp,image/gif',
+                        ], ['connect_timeout' => 3, 'timeout' => 10, 'raw_response' => true, 'follow_redirects' => true]);
+                        $contentType = strtolower(trim(explode(';', $response['content_type'])[0]));
+                        $extension = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp', 'image/gif' => 'gif'][$contentType] ?? null;
+                        if (! $response['successful'] || $extension === null || $response['body'] === '' || strlen($response['body']) > 5_000_000) {
+                            Cache::store('redis')->put($missingKey, true, in_array($response['status'], [404, 410], true) ? 21600 : 300);
+
+                            return;
+                        }
+                        File::ensureDirectoryExists(public_path($directory));
+                        File::replace(public_path("{$directory}/{$entityId}.{$extension}"), $response['body']);
+                        $images = [public_path("{$directory}/{$entityId}.{$extension}")];
+                    }
+                    $imagePath = '/'.$directory.'/'.basename($images[0]);
+                    $cacheKey = $prefix.':matches';
+                    $updated = withRedisLock($cacheKey, static function () use ($cacheKey, $type, $entityId, $imagePath, $sport): bool {
+                        $matches = getInRedis($cacheKey) ?? [];
+                        $updated = false;
+                        $fields = $type === 'teams'
+                            ? ['home_team_logo' => 'home_team_id', 'away_team_logo' => 'away_team_id']
+                            : ['tournament_logo' => in_array($sport, ['football', 'cricket'], true) ? 'tournament_id' : 'tournament_image_id'];
+                        foreach ($matches as &$match) {
+                            foreach ($fields as $field => $idField) {
+                                if ((int) ($match[$idField] ?? 0) === $entityId && ($match[$field] ?? null) !== $imagePath) {
+                                    $match[$field] = $imagePath;
+                                    $updated = true;
+                                }
+                            }
+                        }
+                        unset($match);
+                        if ($updated) {
+                            storeInRedis($cacheKey, $matches);
+                        }
+
+                        return $updated;
+                    }, 2);
+                    if ($updated) {
+                        $eventClass = 'App\\Events\\'.$prefix.'SportsScoreUpdated';
+                        Event::dispatch(new $eventClass);
+                    }
+                } catch (Throwable $e) {
+                    Cache::store('redis')->put($missingKey, true, 300);
+                    Log::warning('SportsAPI Pro background image failed', ['sport' => $sport, 'type' => $type, 'entity_id' => $entityId, 'exception' => $e::class]);
+                } finally {
+                    $lock->release();
+                }
+            })->onQueue('sports-images')->catch(static function (Throwable $e) use ($lockName, $owner, $missingKey): void {
+                Cache::store('redis')->restoreLock($lockName, $owner)->release();
+                Cache::store('redis')->put($missingKey, true, 300);
+            });
+        } catch (Throwable $e) {
+            $pendingLock?->release();
+            Log::warning('SportsAPI Pro image could not be queued', ['sport' => $sport, 'type' => $type, 'entity_id' => $entityId, 'exception' => $e::class]);
+        }
+
+        return null;
     }
 }
 

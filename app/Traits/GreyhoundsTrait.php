@@ -15,6 +15,11 @@ trait GreyhoundsTrait
 
     public function getGreyhoundsMatches(bool $grouped = true): array
     {
+        if (in_array(request()->input('type'), ['ht00', '00_70', 'fav_losing', 'prematch_drops', 'market_shock', 'fav_not_winning'], true)) {
+            $checkAuthAndSubscription = checkAuthAndSubscription();
+            abort_unless($checkAuthAndSubscription['display_odds'], 403, __('An active 7-day free trial or paid subscription is required to use smart filters.'));
+        }
+
         $customerId = request()->user('customers')?->getAuthIdentifier();
         $favorites = $customerId === null ? [] : array_fill_keys(Favorite::query()->where('sport', 'greyhounds')->where('customer_id', $customerId)->pluck('event_key')->all(), true);
         $today = Carbon::now(getCurrentUserTimezone())->toDateString();
@@ -39,7 +44,7 @@ trait GreyhoundsTrait
                 default => true,
             };
         }));
-        usort($matches, static fn (array $first, array $second): int => strcasecmp($first['country'], $second['country'])
+        usort($matches, static fn (array $first, array $second): int => ($type === 'by_time' ? 0 : strcasecmp($first['country'], $second['country']))
             ?: ($first['timestamp'] <=> $second['timestamp'])
             ?: strcmp((string) $first['betfair_match_id'], (string) $second['betfair_match_id']));
         $page = max(1, request()->integer('page', 1));
@@ -79,6 +84,9 @@ trait GreyhoundsTrait
                 $match['prediction_vote'] = null;
             }
             $key = $match['country'];
+            if ($type === 'by_time') {
+                $key .= '|'.$match['timestamp'];
+            }
             $groups[$key] ??= ['country' => $match['country'], 'matches' => []];
             $groups[$key]['matches'][] = $match;
             $preparedMatches[] = $match;

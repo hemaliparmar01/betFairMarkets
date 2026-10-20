@@ -4,7 +4,16 @@
 @section('title', request()->routeIs('football.pinnacle-odds') ? 'Pinnacle Odds · BF Markets' : 'Market Activity Terminal · BF Markets')
 
 @section('content')
-@if (request()->routeIs('football.pinnacle-odds'))
+@php $checkAuthAndSubscription = $checkAuthAndSubscription ?? checkAuthAndSubscription(); @endphp
+@if (! $checkAuthAndSubscription['display_odds'])
+    @include('users.layout.sports')
+    <section class="my-8 rounded-2xl border border-[#d7e4f2] bg-[#f5f9fd] p-6 text-center dark:border-[#3a5568] dark:bg-[#1f3444]" aria-labelledby="premiumHeading">
+        <i class="fas fa-lock mb-3 text-2xl text-[#1a6b9c]" aria-hidden="true"></i>
+        <h1 id="premiumHeading" class="text-xl font-bold text-[#0b2a40] dark:text-[#e8edf2]">{{ __('Registration and subscription required') }}</h1>
+        <p class="mx-auto mt-3 max-w-xl text-sm text-[#5a7d99] dark:text-[#b0c8dd]">{{ __('Register and activate your 7-day free trial (first-time users), or purchase a paid subscription to access Market Activity, Pinnacle Drops, Horse Racing and Greyhounds.') }}</p>
+        <button type="button" data-premium-required class="mt-5 cursor-pointer rounded-xl bg-[#0b2a40] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#1a6b9c] dark:bg-[#4a8ab5]">{{ __('View access options') }}</button>
+    </section>
+@elseif (request()->routeIs('football.pinnacle-odds'))
     <section id="pinnacleDashboard" class="my-5 min-w-0" data-source-url="{{ route('football.pinnacle-odds') }}">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>

@@ -1,5 +1,46 @@
 @php $checkAuthAndSubscription = checkAuthAndSubscription(); @endphp
-@if ($checkAuthAndSubscription['is_authenticated'] === false || $checkAuthAndSubscription['has_active_subscription'] === false)
+@if ($premiumGate ?? false)
+    @if (! $checkAuthAndSubscription['display_odds'])
+        @php
+            $premiumRoutes = [
+                'football.market-activity', 'cricket.market-activity', 'icehockey.market-activity',
+                'americanfootball.market-activity', 'baseball.market-activity', 'basketball.market-activity',
+                'tennis.market-activity', 'greyhounds.market-activity', 'horseracing.market-activity',
+                'football.pinnacle-odds', 'horseracing.home', 'greyhounds.home',
+            ];
+            $restrictedPremiumUrls = array_map(static fn (string $name): string => route($name), $premiumRoutes);
+        @endphp
+        <dialog id="premiumAccess" aria-labelledby="premiumAccessTitle" aria-describedby="premiumAccessMessage"
+            class="fixed inset-0 m-auto max-h-[calc(100dvh_-_2rem)] w-[calc(100%_-_2rem)] max-w-md overflow-y-auto rounded-2xl border-0 bg-white p-6 text-[#0b2a40] shadow-xl backdrop:bg-black/60 dark:bg-[#1a2a38] dark:text-[#e8edf2]">
+            <form method="dialog" class="absolute right-3 top-3">
+                <button type="submit" autofocus aria-label="{{ __('Close') }}" class="flex size-9 cursor-pointer items-center justify-center rounded-full text-xl text-[#5a7d99] hover:bg-[#edf6fc] dark:text-[#b0c8dd] dark:hover:bg-[#29465b]">&times;</button>
+            </form>
+            <i class="fas fa-lock mb-3 text-2xl text-[#1a6b9c]" aria-hidden="true"></i>
+            <h2 id="premiumAccessTitle" class="pr-8 text-lg font-bold">{{ __('Registration and subscription required') }}</h2>
+            <p id="premiumAccessMessage" class="mt-3 text-sm leading-relaxed text-[#5a7d99] dark:text-[#b0c8dd]">{{ __('Register and activate your 7-day free trial (first-time users), or purchase a paid subscription to access Market Activity, Pinnacle Drops, Horse Racing and Greyhounds.') }}</p>
+            <div class="mt-5 flex flex-wrap gap-2">
+                <a href="{{ route('register') }}" class="rounded-xl bg-[#0b2a40] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1a6b9c] dark:bg-[#4a8ab5]">{{ __('Register · 7-day free trial') }}</a>
+                <a href="{{ route('subscriptions') }}" class="rounded-xl border border-[#d4e0ec] px-4 py-2 text-sm font-semibold text-[#1f4b66] hover:bg-[#edf6fc] dark:border-[#3a5568] dark:text-[#b0c8dd] dark:hover:bg-[#29465b]">{{ __('View subscriptions') }}</a>
+                <a href="{{ route('login') }}" class="px-3 py-2 text-sm font-semibold text-[#1a6b9c] underline dark:text-[#8aaccc]">{{ __('Log in') }}</a>
+            </div>
+        </dialog>
+        <script>
+            (() => {
+                const dialog = document.getElementById('premiumAccess');
+                const restrictedUrls = @json($restrictedPremiumUrls);
+                document.addEventListener('click', (event) => {
+                    const link = event.target.closest('a[href]');
+                    if (!event.target.closest('[data-premium-required]') && !restrictedUrls.includes(link?.href)) return;
+                    event.preventDefault();
+                    if (!dialog.open) dialog.showModal();
+                });
+                @if (request()->routeIs(...$premiumRoutes) || request()->routeIs('horseracing.matches.show', 'greyhounds.matches.show'))
+                    dialog.showModal();
+                @endif
+            })();
+        </script>
+    @endif
+@elseif ($checkAuthAndSubscription['is_authenticated'] === false || $checkAuthAndSubscription['has_active_subscription'] === false)
     <!DOCTYPE html>
     <html>
 

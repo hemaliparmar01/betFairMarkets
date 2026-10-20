@@ -61,6 +61,10 @@ if (dashboard) {
         refreshTimer = window.setTimeout(() => { refreshTimer = null; load(); }, refreshInterval);
     }
     async function load({ append = false, reset = false, prediction = null } = {}) {
+        if (reset && !markets) {
+            content()?.classList.add('fixtures-loading');
+            content()?.setAttribute('aria-busy', 'true');
+        }
         if (loading) { if (reset || prediction) pendingAction = { reset, prediction }; else if (!append) refreshPending = true; return; }
         if (document.visibilityState !== 'visible' && !reset && !prediction) { refreshPending = true; return; }
         if (append && loader()?.dataset.hasMore !== 'true') return;
@@ -130,6 +134,8 @@ if (dashboard) {
         } catch (error) { showError(error.message); }
         finally {
             loading = false;
+            content()?.classList.remove('fixtures-loading');
+            content()?.removeAttribute('aria-busy');
             const text = loader()?.querySelector('[data-lazy-loader-text]');
             if (text) text.textContent = '↓ Scroll for more races ↓';
             if (pendingAction) { const action = pendingAction; pendingAction = null; load(action); } else if (refreshPending && document.visibilityState === 'visible') { refreshPending = false; scheduleRefresh(); }

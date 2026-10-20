@@ -1,4 +1,8 @@
-@php $customerIsAuthenticated = auth('customers')->check(); @endphp
+@php
+    $customerIsAuthenticated = auth('customers')->check();
+    $checkAuthAndSubscription = $checkAuthAndSubscription ?? checkAuthAndSubscription();
+    $data = array_filter($data, static fn (array $group): bool => ! empty($group['matches']));
+@endphp
 @unless ($append ?? false)
     <div class="fixtures-container flex min-w-0 flex-col space-y-2 [gap:4px] [margin-top:4px]" id="fixturesContainer">
     @endunless
@@ -15,7 +19,7 @@
                     <img src="{{ $matches['tournament_logo'] }}" alt="" width="18" height="18" loading="lazy"
                         decoding="async" onerror="this.remove()" class="h-[18px] w-[18px] shrink-0 object-contain">
                 @endif
-                <span>{{ $matches['tournament_name'] }} · {{ $matches['status'] }}</span>
+                <span>{{ $matches['tournament_name'] }}</span>
             </span>
         </div>
         @foreach ($matches['matches'] as $event)
@@ -133,6 +137,7 @@
                     @endphp
                     <div
                         class="team-score-group grid min-w-0 flex-1 grid-cols-[28px_28px_28px_minmax(0,180px)_44px_minmax(0,180px)_28px_28px_28px] items-center justify-center gap-x-0.5 overflow-hidden whitespace-nowrap font-semibold text-[15px] text-[#0b2a40] max-[768px]:grid-cols-[24px_24px_24px_minmax(0,1fr)_40px_minmax(0,1fr)_24px_24px_24px] max-[480px]:text-[12px]">
+                        @if ($checkAuthAndSubscription['display_odds'])
                         <span
                             class="text-center text-xs text-[#48708d] max-[480px]:text-[10px] {{ ($event['corners']['home'] ?? 0) > 0 ? '' : 'invisible' }}"
                             title="Home corners"><i class="fas fa-flag"></i>
@@ -145,6 +150,11 @@
                             class="text-center text-xs text-[#c74e4e] max-[480px]:text-[10px] {{ ($homeCards['total_red'] ?? 0) > 0 ? '' : 'invisible' }}"
                             title="Direct red: {{ $homeCards['direct_red'] ?? 0 }}, second yellow: {{ $homeCards['second_yellow'] ?? 0 }}"><i
                                 class="fas fa-square"></i> {{ $homeCards['total_red'] ?? 0 }}</span>
+                        @else
+                            <span aria-hidden="true"></span>
+                            <span aria-hidden="true"></span>
+                            <span aria-hidden="true"></span>
+                        @endif
 
                         <span
                             class="team-name flex w-full min-w-0 items-center justify-end gap-1 pr-1 text-right font-semibold [transition:color_0.3s] dark:text-[#e8edf2]"
@@ -169,6 +179,7 @@
                             @endif
                         </span>
 
+                        @if ($checkAuthAndSubscription['display_odds'])
                         <span
                             class="text-center text-xs text-[#e6b422] max-[480px]:text-[10px] {{ ($awayCards['yellow'] ?? 0) > 0 ? '' : 'invisible' }}"
                             title="Away yellow cards"><i class="fas fa-square"></i>
@@ -181,25 +192,45 @@
                             class="text-center text-xs text-[#48708d] max-[480px]:text-[10px] {{ ($event['corners']['away'] ?? 0) > 0 ? '' : 'invisible' }}"
                             title="Away corners">{{ $event['corners']['away'] ?? 0 }} <i
                                 class="fas fa-flag"></i></span>
+                        @else
+                            <span aria-hidden="true"></span>
+                            <span aria-hidden="true"></span>
+                            <span aria-hidden="true"></span>
+                        @endif
                     </div>
                 </div>
                 <div
                     class="event-actions flex w-[118px] items-center justify-end [gap:2px] max-[1024px]:w-[118px] max-[1024px]:justify-start max-[480px]:w-full max-[480px]:justify-center">
                     <button type="button"
                         class="live-stat-icon bg-transparent border-0 [color:#d63e3e] [font-size:15px] [padding:4px_4px] cursor-pointer [border-radius:8px] [width:28px] text-center [transition:0.2s] disabled:cursor-not-allowed disabled:opacity-30 dark:[color:#6a8aa8] dark:[&:hover]:[background:#2a4050] dark:[&:hover]:[color:#e8edf2] [&:hover]:[background:#dce8f5] [&:hover]:[color:#b52a2a]"
-                        data-action="livestats" data-match-id="{{ $event['sportsApiPro_match_id'] }}"
-                        aria-expanded="false" aria-controls="live-stats-{{ $event['sportsApiPro_match_id'] }}"
-                        title="Live Statistics" @disabled($event['status'] !== 'Live')><i class="fas fa-wave-square"></i></button>
+                        @if ($checkAuthAndSubscription['display_odds'])
+                            data-action="livestats" data-match-id="{{ $event['sportsApiPro_match_id'] }}"
+                            aria-expanded="false" aria-controls="live-stats-{{ $event['sportsApiPro_match_id'] }}"
+                            title="Live Statistics"
+                        @else
+                            disabled title="Live Statistics (requires subscription)"
+                        @endif
+                        @disabled($event['status'] !== 'Live')>
+                        <i class="fas fa-wave-square"></i>
+                    </button>
                     <button type="button"
                         class="action-icon bg-transparent border-0 [color:#427292] [font-size:15px] [padding:4px_4px] cursor-pointer [border-radius:8px] [width:28px] text-center [transition:0.2s] dark:[color:#6a8aa8] dark:[&:hover]:[background:#2a4050] dark:[&:hover]:[color:#e8edf2] [&:hover]:[background:#dce8f5] [&:hover]:[color:#0b2a40] [&.disabled]:[opacity:0.3] [&.disabled]:[pointer-events:none]"
                         data-action="chart" title="Chart"><i class="fas fa-chart-simple"></i></button>
                     <button type="button"
-                        class="action-icon bg-transparent border-0 [color:#427292] [font-size:15px] [padding:4px_4px] cursor-pointer [border-radius:8px] [width:28px] text-center [transition:0.2s] dark:[color:#6a8aa8] dark:[&:hover]:[background:#2a4050] dark:[&:hover]:[color:#e8edf2] [&:hover]:[background:#dce8f5] [&:hover]:[color:#0b2a40] [&.disabled]:[opacity:0.3] [&.disabled]:[pointer-events:none]"
-                        data-action="stats" title="Statistics"><i class="fas fa-chart-bar"></i></button>
+                        class="action-icon bg-transparent border-0 [color:#427292] [font-size:15px] [padding:4px_4px] cursor-pointer [border-radius:8px] [width:28px] text-center [transition:0.2s] dark:[color:#6a8aa8] disabled:cursor-not-allowed disabled:opacity-30 dark:[&:hover]:[background:#2a4050] dark:[&:hover]:[color:#e8edf2] [&:hover]:[background:#dce8f5] [&:hover]:[color:#0b2a40] [&.disabled]:[opacity:0.3] [&.disabled]:[pointer-events:none]"
+                        @if ($checkAuthAndSubscription['display_odds'])
+                            data-action="stats" title="Statistics"
+                        @else
+                            disabled title="Statistics (requires subscription)"
+                        @endif
+                        ><i class="fas fa-chart-bar"></i></button>
                     <button type="button"
                         class="action-icon bg-transparent border-0 [color:#427292] [font-size:15px] [padding:4px_4px] cursor-pointer [border-radius:8px] [width:28px] text-center [transition:0.2s] disabled:cursor-not-allowed disabled:opacity-30 dark:[color:#6a8aa8] dark:[&:hover]:[background:#2a4050] dark:[&:hover]:[color:#e8edf2] [&:hover]:[background:#dce8f5] [&:hover]:[color:#0b2a40]"
-                        data-action="prediction" data-requires-login="{{ $customerIsAuthenticated ? 'false' : 'true' }}" data-login-url="{{ route('login') }}" data-match-id="{{ $event['sportsApiPro_match_id'] }}"
-                        aria-expanded="false" aria-controls="prediction-{{ $event['sportsApiPro_match_id'] }}"
+                        @if ($checkAuthAndSubscription['display_odds'])
+                            data-action="prediction" aria-expanded="false" aria-controls="prediction-{{ $event['sportsApiPro_match_id'] }}" data-requires-login="{{ $customerIsAuthenticated ? 'false' : 'true' }}" data-login-url="{{ route('login') }}" data-match-id="{{ $event['sportsApiPro_match_id'] }}"
+                        @else
+                            disabled title="Prediction (requires subscription)"
+                        @endif
                         title="Prediction" @disabled($event['status'] !== 'Prematch')><i class="fas fa-brain"></i></button>
                 </div>
                 <div
@@ -226,7 +257,7 @@
                     @endforeach
                 </div>
             </div>
-            @if ($event['status'] === 'Live')
+            @if ($checkAuthAndSubscription['display_odds'] && $event['status'] === 'Live')
                 <div id="live-stats-{{ $event['sportsApiPro_match_id'] }}"
                     data-live-stats-panel="{{ $event['sportsApiPro_match_id'] }}" role="dialog" aria-modal="true"
                     aria-label="Live statistics for {{ $event['team1'] }} vs {{ $event['team2'] }}"

@@ -9,6 +9,7 @@ use Amp\DeferredCancellation;
 use Amp\Http\Client\HttpClient;
 use Amp\Http\Client\HttpClientBuilder;
 use Amp\Http\Client\Request;
+use Amp\Websocket\Client\WebsocketConnectException;
 use Amp\Websocket\Client\WebsocketConnection;
 use Amp\Websocket\Client\WebsocketHandshake;
 use App\Events\AmericanFootballSportsScoreUpdated;
@@ -82,7 +83,14 @@ class ListenSportsApiPro extends Command
         try {
             $futures = [];
             foreach (self::SPORTS as $sport => $config) {
-                $futures[$sport] = async(function () use ($sport, $config, $key, $shutdown, &$releases): void {
+                $startupDelay = count($futures) + random_int(0, 500) / 1000;
+                $futures[$sport] = async(function () use ($sport, $config, $key, $shutdown, $startupDelay, &$releases): void {
+                    try {
+                        delay($startupDelay, cancellation: $shutdown->getCancellation());
+                    } catch (CancelledException) {
+                        return;
+                    }
+                    $backoff = 5;
                     while (! $shutdown->isCancelled()) {
                         try {
                             $this->listenSport($sport, $config, $key, $shutdown->getCancellation(), $releases);
@@ -92,9 +100,11 @@ class ListenSportsApiPro extends Command
                             if ($shutdown->isCancelled()) {
                                 return;
                             }
-                            Log::error('SportsAPI Pro sport listener failed; retrying', ['sport' => $sport, 'exception' => $e::class, 'message' => $e->getMessage()]);
+                            $retryDelay = $backoff + random_int(0, 1000) / 1000;
+                            Log::error('SportsAPI Pro sport listener failed; retrying', ['sport' => $sport, 'exception' => $e::class, 'message' => $e->getMessage(), 'retry_in_seconds' => $retryDelay]);
                             try {
-                                delay(5, cancellation: $shutdown->getCancellation());
+                                delay($retryDelay, cancellation: $shutdown->getCancellation());
+                                $backoff = $backoff === 5 ? 10 : 30;
                             } catch (CancelledException) {
                                 return;
                             }
@@ -167,7 +177,7 @@ class ListenSportsApiPro extends Command
                 }
             });
             $httpClient = (new HttpClientBuilder)->retry(0)->build();
-            $backoff = 1;
+            $backoff = 5;
             $initialRecoveryQueued = false;
 
             while (! $shutdown->isRequested()) {
@@ -182,14 +192,19 @@ class ListenSportsApiPro extends Command
                 $cancellation = new CompositeCancellation($shutdown, $connectionFailure->getCancellation());
                 $timers = [];
                 $matchSubscriptions = [];
+                $connectedAt = null;
+                $rateLimited = false;
 
                 try {
+                    while (($retryAt = (int) Cache::store('redis')->get('SportsAPIPro:websocket-retry-at', 0)) > time()) {
+                        delay(max(1, $retryAt - time()) + random_int(0, 3), cancellation: $cancellation);
+                    }
                     $handshake = (new WebsocketHandshake("wss://api.sportsapipro.com/v2/{$config['path']}/ws"))->withHeader('x-api-key', $key);
                     if ($config['header'] !== null) {
                         $handshake = $handshake->withHeader('x-sport', $config['header']);
                     }
                     $socket = connect($handshake, $cancellation);
-                    $backoff = 1;
+                    $connectedAt = microtime(true);
                     $socket->sendText(json_encode(['action' => 'subscribe', 'channel' => 'live-scores'], JSON_THROW_ON_ERROR));
                     $this->info("[{$sport}] Connected; subscribed to live-scores.");
                     $this->queueLiveRecovery($sport, $config, 'startup', ! $initialRecoveryQueued);
@@ -236,8 +251,19 @@ class ListenSportsApiPro extends Command
                     if ($shutdown->isRequested()) {
                         break;
                     }
+                    if ($connectedAt !== null && microtime(true) - $connectedAt >= 60) {
+                        $backoff = 5;
+                    }
+                    $rateLimited = $e instanceof WebsocketConnectException && $e->getResponse()->getStatus() === 429;
+                    if ($rateLimited) {
+                        $retryAfter = $e->getResponse()->getHeader('retry-after');
+                        $retrySeconds = is_numeric($retryAfter) ? (int) $retryAfter : max(0, (strtotime($retryAfter ?? '') ?: time()) - time());
+                        $backoff = max(60, $backoff, $retrySeconds);
+                        Cache::store('redis')->put('SportsAPIPro:websocket-retry-at', time() + $backoff, $backoff);
+                    }
+                    $retryDelay = $backoff + random_int(0, 1000) / 1000;
                     $this->error("[{$sport}] WebSocket disconnected: ".$e->getMessage());
-                    Log::warning('SportsAPI Pro WebSocket disconnected', ['sport' => $sport, 'exception' => $e::class, 'message' => $e->getMessage(), 'retry_in_seconds' => $backoff]);
+                    Log::warning('SportsAPI Pro WebSocket disconnected', ['sport' => $sport, 'exception' => $e::class, 'message' => $e->getMessage(), 'retry_in_seconds' => $retryDelay]);
                     if ($hasListenerLock) {
                         $this->queueLiveRecovery($sport, $config, 'disconnect');
                     }
@@ -254,8 +280,8 @@ class ListenSportsApiPro extends Command
                     $socket = null;
                 }
                 if (! $shutdown->isRequested()) {
-                    delay($backoff, cancellation: $shutdown);
-                    $backoff = min($backoff * 2, 30);
+                    delay($retryDelay, cancellation: $shutdown);
+                    $backoff = $rateLimited ? min($backoff * 2, 600) : ($backoff === 5 ? 10 : 30);
                 }
             }
         } finally {
@@ -269,16 +295,29 @@ class ListenSportsApiPro extends Command
      */
     private function queueLiveRecovery(string $sport, array $config, string $reason, bool $force = false): void
     {
+        $pendingLock = null;
         try {
+            $lockName = $config['prefix'].':sports-api-pro-recovery-pending';
+            $pendingLock = Cache::store('redis')->lock($lockName, 3600);
+            if (! $pendingLock->get()) {
+                return;
+            }
             $gate = $config['prefix'].':sports-api-pro-'.($reason === 'disconnect' ? 'disconnect-recovery' : 'live-recovery');
             if (! $force && ! Cache::store('redis')->add($gate, time(), $reason === 'disconnect' ? 60 : 300)) {
+                $pendingLock->release();
+
                 return;
             }
             Cache::store('redis')->put($config['prefix'].':sports-api-pro-live-recovery', time(), 300);
             $controllerClass = $config['controller'];
             $eventClass = $config['event'];
-            dispatch(static function () use ($sport, $controllerClass, $eventClass, $reason): void {
+            $owner = $pendingLock->owner();
+            dispatch(static function () use ($sport, $controllerClass, $eventClass, $reason, $lockName, $owner): void {
+                $lock = Cache::store('redis')->restoreLock($lockName, $owner);
                 try {
+                    if (! $lock->isOwnedByCurrentProcess()) {
+                        return;
+                    }
                     $matches = app($controllerClass)->syncSportsApiProLiveData() ?? [];
                     try {
                         Event::dispatch(new $eventClass);
@@ -288,9 +327,14 @@ class ListenSportsApiPro extends Command
                     Log::info('SportsAPI Pro live-state recovery completed', ['sport' => $sport, 'reason' => $reason, 'matches' => count($matches)]);
                 } catch (Throwable $e) {
                     Log::warning('SportsAPI Pro live-state recovery failed', ['sport' => $sport, 'reason' => $reason, 'exception' => $e::class, 'message' => $e->getMessage()]);
+                } finally {
+                    $lock->release();
                 }
-            })->onQueue('default');
+            })->onQueue('default')->catch(static function (Throwable $e) use ($lockName, $owner): void {
+                Cache::store('redis')->restoreLock($lockName, $owner)->release();
+            });
         } catch (Throwable $e) {
+            $pendingLock?->release();
             Log::warning('SportsAPI Pro live-state recovery could not be queued', ['sport' => $sport, 'reason' => $reason, 'exception' => $e::class]);
         }
     }

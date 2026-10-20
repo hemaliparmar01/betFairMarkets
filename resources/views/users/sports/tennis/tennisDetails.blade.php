@@ -9,7 +9,7 @@
 @forelse ($data as $group)
     <h2 data-league-header="{{ $group['tournament_name'].'|'.$group['status'] }}" class="mb-2 mt-5 flex items-center gap-2 border-b border-[#e3ecf5] pb-2 text-xs font-bold uppercase tracking-wide text-[#1e4763] dark:border-[#2a3f50] dark:text-[#b0c8dd]">
         @if ($group['tournament_logo'] ?? null)<img src="{{ $group['tournament_logo'] }}" alt="" class="size-5 object-contain" onerror="this.remove()">@endif
-        {{ $group['tournament_name'] }} · {{ $group['status'] }}
+        {{ $group['tournament_name'] }}
     </h2>
     @foreach ($group['matches'] as $event)
         @php
@@ -37,10 +37,28 @@
                 @if (count($setScores) > 1)<small class="col-span-3 text-center text-[10px] font-normal text-[#5a7d99]">{{ implode(' · ', $setScores) }}</small>@endif
             </button>
             <div class="flex items-center justify-center gap-3">
-                <button type="button" data-action="stats" title="{{ __('Live Statistics') }}" class="text-red-500"><i class="fas fa-wave-square"></i></button>
+                <button type="button" class="cursor-pointer text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
+                    @if ($checkAuthAndSubscription['display_odds'])
+                        data-action="stats" title="{{ __('Live Statistics') }}"
+                    @else
+                        disabled title="{{ __('Live Statistics (requires subscription)') }}"
+                    @endif
+                    @disabled($event['status'] !== 'Live')><i class="fas fa-wave-square"></i></button>
                 <button type="button" data-action="chart" title="{{ __('Chart') }}" class="text-[#46799a]"><i class="fas fa-chart-line"></i></button>
-                <button type="button" data-action="stats" title="{{ __('Statistics') }}" class="text-[#46799a]"><i class="fas fa-chart-bar"></i></button>
-                <button type="button" data-action="prediction" data-requires-login="{{ $authenticated ? 'false' : 'true' }}" data-login-url="{{ route('login') }}" title="{{ __('Predictions') }}" class="text-[#46799a]"><i class="fas fa-brain"></i></button>
+                <button type="button" class="cursor-pointer text-[#46799a] disabled:cursor-not-allowed disabled:opacity-30"
+                    @if ($checkAuthAndSubscription['display_odds'])
+                        data-action="stats" title="{{ __('Statistics') }}"
+                    @else
+                        disabled title="{{ __('Statistics (requires subscription)') }}"
+                    @endif
+                    ><i class="fas fa-chart-bar"></i></button>
+                <button type="button" class="cursor-pointer text-[#46799a] disabled:cursor-not-allowed disabled:opacity-30"
+                    @if ($checkAuthAndSubscription['display_odds'])
+                        data-action="prediction" data-requires-login="{{ $authenticated ? 'false' : 'true' }}" data-login-url="{{ route('login') }}" title="{{ __('Predictions') }}"
+                    @else
+                        disabled title="{{ __('Prediction (requires subscription)') }}"
+                    @endif
+                    @disabled($event['status'] !== 'Prematch')><i class="fas fa-brain"></i></button>
             </div>
             <div class="flex min-w-0 gap-2 overflow-x-auto [scrollbar-width:thin]">
                 @foreach ($event['markets'] !== [] ? $event['markets'] : [[], []] as $runner)

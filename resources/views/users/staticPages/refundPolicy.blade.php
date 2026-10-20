@@ -90,7 +90,7 @@
             <span class="refund-policy-section-number inline-flex items-center justify-center [width:34px] [height:34px] [border-radius:10px] [background:linear-gradient(135deg,_#0b2a40,_#1a6b9c)] text-white font-bold [font-size:14px] shrink-0">6</span>
             <span class="refund-policy-section-title [font-size:20px] font-bold [color:#0b2a40] [letter-spacing:-0.3px] [transition:color_0.3s] dark:[color:#e8edf2] [&_i]:[color:#1a6b9c] [&_i]:[margin-right:8px] [&_i]:[font-size:18px] max-[768px]:[font-size:17px]"><i class="fas fa-envelope"></i> Contact Us</span>
         </div>
-        <p><i class="fas fa-envelope [color:#1a6b9c]! [margin-right:8px]!"></i> <a href="mailto:office@betfairmarkets.com">office@betfairmarkets.com</a></p>
+        <p><i class="fas fa-envelope [color:#1a6b9c]! [margin-right:8px]!"></i> <a href="mailto:office@bfmarketsanalytics.com">office@bfmarketsanalytics.com</a></p>
     </div>
 
 @endsection

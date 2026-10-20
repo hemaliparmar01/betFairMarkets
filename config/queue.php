@@ -15,6 +15,11 @@ return [
 
     'default' => env('QUEUE_CONNECTION', 'database'),
 
+    'worker' => [
+        'memory' => (int) env('QUEUE_WORKER_MEMORY', 0),
+        'php_memory_limit' => env('QUEUE_WORKER_PHP_MEMORY_LIMIT', '-1'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Queue Connections
@@ -61,6 +66,15 @@ return [
             'queue' => env('SQS_QUEUE', 'default'),
             'suffix' => env('SQS_SUFFIX'),
             'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
+            'after_commit' => false,
+        ],
+
+        'sports-realtime' => [
+            'driver' => 'redis',
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
+            'queue' => 'realtime',
+            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
+            'block_for' => 1,
             'after_commit' => false,
         ],
 

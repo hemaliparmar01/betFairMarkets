@@ -34,8 +34,8 @@
             <span class="privacy-policy-section-title [font-size:20px] font-bold [color:#0b2a40] [letter-spacing:-0.3px] [transition:color_0.3s] dark:[color:#e8edf2] [&_i]:[color:#1a6b9c] [&_i]:[margin-right:8px] [&_i]:[font-size:18px] max-[768px]:[font-size:17px]"><i class="fas fa-building"></i> Data Controller</span>
         </div>
         <p><strong>BF Markets</strong></p>
-        <p>Website: <a href="https://betfairmarkets.com" target="_blank">https://betfairmarkets.com</a></p>
-        <p>Email: <a href="mailto:office@betfairmarkets.com">office@betfairmarkets.com</a></p>
+        <p>Website: <a href="https://bfmarketsanalytics.com" target="_blank">https://bfmarketsanalytics.com</a></p>
+        <p>Email: <a href="mailto:office@bfmarketsanalytics.com">office@bfmarketsanalytics.com</a></p>
     </div>
 
     <div class="privacy-policy-divider h-px [background:#e6edf6] [margin:24px_0] [transition:background_0.3s] dark:[background:#2a3f50]"></div>
@@ -159,7 +159,7 @@
             <li>withdraw consent where processing is based on consent;</li>
             <li>exercise your right to data portability where applicable by law.</li>
         </ul>
-        <p>For any questions or requests, please contact us at: <a href="mailto:office@betfairmarkets.com">office@betfairmarkets.com</a></p>
+        <p>For any questions or requests, please contact us at: <a href="mailto:office@bfmarketsanalytics.com">office@bfmarketsanalytics.com</a></p>
     </div>
 
     <div class="privacy-policy-divider h-px [background:#e6edf6] [margin:24px_0] [transition:background_0.3s] dark:[background:#2a3f50]"></div>
@@ -236,7 +236,7 @@
             <span class="privacy-policy-section-number inline-flex items-center justify-center [width:34px] [height:34px] [border-radius:10px] [background:linear-gradient(135deg,_#0b2a40,_#1a6b9c)] text-white font-bold [font-size:14px] shrink-0">17</span>
             <span class="privacy-policy-section-title [font-size:20px] font-bold [color:#0b2a40] [letter-spacing:-0.3px] [transition:color_0.3s] dark:[color:#e8edf2] [&_i]:[color:#1a6b9c] [&_i]:[margin-right:8px] [&_i]:[font-size:18px] max-[768px]:[font-size:17px]"><i class="fas fa-envelope"></i> Contact</span>
         </div>
-        <p><i class="fas fa-envelope [color:#1a6b9c]! [margin-right:8px]!"></i> <a href="mailto:office@betfairmarkets.com">office@betfairmarkets.com</a></p>
+        <p><i class="fas fa-envelope [color:#1a6b9c]! [margin-right:8px]!"></i> <a href="mailto:office@bfmarketsanalytics.com">office@bfmarketsanalytics.com</a></p>
     </div>
 
 @endsection

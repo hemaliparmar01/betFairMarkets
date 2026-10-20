@@ -58,6 +58,7 @@
         <a href="{{ route('filter-guide') }}">{{ __('Filter Guide') }}</a>
         <a href="{{ route('market-activity-guide') }}">{{ __('Market Activity Guide') }}</a>
         <a href="{{ route('feature-request') }}">{{ __('Feature Request') }}</a>
+        <a href="{{ route('pinnacle-odds-drops-guide') }}">{{ __('Pinnacle Odds Drops Guide') }}</a>
     </div>
 
     <div class="footer-copyright text-center [font-size:12px] [color:#8aaccc] dark:[color:#5a7d99]">

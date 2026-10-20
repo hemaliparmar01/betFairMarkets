@@ -15,6 +15,11 @@ trait HorseRacingTrait
 
     public function getHorseRacingMatches(bool $grouped = true): array
     {
+        if (in_array(request()->input('type'), ['ht00', '00_70', 'fav_losing', 'prematch_drops', 'market_shock', 'fav_not_winning'], true)) {
+            $checkAuthAndSubscription = checkAuthAndSubscription();
+            abort_unless($checkAuthAndSubscription['display_odds'], 403, __('An active 7-day free trial or paid subscription is required to use smart filters.'));
+        }
+
         $customerId = request()->user('customers')?->getAuthIdentifier();
         $favorites = $customerId === null ? [] : array_fill_keys(Favorite::query()->where('sport', 'horseracing')->where('customer_id', $customerId)->pluck('event_key')->all(), true);
         $today = Carbon::now(getCurrentUserTimezone())->toDateString();
@@ -35,7 +40,7 @@ trait HorseRacingTrait
         }));
         usort($matches, static function (array $first, array $second) use ($type): int {
             if ($type === 'by_time') {
-                return $second['timestamp'] <=> $first['timestamp'];
+                return $first['timestamp'] <=> $second['timestamp'];
             }
             $bucket = static fn (array $race): int => $race['result_status'] === 'Finished' ? 4 : ($race['timestamp'] - time() <= 300 ? 1 : ($race['timestamp'] - time() <= 600 ? 2 : 3));
             $strength = ['strong_back' => 0, 'strong_lay' => 0, 'back' => 1, 'lay' => 1, 'neutral' => 2];
@@ -78,6 +83,9 @@ trait HorseRacingTrait
                 request()->session()->put($sessionKey, $match['prediction_vote']);
             }
             $key = $match['tournament'].'|'.$match['status'];
+            if ($type === 'by_time') {
+                $key .= '|'.$match['timestamp'];
+            }
             $groups[$key] ??= ['tournament_name' => $match['tournament'], 'status' => $match['status'], 'matches' => []];
             $groups[$key]['matches'][] = $match;
             $preparedMatches[] = $match;

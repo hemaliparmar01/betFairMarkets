@@ -8,8 +8,8 @@ use App\Models\FootballMatch;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Throwable;
 
 class FootballSyncController extends Controller
 {
@@ -30,8 +30,13 @@ class FootballSyncController extends Controller
     {
         $url = 'https://betfair-odds.com/betfair/v1/livemap?feed=live&sports=soccer';
         $key = 'x-portal-apikey: '.$this->getBetferKeys;
-        $liveData = ApiCall($url, $key);
+        $liveData = ApiCall($url, $key, ['connect_timeout' => 3, 'timeout' => 15]);
         $cacheKey = $this->sports.':matches';
+        if (! is_array($liveData['liveMap'] ?? null)) {
+            Log::warning('Football Betfair live snapshot unavailable; existing matches retained');
+
+            return getInRedis($cacheKey) ?? [];
+        }
 
         $matches = withRedisLock(
             $cacheKey,
@@ -47,8 +52,13 @@ class FootballSyncController extends Controller
     {
         $url = 'https://betfair-odds.com/betfair/v1/livemap?feed=prematch&sports=soccer';
         $key = 'x-portal-apikey: '.$this->getBetferKeys;
-        $liveData = ApiCall($url, $key);
+        $liveData = ApiCall($url, $key, ['connect_timeout' => 3, 'timeout' => 15]);
         $cacheKey = $this->sports.':matches';
+        if (! is_array($liveData['liveMap'] ?? null)) {
+            Log::warning('Football Betfair prematch snapshot unavailable; existing matches retained');
+
+            return getInRedis($cacheKey) ?? [];
+        }
 
         $matches = withRedisLock(
             $cacheKey,
@@ -64,9 +74,14 @@ class FootballSyncController extends Controller
     {
         $url = 'https://api.sportsapipro.com/v2/football/live/all';
         $key = 'x-api-key: '.$this->getsportsAPIProKeys;
-        $liveData = ApiCall($url, $key);
+        $liveData = ApiCall($url, $key, ['connect_timeout' => 3, 'timeout' => 15]);
         $liveData = is_array($liveData['data'] ?? null) ? $liveData['data'] : $liveData;
         $cacheKey = $this->sports.':matches';
+        if (! is_array($liveData['events'] ?? null)) {
+            Log::warning('Football SportsAPI Pro live snapshot unavailable; existing matches retained');
+
+            return getInRedis($cacheKey) ?? [];
+        }
 
         $matches = $this->readsportApiData($liveData, $cacheKey, true, 10);
         $this->storeMatchesInDatabase($matches);
@@ -368,64 +383,12 @@ class FootballSyncController extends Controller
         }
         $sportsImages = [];
         $getSportsImage = static function (string $type, mixed $entityId) use (&$sportsImages): ?string {
-            if (! in_array($type, ['teams', 'tournaments'], true) || ! is_numeric($entityId) || (int) $entityId <= 0) {
-                return null;
+            $imageKey = $type.':'.(int) $entityId;
+            if (! array_key_exists($imageKey, $sportsImages)) {
+                $sportsImages[$imageKey] = getSportsApiProImage('football', $type, $entityId);
             }
 
-            $entityId = (int) $entityId;
-            $imageKey = "{$type}:{$entityId}";
-            if (array_key_exists($imageKey, $sportsImages)) {
-                return $sportsImages[$imageKey];
-            }
-            $relativeDirectory = "images/football/{$type}";
-            $absoluteDirectory = public_path($relativeDirectory);
-            $existingImage = glob("{$absoluteDirectory}/{$entityId}.*");
-
-            if ($existingImage !== false && isset($existingImage[0]) && File::isFile($existingImage[0])) {
-                return $sportsImages[$imageKey] = '/'.$relativeDirectory.'/'.basename($existingImage[0]);
-            }
-
-            try {
-                return $sportsImages[$imageKey] = Cache::store('redis')
-                    ->lock("SportsAPIPro:image:football:{$type}:{$entityId}", 20)
-                    ->block(15, static function () use ($absoluteDirectory, $entityId, $relativeDirectory, $type): ?string {
-                        $existingImage = glob("{$absoluteDirectory}/{$entityId}.*");
-
-                        if ($existingImage !== false && isset($existingImage[0]) && File::isFile($existingImage[0])) {
-                            return '/'.$relativeDirectory.'/'.basename($existingImage[0]);
-                        }
-
-                        $response = ApiCall("https://api.sportsapipro.com/v2/football/images/{$type}/{$entityId}", [
-                            'x-api-key' => GetSportApiProKey(),
-                            'Accept' => 'image/png,image/jpeg,image/webp,image/gif',
-                        ], [
-                            'connect_timeout' => 3,
-                            'timeout' => 10,
-                            'raw_response' => true,
-                            'follow_redirects' => true,
-                        ]);
-                        $contentType = strtolower(trim(explode(';', $response['content_type'])[0]));
-                        $extension = [
-                            'image/png' => 'png',
-                            'image/jpeg' => 'jpg',
-                            'image/webp' => 'webp',
-                            'image/gif' => 'gif',
-                        ][$contentType] ?? null;
-                        $content = $response['body'];
-
-                        if (! $response['successful'] || $extension === null || $content === '' || strlen($content) > 5_000_000) {
-                            return null;
-                        }
-
-                        File::ensureDirectoryExists($absoluteDirectory);
-                        $fileName = "{$entityId}.{$extension}";
-                        File::replace("{$absoluteDirectory}/{$fileName}", $content);
-
-                        return "/{$relativeDirectory}/{$fileName}";
-                    });
-            } catch (Throwable) {
-                return $sportsImages[$imageKey] = null;
-            }
+            return $sportsImages[$imageKey];
         };
 
         foreach (($payloads['events'] ?? []) as $payload) {

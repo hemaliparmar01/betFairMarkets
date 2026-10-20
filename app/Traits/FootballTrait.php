@@ -19,6 +19,11 @@ trait FootballTrait
 
     public function getFootballMatches()
     {
+        if (in_array(request()->input('type'), ['ht00', '00_70', 'fav_losing', 'prematch_drops', 'market_shock', 'fav_not_winning'], true)) {
+            $checkAuthAndSubscription = checkAuthAndSubscription();
+            abort_unless($checkAuthAndSubscription['display_odds'], 403, __('An active 7-day free trial or paid subscription is required to use smart filters.'));
+        }
+
         $getData = getInRedis('Football:matches') ?? [];
         $customerId = request()->user('customers')?->getAuthIdentifier();
         $favoriteKeys = $customerId === null ? [] : array_fill_keys(
@@ -62,7 +67,7 @@ trait FootballTrait
                     break;
 
                 case 'by_time':
-                    usort($getData, static fn (array $first, array $second): int => (int) ($second['timestamp'] ?? 0) <=> (int) ($first['timestamp'] ?? 0));
+                    usort($getData, static fn (array $first, array $second): int => (int) ($first['timestamp'] ?? 0) <=> (int) ($second['timestamp'] ?? 0));
                     break;
 
                 case '00_70':
@@ -259,6 +264,9 @@ trait FootballTrait
             if (($data['data_sync_complete'] ?? false) !== true) {
                 continue;
             }
+            if ($type != 'finished' && ($data['result_status'] ?? null) === 'Finished') {
+                continue;
+            }
             $markets = $data['markets'];
             $marketKey = array_key_first(array_filter($markets, fn ($key) => $key === $marketName || str_ends_with($key, '_'.$marketName), ARRAY_FILTER_USE_KEY));
             $selectedMarketRunners = $markets[$marketKey] ?? [];
@@ -298,6 +306,7 @@ trait FootballTrait
             unset($selectedRunner);
 
             $tournamentName = $data['tournament'];
+            $leagueKey = $type === 'by_time' ? $tournamentName.'|'.$data['timestamp'] : $tournamentName;
             $matchId = (string) $data['sportsApiPro_match_id'];
             $predictionVotes = [];
 
@@ -311,8 +320,8 @@ trait FootballTrait
                 }
             }
 
-            if (! isset($mainArray[$tournamentName])) {
-                $mainArray[$tournamentName] = [
+            if (! isset($mainArray[$leagueKey])) {
+                $mainArray[$leagueKey] = [
                     'tournament_name' => $tournamentName,
                     'tournament_id' => $data['tournament_id'] ?? null,
                     'tournament_logo' => $data['tournament_logo'] ?? null,
@@ -322,7 +331,7 @@ trait FootballTrait
                     'matches' => [],
                 ];
             }
-            $mainArray[$tournamentName]['matches'][] = [
+            $mainArray[$leagueKey]['matches'][] = [
                 'unique_key' => $data['unique_key'],
                 'is_favorite' => isset($favoriteKeys[$data['unique_key']]),
                 'team1' => $data['team1'],

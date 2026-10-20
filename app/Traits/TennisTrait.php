@@ -19,6 +19,11 @@ trait TennisTrait
 
     public function getTennisMatches(): array
     {
+        if (in_array(request()->input('type'), ['ht00', '00_70', 'fav_losing', 'prematch_drops', 'market_shock', 'fav_not_winning'], true)) {
+            $checkAuthAndSubscription = checkAuthAndSubscription();
+            abort_unless($checkAuthAndSubscription['display_odds'], 403, __('An active 7-day free trial or paid subscription is required to use smart filters.'));
+        }
+
         $matches = array_values(getInRedis('Tennis:matches') ?? []);
         $customerId = request()->user('customers')?->getAuthIdentifier();
         $favoriteKeys = $customerId === null ? [] : array_fill_keys(Favorite::query()->where('sport', 'tennis')->where('customer_id', $customerId)->pluck('event_key')->all(), true);
@@ -54,7 +59,7 @@ trait TennisTrait
         }));
         usort($matches, static function (array $left, array $right) use ($type): int {
             if ($type === 'by_time') {
-                return (int) $right['timestamp'] <=> (int) $left['timestamp'];
+                return (int) $left['timestamp'] <=> (int) $right['timestamp'];
             }
             $order = ['Live' => 0, 'Prematch' => 1, 'Finished' => 2];
 
@@ -105,6 +110,9 @@ trait TennisTrait
                 request()->session()->put($sessionKey, $customerVote);
             }
             $groupKey = ($match['tournament'] ?? 'Tennis').'|'.$match['result_status'];
+            if ($type === 'by_time') {
+                $groupKey .= '|'.$match['timestamp'];
+            }
             $groups[$groupKey] ??= ['tournament_name' => $match['tournament'] ?? 'Tennis', 'tournament_logo' => $match['tournament_logo'] ?? null, 'status' => $match['result_status'], 'matches' => []];
             $groups[$groupKey]['matches'][] = array_replace($match, [
                 'status' => $match['result_status'],

@@ -7,10 +7,7 @@ use App\Models\IceHockeyMarket;
 use App\Models\IceHockeyMatch;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Throwable;
 
 class IceHockeySyncController extends Controller
 {
@@ -63,7 +60,7 @@ class IceHockeySyncController extends Controller
     {
         $url = 'https://api.sportsapipro.com/v2/hockey/api/live/all';
         $key = 'x-api-key: '.$this->getsportsAPIProKeys;
-        $liveData = ApiCall($url, $key) ?? [];
+        $liveData = ApiCall($url, $key, ['connect_timeout' => 3, 'timeout' => 15]) ?? [];
         $liveData = is_array($liveData['data'] ?? null) ? $liveData['data'] : ($liveData ?? []);
         $cacheKey = $this->sports.':matches';
 
@@ -439,37 +436,7 @@ class IceHockeySyncController extends Controller
                         continue;
                     }
                     $imageKey = $type.':'.$entityId;
-                    $directory = "images/icehockey/{$type}";
-                    $images = glob(public_path("{$directory}/{$entityId}.*"));
-                    $sportsImages[$imageKey] = $images && File::isFile($images[0]) ? '/'.$directory.'/'.basename($images[0]) : null;
-                    if ($sportsImages[$imageKey] !== null) {
-                        continue;
-                    }
-                    try {
-                        $sportsImages[$imageKey] = Cache::store('redis')->lock("IceHockey:image:{$imageKey}", 20)->block(2, function () use ($directory, $entityId, $type): ?string {
-                            $images = glob(public_path("{$directory}/{$entityId}.*"));
-                            if ($images && File::isFile($images[0])) {
-                                return '/'.$directory.'/'.basename($images[0]);
-                            }
-                            $response = ApiCall("https://api.sportsapipro.com/v2/hockey/images/{$type}/{$entityId}", ['x-api-key' => $this->getsportsAPIProKeys], [
-                                'connect_timeout' => 3,
-                                'timeout' => 8,
-                                'raw_response' => true,
-                                'follow_redirects' => true,
-                            ]);
-                            $contentType = strtolower(trim(explode(';', $response['content_type'])[0]));
-                            $extension = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp', 'image/gif' => 'gif'][$contentType] ?? null;
-                            if (! $response['successful'] || $extension === null || $response['body'] === '' || strlen($response['body']) > 5_000_000) {
-                                return null;
-                            }
-                            File::ensureDirectoryExists(public_path($directory));
-                            File::replace(public_path("{$directory}/{$entityId}.{$extension}"), $response['body']);
-
-                            return "/{$directory}/{$entityId}.{$extension}";
-                        });
-                    } catch (Throwable $e) {
-                        Log::warning('IceHockey image download failed', ['type' => $type, 'entity_id' => $entityId, 'exception' => $e::class]);
-                    }
+                    $sportsImages[$imageKey] = getSportsApiProImage('icehockey', $type, $entityId);
                 }
             }
         }

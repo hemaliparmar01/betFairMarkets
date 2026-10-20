@@ -1,7 +1,7 @@
 @php $append = $append ?? false; $checkAuthAndSubscription = checkAuthAndSubscription(); @endphp
 @if (! $append)<div class="fixtures-container overflow-x-auto [scrollbar-width:thin]">@endif
 @forelse ($data as $group)
-    <h2 data-league-header="{{ $group['tournament_name'].'|'.$group['status'] }}" class="mb-2 mt-5 border-b border-[#e3ecf5] pb-2 text-xs font-bold uppercase tracking-wide text-[#1e4763] dark:border-[#2a3f50] dark:text-[#b0c8dd]">{{ $group['tournament_name'] }} · {{ $group['status'] }}</h2>
+    <h2 data-league-header="{{ $group['tournament_name'].'|'.$group['status'] }}" class="mb-2 mt-5 border-b border-[#e3ecf5] pb-2 text-xs font-bold uppercase tracking-wide text-[#1e4763] dark:border-[#2a3f50] dark:text-[#b0c8dd]">{{ $group['tournament_name'] }}</h2>
     @foreach ($group['matches'] as $race)
         @php
             $choices = array_column($race['win_runners'], 'runner', 'runnerId');
@@ -13,7 +13,23 @@
             <button type="button" data-action="favorite" data-requires-login="{{ auth('customers')->check() ? 'false' : 'true' }}" data-login-url="{{ route('login') }}" data-sport="horseracing" data-event-key="{{ $race['unique_key'] }}" data-event-id="{{ $race['id'] }}" data-team1="{{ $race['team1'] }}" data-team2="{{ $race['team2'] }}" data-start-timestamp="{{ $race['timestamp'] }}" aria-pressed="{{ $race['is_favorite'] ? 'true' : 'false' }}" @class(['fav-star cursor-pointer text-lg text-[#b8ccdf]', '!text-[#e6b422]' => $race['is_favorite']])><i class="fas fa-star"></i></button>
             <span class="whitespace-nowrap text-center text-xs font-semibold text-[#5a7d99]">{{ $race['minutes'] }}</span>
             <button type="button" data-action="open-match" class="text-center text-sm font-bold">{{ $race['team1'] }} · {{ $race['team2'] }} <span class="text-amber-500" title="{{ $race['favorite_runner']['runner'] ?? '' }}">⭐</span></button>
-            <div class="flex justify-center gap-3"><button type="button" data-action="market" title="{{ __('Runners and liquidity') }}" class="text-[#46799a]"><i class="fas fa-chart-bar"></i></button><button type="button" data-action="chart" title="{{ __('Chart') }}" class="text-[#46799a]"><i class="fas fa-chart-line"></i></button><button type="button" data-action="prediction" data-requires-login="{{ auth('customers')->check() ? 'false' : 'true' }}" data-login-url="{{ route('login') }}" title="{{ __('Predictions') }}" class="text-[#46799a]"><i class="fas fa-brain"></i></button></div>
+            <div class="flex justify-center gap-3">
+                <button type="button" class="cursor-pointer text-[#46799a] disabled:cursor-not-allowed disabled:opacity-30"
+                    @if ($checkAuthAndSubscription['display_odds'])
+                        data-action="market" title="{{ __('Runners and liquidity') }}"
+                    @else
+                        disabled title="{{ __('Statistics (requires subscription)') }}"
+                    @endif
+                    ><i class="fas fa-chart-bar"></i></button>
+                <button type="button" data-action="chart" title="{{ __('Chart') }}" class="text-[#46799a]"><i class="fas fa-chart-line"></i></button>
+                <button type="button" class="cursor-pointer text-[#46799a] disabled:cursor-not-allowed disabled:opacity-30"
+                    @if ($checkAuthAndSubscription['display_odds'])
+                        data-action="prediction" data-requires-login="{{ auth('customers')->check() ? 'false' : 'true' }}" data-login-url="{{ route('login') }}" title="{{ __('Predictions') }}"
+                    @else
+                        disabled title="{{ __('Prediction (requires subscription)') }}"
+                    @endif
+                    @disabled($race['status'] !== 'Prematch' || $prediction['locked'])><i class="fas fa-brain"></i></button>
+            </div>
             <div class="flex gap-2">
                 @foreach (array_pad($viewRunners, 3, []) as $runner)
                     <span @if ($checkAuthAndSubscription['display_odds'] && ($runner['currentBackOdds'] ?? 0) > 0) tabindex="0" data-horseracing-odds-tooltip="{{ number_format($runner['initialBackOdds'], 2) }} → {{ number_format($runner['currentBackOdds'], 2) }}" @endif title="{{ $runner['runner'] ?? __('Unavailable') }}" class="inline-flex min-w-[96px] items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-[#d4e2f3] bg-white px-2 py-1 text-sm font-bold dark:border-[#3a5568] dark:bg-[#1f3444]">@if ($checkAuthAndSubscription['display_odds']){{ ($runner['currentBackOdds'] ?? 0) > 0 ? number_format($runner['currentBackOdds'], 2) : '—' }}@if (($runner['odds_direction'] ?? '') === 'up')<span class="text-emerald-600">↑</span>@elseif (($runner['odds_direction'] ?? '') === 'down')<span class="text-red-500">↓</span>@endif @else @include('lock_icon') @endif</span>
