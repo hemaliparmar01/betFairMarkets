@@ -2,13 +2,39 @@
 
 namespace App\Traits;
 
+use App\Http\Controllers\Users\Football\FootballSyncController;
 use App\Models\Favorite;
 use App\Models\FootballMatch;
 use App\Models\PredictionVote;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 
 trait FootballTrait
 {
+    private const LEAGUE_PRIORITY = [
+        'Premier League', 'La Liga', 'Serie A', 'Bundesliga', 'Ligue 1',
+        'UEFA Champions League', 'UEFA Europa League', 'UEFA Conference League',
+        'Primeira Liga', 'Eredivisie', 'Süper Lig', 'Belgian Pro League',
+        'Scottish Premiership', 'Greek Super League', 'Austrian Bundesliga',
+        'Swiss Super League', 'EFL Championship', 'Serie B', 'LaLiga 2', 'Ligue 2',
+        'Danish Superliga', 'Eliteserien', 'Allsvenskan', 'Ekstraklasa',
+        'Czech First League', 'Brasileirão Série A', 'Argentine Primera División',
+        'Liga MX', 'Major League Soccer (MLS)', 'Saudi Pro League', 'J1 League',
+        'K League 1', 'Chinese Super League', 'Croatian HNL', 'Serbian SuperLiga',
+        'Romanian SuperLiga', 'Ukrainian Premier League', 'Israeli Premier League',
+        'Norwegian Eliteserien', 'Swedish Allsvenskan', 'EFL League One', 'Liga',
+        'Segunda Federación / Primera Federación', 'Serie C',
+        'National 1 / Championnat National', 'Liga Portugal 2', 'Eerste Divisie',
+        'Belgian Challenger Pro League', 'Scottish Championship', 'Greek Super League 2',
+        'Danish 1st Division', 'Swedish Superettan', 'Norwegian OBOS-ligaen',
+        'Polish I Liga', 'Czech National Football League', 'Croatian First Football League',
+        'Serbian First League', 'Major International Competitions', 'FIFA World Cup',
+        'UEFA European Championship', 'Copa America', 'CONMEBOL Libertadores',
+        'CONMEBOL Sudamericana', 'UEFA Nations League', 'FIFA Club World Cup',
+        'AFC Champions League Elite', 'CAF Champions League', 'CONCACAF Champions Cup',
+    ];
+
     protected bool $footballHasMore = false;
 
     protected ?int $footballNextPage = null;
@@ -113,7 +139,7 @@ trait FootballTrait
                 case 'fav_losing':
                 case 'fav_not_winning':
                     $getData = array_values(array_filter($getData, function (array $match) use ($type): bool {
-                        $favoriteOdds = (float) ($match['prematch_favorite_odds'] ?? 0);
+                        $favoriteOdds = (float) ($match['bet365_prematch']['favorite_odds'] ?? 0);
                         $maximumOdds = $type === 'fav_losing' ? 2.10 : 1.87;
 
                         if (
@@ -146,7 +172,7 @@ trait FootballTrait
                             }
                         }
 
-                        $favoriteSide = $match['prematch_favorite_side'] ?? null;
+                        $favoriteSide = $match['bet365_prematch']['favorite_side'] ?? null;
                         $homeScore = (int) ($match['home_score'] ?? 0);
                         $awayScore = (int) ($match['away_score'] ?? 0);
 
@@ -172,6 +198,10 @@ trait FootballTrait
                             return false;
                         }
 
+                        if (($match['pinnacle_drop_triggered'] ?? false) === true) {
+                            return true;
+                        }
+
                         foreach (($match['markets'] ?? []) as $marketRunners) {
                             foreach (($marketRunners ?? []) as $runner) {
                                 if (($runner['prematch_drop_triggered'] ?? false) === true) {
@@ -189,6 +219,10 @@ trait FootballTrait
                     $getData = array_values(array_filter($getData, static function (array $match) use ($shockCutoff): bool {
                         if (($match['result_status'] ?? null) !== 'Prematch') {
                             return false;
+                        }
+
+                        if ((int) ($match['pinnacle_market_shock_detected_at'] ?? 0) >= $shockCutoff) {
+                            return true;
                         }
 
                         foreach (($match['markets'] ?? []) as $marketRunners) {
@@ -215,8 +249,19 @@ trait FootballTrait
 
         $getData = array_values(array_filter(
             $getData,
-            static fn (array $match): bool => ($match['data_sync_complete'] ?? false) === true
+            static fn (array $match): bool => is_numeric($match['sportsApiPro_match_id'] ?? null)
+                && (int) $match['sportsApiPro_match_id'] > 0
+                && ($type === 'finished' || ($match['result_status'] ?? null) !== 'Finished')
         ));
+        usort($getData, function (array $first, array $second) use ($type): int {
+            $timeComparison = (int) ($first['timestamp'] ?? 0) <=> (int) ($second['timestamp'] ?? 0);
+            $priorityComparison = $this->footballLeaguePriority((string) ($first['tournament'] ?? ''), $first['tournament_country'] ?? null)
+                <=> $this->footballLeaguePriority((string) ($second['tournament'] ?? ''), $second['tournament_country'] ?? null);
+
+            return in_array($type, ['by_time', 'upcoming'], true)
+                ? ($timeComparison ?: $priorityComparison)
+                : ($priorityComparison ?: $timeComparison);
+        });
         $page = max(1, (int) request()->input('page', 1));
         $perPage = min(100, max(1, (int) request()->input('per_page', 20)));
         $offset = ($page - 1) * $perPage;
@@ -259,55 +304,46 @@ trait FootballTrait
             }
         }
 
+        $showTimeline = in_array($type ?? 'all', ['all', 'live', 'finished', 'by_time'], true);
+        $canDisplayOdds = checkAuthAndSubscription()['display_odds'];
+        $timelineCache = $showTimeline && $matchIds !== []
+            ? Cache::store('redis')->many(array_map(static fn (string $id): string => 'Football:timeline:'.$id, $matchIds))
+            : [];
+        $liveOddsKeys = array_values(array_map(
+            static fn (array $match): string => 'Football:bet365:live:'.$match['sportsApiPro_match_id'],
+            array_filter($getData, static fn (array $match): bool => ($match['result_status'] ?? '') === 'Live')
+        ));
+        $liveOddsCache = ! $showTimeline && $canDisplayOdds && $liveOddsKeys !== []
+            ? Cache::store('redis')->many($liveOddsKeys)
+            : [];
+        $pinnacleAlerts = $canDisplayOdds && in_array($type, ['prematch_drops', 'market_shock'], true)
+            ? array_column(getInRedis('Pinnacle:drops')['signals'] ?? [], null, 'alert_key')
+            : [];
+        $canBackfillTimeline = $showTimeline && $canDisplayOdds;
         $mainArray = [];
         foreach ($getData ?? [] as $key => $data) {
-            if (($data['data_sync_complete'] ?? false) !== true) {
+            if (! isset($data['sportsApiPro_match_id'])) {
                 continue;
             }
+            // if(!in_array($type, ['live', 'upcoming','finished','by_time','all'], true)) {
+            //     if (($data['data_sync_complete'] ?? false) !== true) {
+            //         continue;
+            //     }
+            // }
             if ($type != 'finished' && ($data['result_status'] ?? null) === 'Finished') {
                 continue;
             }
-            $markets = $data['markets'];
-            $marketKey = array_key_first(array_filter($markets, fn ($key) => $key === $marketName || str_ends_with($key, '_'.$marketName), ARRAY_FILTER_USE_KEY));
-            $selectedMarketRunners = $markets[$marketKey] ?? [];
-
-            if ($marketName === 'MATCH_ODDS') {
-                $homeTeam = trim((string) ($data['team1'] ?? ''));
-                $awayTeam = trim((string) ($data['team2'] ?? ''));
-                $homeRunner = [];
-                $drawRunner = [];
-                $awayRunner = [];
-                $otherRunners = [];
-
-                foreach ($selectedMarketRunners as $selectedMarketRunner) {
-                    $runnerName = trim((string) ($selectedMarketRunner['runner'] ?? ''));
-
-                    if (strcasecmp($runnerName, $homeTeam) === 0) {
-                        $homeRunner[] = $selectedMarketRunner;
-                    } elseif (stripos($runnerName, 'draw') !== false) {
-                        $drawRunner[] = $selectedMarketRunner;
-                    } elseif (strcasecmp($runnerName, $awayTeam) === 0) {
-                        $awayRunner[] = $selectedMarketRunner;
-                    } else {
-                        $otherRunners[] = $selectedMarketRunner;
-                    }
-                }
-
-                $selectedMarketRunners = array_merge($homeRunner, $drawRunner, $awayRunner, $otherRunners);
-            }
-
-            foreach ($selectedMarketRunners as &$selectedRunner) {
-                $initialOdds = (float) ($selectedRunner['initialBackOdds'] ?? $selectedRunner['previousBackOdds'] ?? 0);
-                $currentOdds = (float) ($selectedRunner['currentBackOdds'] ?? $selectedRunner['backOdds'] ?? 0);
-                $selectedRunner['odds_direction'] = $initialOdds <= 0 || $currentOdds === $initialOdds
-                    ? 'same'
-                    : ($currentOdds < $initialOdds ? 'down' : 'up');
-            }
-            unset($selectedRunner);
-
             $tournamentName = $data['tournament'];
             $leagueKey = $type === 'by_time' ? $tournamentName.'|'.$data['timestamp'] : $tournamentName;
             $matchId = (string) $data['sportsApiPro_match_id'];
+            $timeline = $timelineCache['Football:timeline:'.$matchId] ?? [];
+            $oddsMarkets = ! $showTimeline && $canDisplayOdds
+                ? $this->footballOddsMarkets($data, $type ?? 'all', $marketName, $liveOddsCache['Football:bet365:live:'.$matchId] ?? [], $pinnacleAlerts)
+                : [];
+            if ($canBackfillTimeline && in_array($data['result_status'], ['Live', 'Finished'], true)
+                && (! ($timeline['initialized'] ?? false) || ($data['result_status'] === 'Finished' && ! ($timeline['finalized'] ?? false)))) {
+                app(FootballSyncController::class)->queueTimelineBackfill($matchId, $data['result_status'] === 'Finished');
+            }
             $predictionVotes = [];
 
             foreach (['1x2', 'uo'] as $poll) {
@@ -342,13 +378,15 @@ trait FootballTrait
                 'away_team_logo' => $data['away_team_logo'] ?? null,
                 'status' => $data['result_status'],
                 'sportsApiPro_match_id' => $data['sportsApiPro_match_id'],
-                'betfair_match_id' => $data['betfair_match_id'],
+                'betfair_match_id' => $data['betfair_match_id'] ?? null,
                 'score' => $this->getScore($data),
                 'timestamp' => $data['timestamp'],
                 'minutes' => $this->calculateMinutes($data['minutes_status'] ?? $data['result_status'], $data['timestamp'], $data['result_status'], $data['added_time'] ?? [], $data['current_period_start_timestamp'] ?? null),
                 // 'status_type' => $data['status_type'] ?? null,
                 'cards' => $data['cards'] ?? [],
                 'card_counts' => $data['card_counts'] ?? [],
+                'card_counts_updated_at' => $data['card_counts_updated_at'] ?? 0,
+                'card_stats_updated_at' => $data['card_stats_updated_at'] ?? 0,
                 'last_goal' => $data['last_goal'] ?? null,
                 'goal_highlight_until' => $data['goal_highlight_until'] ?? null,
                 'added_time' => $data['added_time'] ?? [],
@@ -356,11 +394,234 @@ trait FootballTrait
                 'live_stats' => $data['live_stats'] ?? [],
                 'predictions' => $predictionCounts[$matchId] ?? ($data['predictions'] ?? []),
                 'prediction_votes' => $predictionVotes,
-                'markets' => $selectedMarketRunners,
+                'timeline' => $showTimeline ? $this->footballTimeline($data, $timeline) : null,
+                'markets' => array_merge([], ...array_column($oddsMarkets, 'runners')),
+                'odds_markets' => $oddsMarkets,
             ];
         }
 
         return $mainArray;
+    }
+
+    /**
+     * @param  array<string, mixed>  $match
+     * @param  array<string, mixed>  $liveOdds
+     * @param  array<string, array<string, mixed>>  $pinnacleAlerts
+     * @return list<array{source: string, label: string, runners: list<array{runner: string, currentBackOdds: ?float, previousBackOdds: ?float, odds_direction: string}>}>
+     */
+    private function footballOddsMarkets(array $match, string $filter, string $marketName, array $liveOdds, array $pinnacleAlerts): array
+    {
+        $groups = [];
+        if (in_array($filter, ['prematch_drops', 'market_shock'], true)) {
+            $shockCutoff = time() - 1200;
+            foreach ($match['pinnacle_markets'] ?? [] as $state) {
+                $qualifies = $filter === 'prematch_drops'
+                    ? ($state['drop_triggered'] ?? false) === true
+                    : (int) ($state['shock_detected_at'] ?? 0) >= $shockCutoff;
+                if (! $qualifies) {
+                    continue;
+                }
+                $quote = array_replace($pinnacleAlerts[$state['alert_key'] ?? ''] ?? [], $state);
+                $section = trim((string) ($quote['sect'] ?? ''));
+                $outcome = trim((string) ($quote['outcome'] ?? ''));
+                if ($section === '' || $outcome === '') {
+                    continue;
+                }
+                $line = $quote['point'] ?? $quote['points'] ?? $quote['hdp'] ?? null;
+                $label = in_array(strtolower($section), ['moneyline', 'money line', '1x2', 'match odds'], true) ? 'Match Odds / 1X2' : $section;
+                if ($label !== 'Match Odds / 1X2' && is_numeric($line) && ! str_contains($label, (string) $line)) {
+                    $label .= ' '.$line;
+                }
+                $runner = match (strtolower($outcome)) {
+                    'home', '1' => $match['team1'],
+                    'away', '2' => $match['team2'],
+                    'draw', 'x' => 'Draw',
+                    default => $outcome,
+                };
+                $odd = $this->footballOddsRunner($runner, $state['current_odds'] ?? null, $quote['from_price'] ?? $state['baseline_odds'] ?? null);
+                if ($odd['currentBackOdds'] === null) {
+                    continue;
+                }
+                $groupKey = 'pinnacle:'.strtolower($section).'|'.$line;
+                $groups[$groupKey] ??= ['source' => 'Pinnacle', 'label' => $label, 'runners' => []];
+                $groups[$groupKey]['runners'][] = $odd;
+            }
+            foreach ($match['markets'] ?? [] as $runners) {
+                $qualifies = array_any($runners, static fn (array $runner): bool => $filter === 'prematch_drops'
+                    ? ($runner['prematch_drop_triggered'] ?? false) === true
+                    : (int) ($runner['market_shock_detected_at'] ?? 0) >= $shockCutoff);
+                if (! $qualifies) {
+                    continue;
+                }
+                usort($runners, static fn (array $first, array $second): int => (int) ($first['sortPriority'] ?? 0) <=> (int) ($second['sortPriority'] ?? 0));
+                $first = $runners[0];
+                $groups[] = [
+                    'source' => 'Betfair',
+                    'label' => ($first['marketType'] ?? '') === 'MATCH_ODDS' ? 'Match Odds / 1X2' : ($first['name'] ?? str_replace('_', ' ', $first['marketType'] ?? 'Market')),
+                    'runners' => array_map(fn (array $runner): array => $this->footballOddsRunner(
+                        (string) ($runner['runner'] ?? 'Selection'),
+                        $runner['currentBackOdds'] ?? $runner['backOdds'] ?? null,
+                        $runner['previousBackOdds'] ?? $runner['initialBackOdds'] ?? null
+                    ), $runners),
+                ];
+            }
+            $outcomeOrder = [strtolower(trim($match['team1'])) => 0, 'draw' => 1, 'the draw' => 1, 'x' => 1, strtolower(trim($match['team2'])) => 2];
+            foreach ($groups as &$group) {
+                if ($group['label'] === 'Match Odds / 1X2') {
+                    usort($group['runners'], static fn (array $first, array $second): int => ($outcomeOrder[strtolower(trim($first['runner']))] ?? 3)
+                        <=> ($outcomeOrder[strtolower(trim($second['runner']))] ?? 3));
+                }
+            }
+            unset($group);
+
+            return array_values($groups);
+        }
+
+        if ($marketName !== 'MATCH_ODDS') {
+            return [];
+        }
+        $runners = [];
+        if (($match['result_status'] ?? '') === 'Live') {
+            $market = array_find($liveOdds['markets'] ?? [], static fn (array $market): bool => (int) ($market['market_id'] ?? 0) === 1
+                && in_array(strtolower((string) ($market['period'] ?? 'full-time')), ['full-time', 'full time'], true));
+            if ($market === null) {
+                return [];
+            }
+            $choices = array_column($market['choices'] ?? [], null, 'name');
+            foreach (['1' => $match['team1'], 'X' => 'Draw', '2' => $match['team2']] as $selection => $name) {
+                $choice = $choices[$selection] ?? [];
+                $runners[] = $this->footballOddsRunner($name, ($market['suspended'] ?? false) ? null : ($choice['decimal_odds'] ?? null), $choice['initial_decimal_odds'] ?? null);
+            }
+        } else {
+            $quote = $match['bet365_prematch'] ?? [];
+            if ((int) ($quote['bookmaker_id'] ?? 0) !== 126) {
+                return [];
+            }
+            foreach (['home_odds' => $match['team1'], 'draw_odds' => 'Draw', 'away_odds' => $match['team2']] as $key => $name) {
+                $runners[] = $this->footballOddsRunner($name, $quote[$key] ?? null, $quote['previous_odds'][$key] ?? null);
+            }
+        }
+
+        return [['source' => 'bet365', 'label' => ($match['result_status'] === 'Live' ? 'Live' : 'Pre-match').' · Match Odds / 1X2', 'runners' => $runners]];
+    }
+
+    /** @return array{runner: string, currentBackOdds: ?float, previousBackOdds: ?float, odds_direction: string} */
+    private function footballOddsRunner(string $name, mixed $current, mixed $previous): array
+    {
+        $current = is_numeric($current) && is_finite((float) $current) && (float) $current > 1 ? (float) $current : null;
+        $previous = is_numeric($previous) && is_finite((float) $previous) && (float) $previous > 1 ? (float) $previous : null;
+
+        return [
+            'runner' => $name, 'currentBackOdds' => $current, 'previousBackOdds' => $previous,
+            'odds_direction' => $current === null || $previous === null || $current === $previous ? 'same' : ($current < $previous ? 'down' : 'up'),
+        ];
+    }
+
+    private function footballLeaguePriority(string $tournament, ?string $country = null): int
+    {
+        $normalize = static fn (string $name): string => strtolower((string) preg_replace('/[^a-z0-9]+/i', '', Str::ascii($name)));
+        static $priorities = null;
+        $priorities ??= array_flip(array_map($normalize, self::LEAGUE_PRIORITY));
+        $aliases = [
+            'englishpremierleague' => 'Premier League', 'spanishlaliga' => 'La Liga',
+            'italianseriea' => 'Serie A', 'germanbundesliga' => 'Bundesliga',
+            'frenchligue1' => 'Ligue 1', 'uefaeuropaconferenceleague' => 'UEFA Conference League',
+            'portugueseprimeiraliga' => 'Primeira Liga', 'dutcheredivisie' => 'Eredivisie',
+            'turkishsuperlig' => 'Süper Lig', 'belgianjupilerproleague' => 'Belgian Pro League',
+            'englishchampionship' => 'EFL Championship', 'englishleague1' => 'EFL League One',
+            'brazilianseriea' => 'Brasileirão Série A', 'usamls' => 'Major League Soccer (MLS)',
+            'mls' => 'Major League Soccer (MLS)', 'majorleaguesoccer' => 'Major League Soccer (MLS)',
+        ];
+        $name = $normalize($tournament);
+        if ($country !== null && $country !== '' && $name === 'premierleague' && $normalize($country) !== 'england') {
+            return PHP_INT_MAX;
+        }
+        if ($name === 'bundesliga' && $normalize($country ?? '') === 'austria') {
+            $name = 'austrianbundesliga';
+        }
+
+        return $priorities[$normalize($aliases[$name] ?? $name)] ?? PHP_INT_MAX;
+    }
+
+    private function footballTimeline(array $match, array $timeline): array
+    {
+        $clock = $timeline['clock'] ?? [];
+        $finished = ($match['result_status'] ?? '') === 'Finished' || ($clock['finished'] ?? false);
+        $clockCode = strtoupper((string) ($clock['status_code'] ?? ''));
+        $live = ! $finished && (($match['result_status'] ?? '') === 'Live' || ($clock['status_type'] ?? '') === 'inprogress' || in_array($clockCode, ['6', '7', '31', 'HT'], true));
+        $minuteStatus = match ($clockCode) {
+            '6' => '1st half',
+            '7' => '2nd half',
+            '31', 'HT' => 'Half Time',
+            default => $match['minutes_status'] ?? $match['result_status'],
+        };
+        $periodStart = (int) ($clock['period_start'] ?? $match['current_period_start_timestamp'] ?? 0);
+        $minuteLabel = (string) $this->calculateMinutes($minuteStatus, (int) $match['timestamp'], $finished ? 'Finished' : ($live ? 'Live' : 'Prematch'), $match['added_time'] ?? [], $periodStart ?: null);
+        $halfTime = $minuteLabel === 'HT';
+        $secondHalf = $minuteStatus === '2nd half'
+            || str_contains(strtolower((string) ($clock['status_description'] ?? '')), '2nd');
+        $periodLimit = $secondHalf ? 90 : 45;
+        $minute = 0;
+        if ($finished) {
+            $minute = 90;
+            $minuteLabel = 'FT';
+        } elseif ($halfTime) {
+            $minute = 45;
+            $minuteLabel = 'HT';
+        } elseif ($live) {
+            if (preg_match('/^(\d+)(?:\+(\d+))?/', $minuteLabel, $parts)) {
+                $minute = (int) $parts[1] + (int) ($parts[2] ?? 0);
+            }
+            if (isset($clock['period_start']) && $periodStart > 0) {
+                $reference = (int) ($clock['last_period_timestamp'] ?? time());
+                $reference = $reference >= $periodStart ? $reference : time();
+                $minute = ($secondHalf ? 45 : 0) + max(0, (int) floor(($reference - $periodStart) / 60));
+                if (isset($clock['last_period_timestamp'])) {
+                    $minute += max(0, (int) floor((microtime(true) - ($timeline['clock_updated_at'] ?? microtime(true))) / 60));
+                }
+            }
+            if ($minute > 45 && ! str_starts_with($minuteLabel, '45+')) {
+                $periodLimit = 90;
+            }
+            $minuteLabel = $minute > $periodLimit ? $periodLimit.'+'.($minute - $periodLimit) : (string) $minute;
+        } else {
+            $minuteLabel = __('Not started');
+        }
+        $events = array_values($timeline['events'] ?? []);
+        usort($events, static fn (array $first, array $second): int => ($first['seconds'] <=> $second['seconds']) ?: strcmp($first['id'], $second['id']));
+        $stoppageCount = count(array_filter($events, static fn (array $event): bool => $event['minute'] + $event['added_time'] > 90));
+        $stoppageIndex = 0;
+        foreach ($events as &$event) {
+            $event['left'] = min(100, max(0, $event['minute'] / 90 * 100));
+            $event['end_offset'] = null;
+            if ($event['minute'] + $event['added_time'] > 90) {
+                $event['end_offset'] = $stoppageCount - 1 - $stoppageIndex++;
+                $event['left'] = max(0, 100 - $event['end_offset'] * 2);
+            }
+            $displayMinute = min(90, $event['minute']);
+            $added = $event['added_time'] + max(0, $event['minute'] - 90);
+            $event['minute_label'] = $displayMinute.($added > 0 ? '+'.$added : '')."'";
+            $event['label'] = match ($event['kind']) {
+                'goal' => __('Goal'),
+                'yellow' => __('Yellow card'),
+                default => __('Red card'),
+            };
+            $playerParts = preg_split('/\s+/u', trim($event['player']));
+            $event['player_surname'] = $event['player_surname'] ?? ($event['player'] !== '' ? end($playerParts) : __('Unknown player'));
+            $event['player'] = $event['player'] ?: __('Unknown player');
+        }
+        unset($event);
+
+        return [
+            'events' => $events,
+            'minute' => $minute,
+            'minute_label' => $minuteLabel.($live && ! $halfTime ? "'" : ''),
+            'period_limit' => $periodLimit,
+            'progress' => min(100, max(0, $minute / 90 * 100)),
+            'running' => $live && ! $halfTime,
+            'calculated_at' => time(),
+            'finished' => $finished,
+        ];
     }
 
     public function calculateMinutes(?string $minute_status, int $timestamp, string $result_status, array $added_time = [], ?int $current_period_start_timestamp = null)
@@ -481,8 +742,7 @@ trait FootballTrait
 
         foreach ((getInRedis('Football:matches') ?? []) as $candidate) {
             if (
-                ($candidate['data_sync_complete'] ?? false) === true
-                && (string) ($candidate['sportsApiPro_match_id'] ?? '') === $matchId
+                (string) ($candidate['sportsApiPro_match_id'] ?? '') === $matchId
             ) {
                 $match = $candidate;
                 break;
@@ -493,7 +753,6 @@ trait FootballTrait
             $storedMatch = FootballMatch::query()
                 ->with('markets')
                 ->where('sports_api_pro_match_id', $matchId)
-                ->where('data_sync_complete', true)
                 ->first();
 
             if ($storedMatch !== null) {
@@ -687,7 +946,7 @@ trait FootballTrait
             case 'fav_losing':
             case 'fav_not_winning':
                 $getData = array_values(array_filter($getData, function (array $match) use ($type): bool {
-                    $favoriteOdds = (float) ($match['prematch_favorite_odds'] ?? 0);
+                    $favoriteOdds = (float) ($match['bet365_prematch']['favorite_odds'] ?? 0);
                     $maximumOdds = $type === 'fav_losing' ? 2.10 : 1.87;
 
                     if (
@@ -720,7 +979,7 @@ trait FootballTrait
                         }
                     }
 
-                    $favoriteSide = $match['prematch_favorite_side'] ?? null;
+                    $favoriteSide = $match['bet365_prematch']['favorite_side'] ?? null;
                     $homeScore = (int) ($match['home_score'] ?? 0);
                     $awayScore = (int) ($match['away_score'] ?? 0);
 
@@ -746,6 +1005,10 @@ trait FootballTrait
                         return false;
                     }
 
+                    if (($match['pinnacle_drop_triggered'] ?? false) === true) {
+                        return true;
+                    }
+
                     foreach (($match['markets'] ?? []) as $marketRunners) {
                         foreach (($marketRunners ?? []) as $runner) {
                             if (($runner['prematch_drop_triggered'] ?? false) === true) {
@@ -763,6 +1026,10 @@ trait FootballTrait
                 $getData = array_values(array_filter($getData, static function (array $match) use ($shockCutoff): bool {
                     if (($match['result_status'] ?? null) !== 'Prematch') {
                         return false;
+                    }
+
+                    if ((int) ($match['pinnacle_market_shock_detected_at'] ?? 0) >= $shockCutoff) {
+                        return true;
                     }
 
                     foreach (($match['markets'] ?? []) as $marketRunners) {
@@ -925,6 +1192,7 @@ trait FootballTrait
                     'statusPriority' => $statusPriority,
                     'time' => $displayTime,
                     'comp' => $data['tournament'] ?? '',
+                    'competition_country' => $data['tournament_country'] ?? null,
                     'match' => ($data['team1'] ?? '').' vs '.($data['team2'] ?? ''),
                     'score' => $this->getScore($data),
                     'market' => $uiMarket,
@@ -950,6 +1218,11 @@ trait FootballTrait
         }
 
         usort($mainArray, function (array $first, array $second): int {
+            $leagueComparison = $this->footballLeaguePriority((string) ($first['comp'] ?? ''), $first['competition_country'] ?? null)
+                <=> $this->footballLeaguePriority((string) ($second['comp'] ?? ''), $second['competition_country'] ?? null);
+            if ($leagueComparison !== 0) {
+                return $leagueComparison;
+            }
             $statusComparison = $first['statusPriority'] <=> $second['statusPriority'];
 
             if ($statusComparison !== 0) {

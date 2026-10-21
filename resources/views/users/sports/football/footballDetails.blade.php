@@ -26,11 +26,12 @@
             @php
                 $goalHighlightActive = ($event['goal_highlight_until'] ?? 0) > time();
                 $liveStats = $event['live_stats'] ?? [];
+                $preferIncidents = ($event['card_counts_updated_at'] ?? 0) > ($event['card_stats_updated_at'] ?? 0);
                 if (!isset($liveStats['corners']) && isset($event['corners']['home'], $event['corners']['away'])) {
                     $liveStats['corners'] = $event['corners'];
                 }
                 if (
-                    !isset($liveStats['yellow_cards']) &&
+                    ($preferIncidents || !isset($liveStats['yellow_cards'])) &&
                     isset($event['card_counts']['home']['yellow'], $event['card_counts']['away']['yellow'])
                 ) {
                     $liveStats['yellow_cards'] = [
@@ -39,7 +40,7 @@
                     ];
                 }
                 if (
-                    !isset($liveStats['red_cards']) &&
+                    ($preferIncidents || !isset($liveStats['red_cards'])) &&
                     isset($event['card_counts']['home']['total_red'], $event['card_counts']['away']['total_red'])
                 ) {
                     $liveStats['red_cards'] = [
@@ -131,9 +132,11 @@
                         $homeCards = $event['card_counts']['home'] ?? [];
                         $awayCards = $event['card_counts']['away'] ?? [];
                         $homeCards['yellow'] =
-                            $homeCards['yellow'] ?? (($event['cards']['home'] ?? null) === 'yellow' ? 1 : 0);
+                            $liveStats['yellow_cards']['home'] ?? $homeCards['yellow'] ?? (($event['cards']['home'] ?? null) === 'yellow' ? 1 : 0);
                         $awayCards['yellow'] =
-                            $awayCards['yellow'] ?? (($event['cards']['away'] ?? null) === 'yellow' ? 1 : 0);
+                            $liveStats['yellow_cards']['away'] ?? $awayCards['yellow'] ?? (($event['cards']['away'] ?? null) === 'yellow' ? 1 : 0);
+                        $homeCards['total_red'] = $liveStats['red_cards']['home'] ?? $homeCards['total_red'] ?? 0;
+                        $awayCards['total_red'] = $liveStats['red_cards']['away'] ?? $awayCards['total_red'] ?? 0;
                     @endphp
                     <div
                         class="team-score-group grid min-w-0 flex-1 grid-cols-[28px_28px_28px_minmax(0,180px)_44px_minmax(0,180px)_28px_28px_28px] items-center justify-center gap-x-0.5 overflow-hidden whitespace-nowrap font-semibold text-[15px] text-[#0b2a40] max-[768px]:grid-cols-[24px_24px_24px_minmax(0,1fr)_40px_minmax(0,1fr)_24px_24px_24px] max-[480px]:text-[12px]">
@@ -233,29 +236,132 @@
                         @endif
                         title="Prediction" @disabled($event['status'] !== 'Prematch')><i class="fas fa-brain"></i></button>
                 </div>
-                <div
-                    class="odds-group grid min-h-8 w-[360px] grid-cols-3 items-center gap-2 whitespace-nowrap max-[1024px]:w-full max-[480px]:col-span-1 max-[480px]:gap-1.5">
-                    @foreach ($event['markets'] as $odd)
-                        <div class="odd-box relative flex min-w-0 items-center justify-center gap-1 whitespace-nowrap rounded-[10px] border border-[#d7e3ef] bg-white px-2 py-0.5 text-center text-[15px] font-semibold text-[#0b2a40] shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition duration-300 [cursor:default] dark:border-[#3a5568] dark:bg-[#1f3444] dark:text-[#e8edf2] dark:[&_.tooltip]:bg-[#2a4050] dark:[&_.tooltip]:text-[#e8edf2] [&_.tooltip]:invisible [&_.tooltip]:absolute [&_.tooltip]:bottom-[110%] [&_.tooltip]:left-1/2 [&_.tooltip]:z-10 [&_.tooltip]:-translate-x-1/2 [&_.tooltip]:whitespace-nowrap [&_.tooltip]:rounded-md [&_.tooltip]:bg-[#0b2a40] [&_.tooltip]:px-2 [&_.tooltip]:py-1 [&_.tooltip]:text-[11px] [&_.tooltip]:font-normal [&_.tooltip]:text-white [&_.tooltip]:opacity-0 [&_.tooltip]:transition [&:hover_.tooltip]:visible [&:hover_.tooltip]:opacity-100 [&_i]:text-xs [&_i]:transition-all [&_i]:duration-150">
-                            @if ($checkAuthAndSubscription['display_odds'])
-                                {{ number_format($odd['currentBackOdds'], 2) }}
-                                @if ($odd['odds_direction'] == 'down')
-                                    <i class="fas fa-arrow-down text-[#c74e4e]"></i>
-                                    <span
-                                        class="tooltip">{{ number_format($odd['initialBackOdds'] ?? $odd['previousBackOdds'], 2) }}
-                                        >> {{ number_format($odd['currentBackOdds'], 2) }}</span>
-                                @elseif($odd['odds_direction'] == 'up')
-                                    <i class="fas fa-arrow-up text-[#1f9a6e]"></i>
-                                    <span
-                                        class="tooltip">{{ number_format($odd['initialBackOdds'] ?? $odd['previousBackOdds'], 2) }}
-                                        << {{ number_format($odd['currentBackOdds'], 2) }}</span>
-                                @endif
-                            @else
-                                @include('lock_icon')
-                            @endif
+                @if (($event['timeline'] ?? null) !== null)
+                    <div class="w-[360px] min-w-0 max-[1024px]:w-full max-[480px]:col-span-1">
+                        @if ($checkAuthAndSubscription['display_odds'])
+                            @php $timeline = $event['timeline']; @endphp
+                            <div data-football-timeline="{{ $event['sportsApiPro_match_id'] }}"
+                                data-timeline-minute="{{ $timeline['minute'] }}"
+                                data-timeline-at="{{ $timeline['calculated_at'] }}"
+                                data-timeline-running="{{ $timeline['running'] ? 'true' : 'false' }}"
+                                data-timeline-period-limit="{{ $timeline['period_limit'] }}"
+                                data-timeline-label="{{ $timeline['minute_label'] }}"
+                                data-timeline-score="{{ $event['score'] }}"
+                                class="relative min-w-0 overflow-hidden rounded-lg border border-[#dce5ee] bg-[#f8fbfe] text-[#34566e] dark:border-[#365167] dark:bg-[#1b3447] dark:text-[#cbd5e1]">
+                                <div id="timeline-panel-{{ $event['sportsApiPro_match_id'] }}" data-timeline-panel
+                                    class="hidden rounded-t-md bg-[#08aebf] text-center text-xs text-white" role="region"
+                                    aria-label="{{ __('Match timeline details') }}">
+                                    <div class="relative grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 bg-[#08b9ca] px-5 py-2">
+                                        <span class="min-w-0 break-words text-right">{{ $event['team1'] }}</span>
+                                        <span class="rounded bg-[#343434] px-1.5 py-1">
+                                            <strong data-timeline-detail-score class="block whitespace-nowrap text-[#65cf8a]">{{ $event['score'] }}</strong>
+                                            <span data-timeline-detail-minute>{{ $timeline['minute_label'] }}</span>
+                                        </span>
+                                        <span class="min-w-0 break-words text-left">{{ $event['team2'] }}</span>
+                                        <button type="button" data-timeline-close class="absolute right-0.5 top-0.5 h-5 w-5 cursor-pointer rounded text-base hover:bg-black/10"
+                                            aria-label="{{ __('Close timeline details') }}">&times;</button>
+                                    </div>
+                                    <div data-timeline-detail-event class="hidden flex-wrap items-center justify-center gap-1 px-2 py-1.5">
+                                        <span data-timeline-detail-icon aria-hidden="true"></span>
+                                        <span data-timeline-detail-player class="break-words"></span>
+                                        <span data-timeline-detail-kind class="text-[10px]"></span>
+                                    </div>
+                                    <div data-timeline-goals class="space-y-1 px-2 py-1.5">
+                                        @forelse (array_filter($timeline['events'], static fn (array $incident): bool => $incident['kind'] === 'goal') as $goal)
+                                            <div class="flex items-center justify-center gap-1">
+                                                <span aria-hidden="true">⚽</span>
+                                                <span>{{ $goal['player_surname'] }}</span>
+                                                <span>{{ $goal['minute_label'] }}</span>
+                                            </div>
+                                        @empty
+                                            <span>{{ __('No goals yet') }}</span>
+                                        @endforelse
+                                    </div>
+                                </div>
+                                <div class="relative mx-3 h-16">
+                                    <button type="button" data-timeline-toggle aria-expanded="false"
+                                        aria-controls="timeline-panel-{{ $event['sportsApiPro_match_id'] }}"
+                                        aria-label="{{ __('Show match timeline for :home vs :away', ['home' => $event['team1'], 'away' => $event['team2']]) }}"
+                                        class="absolute inset-0 h-full w-full cursor-pointer rounded bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"></button>
+                                    <span class="pointer-events-none absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[#d3dde6] dark:bg-[#bacbd9]" aria-hidden="true"></span>
+                                    <span data-timeline-progress class="pointer-events-none absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[#34566e] transition-[width] duration-300 dark:bg-[#5e849f]"
+                                        style="width: {{ $timeline['progress'] }}%" aria-hidden="true"></span>
+                                    <span class="pointer-events-none absolute left-1/2 top-1/2 h-3 w-px -translate-x-1/2 -translate-y-1/2 bg-[#90a7b9]" aria-hidden="true"></span>
+                                    <div class="pointer-events-none absolute inset-x-0 bottom-0.5 flex justify-between text-[9px] leading-none text-[#7891a5] dark:text-[#b0c4d4]" aria-hidden="true">
+                                        <span>0'</span><span class="absolute left-1/2 -translate-x-1/2">45'</span><span class="ml-auto">90'</span>
+                                    </div>
+                                    @if ($timeline['finished'])
+                                        <span class="absolute left-0 top-0.5 text-[9px] font-semibold">FT</span>
+                                    @endif
+                                    @foreach ($timeline['events'] as $incident)
+                                        <button type="button" data-timeline-event="{{ $incident['id'] }}"
+                                            data-event-minute="{{ $incident['minute_label'] }}" data-event-player="{{ $incident['player'] }}" data-event-surname="{{ $incident['player_surname'] }}"
+                                            data-event-kind="{{ $incident['kind'] }}" data-event-label="{{ $incident['label'] }}"
+                                            data-event-score="{{ $incident['home_score'] !== null && $incident['away_score'] !== null ? $incident['home_score'].' - '.$incident['away_score'] : '' }}"
+                                            aria-label="{{ $incident['label'].' '.$incident['minute_label'].' '.$incident['player'] }}"
+                                            title="{{ $incident['label'].' '.$incident['minute_label'].' '.$incident['player'] }}"
+                                            style="left: {{ $incident['end_offset'] ? 'calc(100% - max('.($incident['end_offset'] * 2).'%, '.($incident['end_offset'] * 14).'px))' : $incident['left'].'%' }}"
+                                            class="absolute z-10 flex h-3.5 w-3.5 -translate-x-1/2 cursor-pointer items-center justify-center rounded-sm outline-none hover:ring-2 hover:ring-[#90a7b9]/60 focus-visible:ring-2 focus-visible:ring-cyan-500 {{ $incident['is_home'] ? 'bottom-[calc(50%+6px)]' : 'top-[calc(50%+6px)]' }}">
+                                            @if ($incident['kind'] === 'goal')
+                                                <span class="flex h-2.5 w-2.5 items-center justify-center text-[9px] leading-none" aria-hidden="true">⚽</span>
+                                            @else
+                                                <span class="h-3 w-2 rounded-[1px] shadow-sm {{ $incident['kind'] === 'yellow' ? 'bg-[#e6b422]' : 'bg-[#c74e4e]' }}" aria-hidden="true"></span>
+                                            @endif
+                                        </button>
+                                    @endforeach
+                                </div>
                             </div>
-                    @endforeach
-                </div>
+                        @else
+                            <div class="flex min-h-8 items-center justify-center">@include('lock_icon')</div>
+                        @endif
+                    </div>
+                @else
+                    <div class="odds-group flex min-h-8 w-[360px] min-w-0 flex-col justify-center gap-2 max-[1024px]:w-full max-[480px]:col-span-1">
+                        @if ($checkAuthAndSubscription['display_odds'])
+                            @forelse ($event['odds_markets'] ?? [] as $market)
+                                <div data-football-odds-source="{{ $market['source'] }}">
+                                    <div class="mb-1 flex min-w-0 items-center gap-1 text-[10px] leading-tight text-[#48708d] dark:text-[#b0c8dd]">
+                                        <span class="shrink-0 font-bold">{{ $market['source'] }}</span>
+                                        <span aria-hidden="true">·</span>
+                                        <span class="truncate" title="{{ $market['label'] }}">{{ $market['label'] }}</span>
+                                    </div>
+                                    <div @class([
+                                        'grid gap-2 max-[480px]:gap-1.5',
+                                        'grid-cols-1' => count($market['runners']) === 1,
+                                        'grid-cols-2' => count($market['runners']) === 2,
+                                        'grid-cols-3' => count($market['runners']) >= 3,
+                                    ])>
+                                        @foreach ($market['runners'] as $odd)
+                                            <div class="odd-box relative min-w-0 cursor-default rounded-[10px] border border-[#d7e3ef] bg-white px-2 py-1 text-center font-semibold text-[#0b2a40] shadow-[0_1px_2px_rgba(0,0,0,0.02)] dark:border-[#3a5568] dark:bg-[#1f3444] dark:text-[#e8edf2] dark:[&_.tooltip]:bg-[#2a4050] dark:[&_.tooltip]:text-[#e8edf2] [&_.tooltip]:invisible [&_.tooltip]:absolute [&_.tooltip]:bottom-[110%] [&_.tooltip]:left-1/2 [&_.tooltip]:z-10 [&_.tooltip]:-translate-x-1/2 [&_.tooltip]:whitespace-nowrap [&_.tooltip]:rounded-md [&_.tooltip]:bg-[#0b2a40] [&_.tooltip]:px-2 [&_.tooltip]:py-1 [&_.tooltip]:text-[11px] [&_.tooltip]:font-normal [&_.tooltip]:text-white [&_.tooltip]:opacity-0 [&:hover_.tooltip]:visible [&:hover_.tooltip]:opacity-100"
+                                                title="{{ $odd['runner'] }}">
+                                                <span class="block truncate text-[9px] font-medium leading-tight text-[#48708d] dark:text-[#b0c8dd]">{{ $odd['runner'] }}</span>
+                                                <span class="flex items-center justify-center gap-1 whitespace-nowrap text-[15px] tabular-nums">
+                                                    @if ($odd['currentBackOdds'] !== null)
+                                                        {{ number_format($odd['currentBackOdds'], 2) }}
+                                                        @if ($odd['odds_direction'] === 'down')
+                                                            <i class="fas fa-arrow-down text-xs text-[#c74e4e]" aria-label="{{ __('Odds decreased') }}"></i>
+                                                        @elseif ($odd['odds_direction'] === 'up')
+                                                            <i class="fas fa-arrow-up text-xs text-[#1f9a6e]" aria-label="{{ __('Odds increased') }}"></i>
+                                                        @endif
+                                                        @if ($odd['previousBackOdds'] !== null)
+                                                            <span class="tooltip">{{ number_format($odd['previousBackOdds'], 2) }} → {{ number_format($odd['currentBackOdds'], 2) }}</span>
+                                                        @endif
+                                                    @else
+                                                        <span aria-label="{{ __('Odds unavailable') }}">—</span>
+                                                    @endif
+                                                </span>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                </div>
+                            @empty
+                                <span class="text-center text-xs text-[#7891a5] dark:text-[#b0c4d4]">{{ __('Odds unavailable') }}</span>
+                            @endforelse
+                        @else
+                            <div class="flex min-h-8 items-center justify-center">@include('lock_icon')</div>
+                        @endif
+                    </div>
+                @endif
             </div>
             @if ($checkAuthAndSubscription['display_odds'] && $event['status'] === 'Live')
                 <div id="live-stats-{{ $event['sportsApiPro_match_id'] }}"

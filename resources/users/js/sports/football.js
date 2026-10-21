@@ -8,6 +8,52 @@ const getSelectedFilters = () => {
     };
 };
 
+let openFootballTimeline = null;
+
+const restoreFootballTimeline = () => {
+    let found = false;
+    document.querySelectorAll('[data-football-timeline]').forEach((timeline) => {
+        const panel = timeline.querySelector('[data-timeline-panel]');
+        const toggle = timeline.querySelector('[data-timeline-toggle]');
+        const open = openFootballTimeline?.matchId === timeline.dataset.footballTimeline;
+        panel?.classList.toggle('hidden', !open);
+        toggle?.setAttribute('aria-expanded', String(open));
+        if (!open || !panel) return;
+        found = true;
+        const selected = openFootballTimeline.eventId
+            ? timeline.querySelector(`[data-timeline-event="${CSS.escape(openFootballTimeline.eventId)}"]`)
+            : null;
+        if (!selected) openFootballTimeline.eventId = null;
+        panel.querySelector('[data-timeline-detail-score]').textContent = selected?.dataset.eventScore || timeline.dataset.timelineScore;
+        panel.querySelector('[data-timeline-detail-minute]').textContent = selected?.dataset.eventMinute || timeline.dataset.timelineLabel;
+        const detail = panel.querySelector('[data-timeline-detail-event]');
+        detail.classList.toggle('hidden', !selected);
+        detail.classList.toggle('flex', Boolean(selected));
+        panel.querySelector('[data-timeline-goals]')?.classList.toggle('hidden', Boolean(selected));
+        panel.querySelector('[data-timeline-detail-icon]').textContent = selected
+            ? ({ goal: '⚽', yellow: '🟨', red: '🟥' }[selected.dataset.eventKind] || '') : '';
+        panel.querySelector('[data-timeline-detail-player]').textContent = selected?.dataset.eventSurname || selected?.dataset.eventPlayer || '';
+        panel.querySelector('[data-timeline-detail-kind]').textContent = selected?.dataset.eventLabel || '';
+    });
+    if (!found) openFootballTimeline = null;
+};
+
+const refreshFootballTimelineClocks = () => {
+    document.querySelectorAll('[data-football-timeline][data-timeline-running="true"]').forEach((timeline) => {
+        const elapsed = Math.max(0, Math.floor((Date.now() / 1000 - Number(timeline.dataset.timelineAt)) / 60));
+        const minute = Number(timeline.dataset.timelineMinute) + elapsed;
+        const limit = Number(timeline.dataset.timelinePeriodLimit);
+        const label = (minute > limit ? `${limit}+${minute - limit}` : String(minute)) + "'";
+        timeline.dataset.timelineLabel = label;
+        const progress = timeline.querySelector('[data-timeline-progress]');
+        if (progress) progress.style.width = `${Math.min(100, Math.max(0, minute / 90 * 100))}%`;
+        if (openFootballTimeline?.matchId === timeline.dataset.footballTimeline && !openFootballTimeline.eventId) {
+            const detailMinute = timeline.querySelector('[data-timeline-detail-minute]');
+            if (detailMinute) detailMinute.textContent = label;
+        }
+    });
+};
+
 const FOOTBALL_PAGE_SIZE = 20;
 const footballLazyLoader = document.querySelector('[data-football-lazy-loader]');
 let footballPage = 1;
@@ -138,6 +184,24 @@ document.addEventListener('click', (event) => {
         event.stopImmediatePropagation();
         window.location.href = loginRequiredAction.dataset.loginUrl;
         return;
+    }
+
+    const timeline = event.target.closest('[data-football-timeline]');
+    if (timeline) {
+        const selected = event.target.closest('[data-timeline-event]');
+        const toggle = event.target.closest('[data-timeline-toggle]');
+        if (selected || toggle || event.target.closest('[data-timeline-close]')) {
+            const matchId = timeline.dataset.footballTimeline;
+            const eventId = selected?.dataset.timelineEvent || null;
+            const same = openFootballTimeline?.matchId === matchId && openFootballTimeline?.eventId === eventId;
+            openFootballTimeline = event.target.closest('[data-timeline-close]') || same ? null : { matchId, eventId };
+            restoreFootballTimeline();
+        }
+        return;
+    }
+    if (openFootballTimeline) {
+        openFootballTimeline = null;
+        restoreFootballTimeline();
     }
 
     const matchRow = event.target.closest('[data-match-url]');
@@ -305,6 +369,8 @@ const callFixtureData = async (value, options = {}) => {
         scheduleGoalHighlights();
         restoreLiveStatsPanel();
         restorePredictionPanel();
+        refreshFootballTimelineClocks();
+        restoreFootballTimeline();
 
     } catch (error) {
         console.error('Request failed:', error);
@@ -399,6 +465,8 @@ window.Echo.channel('sports.football.live')
             scheduleGoalHighlights();
             restoreLiveStatsPanel();
             restorePredictionPanel();
+            refreshFootballTimelineClocks();
+            restoreFootballTimeline();
 
         } catch (error) {
             console.error('Request failed:', error);
@@ -479,4 +547,13 @@ document.addEventListener('click', async (event) => {
             value: option.dataset.value,
         },
     }, { preserveLoaded: true });
+});
+
+refreshFootballTimelineClocks();
+setInterval(refreshFootballTimelineClocks, 1000);
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && openFootballTimeline) {
+        openFootballTimeline = null;
+        restoreFootballTimeline();
+    }
 });

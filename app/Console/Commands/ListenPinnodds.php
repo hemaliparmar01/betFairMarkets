@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use Amp\Http\Client\HttpClientBuilder;
 use Amp\Http\Client\Request;
+use App\Http\Controllers\Users\Football\FootballSyncController;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Cache;
@@ -50,14 +51,19 @@ class ListenPinnodds extends Command
             }
             try {
                 $this->storeDrops($pending, $feeds);
-                $pending = [];
-                $dirty = false;
-                $lastFlushAt = time();
             } catch (Throwable $e) {
                 Log::warning('Pinnodds cache update failed', ['exception' => $e::class]);
 
                 return;
             }
+            try {
+                app(FootballSyncController::class)->mergePinnacleDrops(array_values($pending));
+                $pending = [];
+            } catch (Throwable $e) {
+                Log::warning('Pinnacle Football filter update deferred; pending signals retained', ['exception' => $e::class]);
+            }
+            $dirty = false;
+            $lastFlushAt = time();
             try {
                 Broadcast::on('sports.pinnacle.drops')->as('drops.updated')->with(['refresh' => true])->sendNow();
             } catch (Throwable $e) {
@@ -108,7 +114,7 @@ class ListenPinnodds extends Command
                     $feeds[$mode]['status'] = 'connecting';
                     $dirty = true;
                     try {
-                        $request = new Request(rtrim((string) config('services.pinnodds.url'), '/').$path.'?min_drop=5');
+                        $request = new Request(rtrim((string) config('services.pinnodds.url'), '/').$path.'?min_drop='.($mode === 'prematch' ? 1 : 5));
                         $request->setHeader('x-api-key', $key);
                         $request->setHeader('Accept', 'text/event-stream');
                         $request->setTcpConnectTimeout(5);
@@ -207,7 +213,7 @@ class ListenPinnodds extends Command
             }
             $from = (float) ($drop['from_price'] ?? 0);
             $to = (float) ($drop['to_price'] ?? 0);
-            if ($from <= 1 || $to <= 1 || round((($from - $to) / $from) * 100, 8) < 5) {
+            if (! is_finite($from) || ! is_finite($to) || $from <= 1 || $to <= 1 || round((($from - $to) / $from) * 100, 8) < ($mode === 'prematch' ? 1 : 5)) {
                 continue;
             }
             $alerted = is_numeric($drop['alerted'] ?? null) ? (int) $drop['alerted'] : time();
@@ -236,13 +242,15 @@ class ListenPinnodds extends Command
         withRedisLock('Pinnacle:drops', function () use ($pending, $feeds): void {
             $cached = getInRedis('Pinnacle:drops') ?? [];
             $alerts = [];
-            foreach ($cached['alerts'] ?? [] as $alert) {
+            foreach ($cached['signals'] ?? $cached['alerts'] ?? [] as $alert) {
                 $mode = $alert['feed'] ?? (($alert['is_live'] ?? false) ? 'live' : 'prematch');
                 $alerts = array_replace($alerts, $this->normalizeDrops([$alert], $mode));
             }
             $alerts = array_filter(array_replace($alerts, $pending), static fn (array $alert): bool => (int) ($alert['alerted'] ?? 0) >= time() - 10800);
             uasort($alerts, static fn (array $left, array $right): int => (int) $right['alerted'] <=> (int) $left['alerted']);
-            Redis::set('Pinnacle:drops', json_encode(['alerts' => array_values(array_slice($alerts, 0, 1000, true)), 'feeds' => $feeds, 'updated_at' => time()], JSON_THROW_ON_ERROR));
+            $signals = array_values(array_slice($alerts, 0, 5000, true));
+            $dashboardAlerts = array_values(array_slice(array_filter($alerts, static fn (array $alert): bool => $alert['drop_pct'] >= 5), 0, 1000, true));
+            Redis::set('Pinnacle:drops', json_encode(['alerts' => $dashboardAlerts, 'signals' => $signals, 'feeds' => $feeds, 'updated_at' => time()], JSON_THROW_ON_ERROR));
             Redis::expire('Pinnacle:drops', 10800);
         });
     }

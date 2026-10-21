@@ -16,11 +16,10 @@ class FootballController extends Controller
     public function football()
     {
         $data = $this->getFootballMatches();
-        $getAllMarkets = $this->getAllMarkets();
         $hasMore = $this->footballHasMore;
         $nextPage = $this->footballNextPage;
 
-        return view('users.sports.football.football', compact('data', 'getAllMarkets', 'hasMore', 'nextPage'));
+        return view('users.sports.football.football', compact('data', 'hasMore', 'nextPage'));
     }
 
     public function marketActivity(): View|JsonResponse
@@ -214,8 +213,7 @@ class FootballController extends Controller
 
                     foreach ($matches as $key => $match) {
                         if (
-                            ($match['data_sync_complete'] ?? false) !== true
-                            || ($match['sportsApiPro_match_id'] ?? null) != $matchId
+                            ($match['sportsApiPro_match_id'] ?? null) != $matchId
                             || ($match['result_status'] ?? null) !== 'Prematch'
                         ) {
                             continue;
