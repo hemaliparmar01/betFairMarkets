@@ -21,10 +21,10 @@ class HorseRacingSyncController extends Controller
             'timeout' => 30,
             'raw_response' => true,
             'follow_redirects' => true,
-        ]);
+        ], $apiDiagnostics);
         $data = json_decode($response['body'], true);
         if (! $response['successful'] || ! is_array($data['liveMap'] ?? null) || ($data['meta']['stale'] ?? true)) {
-            Log::warning('HorseRacing snapshot unavailable; existing races retained', ['status' => $response['status']]);
+            Log::warning('HorseRacing snapshot unavailable; existing races retained', ['status' => $response['status'], 'api' => $apiDiagnostics]);
 
             return [];
         }
@@ -224,10 +224,10 @@ class HorseRacingSyncController extends Controller
             'timeout' => 25,
             'raw_response' => true,
             'follow_redirects' => true,
-        ]);
+        ], $apiDiagnostics);
         $data = json_decode($response['body'], true);
         if (! $response['successful'] || ! is_array($data['leagues'] ?? null)) {
-            Log::warning('Horse Racing SportsAPIPro metadata unavailable', ['status' => $response['status']]);
+            Log::warning('Horse Racing SportsAPIPro metadata unavailable', ['status' => $response['status'], 'api' => $apiDiagnostics]);
 
             return [];
         }

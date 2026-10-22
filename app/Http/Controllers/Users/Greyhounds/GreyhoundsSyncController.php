@@ -21,10 +21,10 @@ class GreyhoundsSyncController extends Controller
             'timeout' => 30,
             'raw_response' => true,
             'follow_redirects' => true,
-        ]);
+        ], $apiDiagnostics);
         $data = json_decode($response['body'], true);
         if (! $response['successful'] || ! is_array($data['liveMap'] ?? null) || ($data['meta']['stale'] ?? true)) {
-            Log::warning('Greyhounds snapshot unavailable; existing races retained', ['status' => $response['status']]);
+            Log::warning('Greyhounds snapshot unavailable; existing races retained', ['status' => $response['status'], 'api' => $apiDiagnostics]);
 
             return [];
         }

@@ -199,13 +199,49 @@ if (! function_exists('recordSportsApiProRestRequest')) {
     }
 }
 
+if (! function_exists('apiResponseLogContext')) {
+    /**
+     * @param  array<string, mixed>  $response
+     * @param  list<string>  $secrets
+     * @return array<string, mixed>
+     */
+    function apiResponseLogContext(array $response, array $secrets = []): array
+    {
+        if (isset($response['url'])) {
+            $response['url'] = preg_replace_callback('/([?&](?:x[-_]?api[-_]?key|x[-_]?portal[-_]?api[-_]?key|api[-_]?key|key|token|access_token|auth_key|auth_signature|signature|password|secret)=)([^&#]*)/i', static function (array $match) use (&$secrets): string {
+                $secrets[] = urldecode($match[2]);
+
+                return $match[1].'[REDACTED]';
+            }, $response['url']);
+        }
+        $secrets = array_values(array_filter(array_unique($secrets), static fn (string $secret): bool => $secret !== ''));
+        foreach ($secrets as $secret) {
+            $encoded = json_encode($secret);
+            $variants = [$secret, rawurlencode($secret), urlencode($secret)];
+            if (is_string($encoded)) {
+                $variants[] = substr($encoded, 1, -1);
+            }
+            foreach ($response as $field => $value) {
+                if (is_string($value)) {
+                    $response[$field] = str_replace($variants, '[REDACTED]', $value);
+                }
+            }
+        }
+
+        return $response;
+    }
+}
+
 if (! function_exists('ApiCall')) {
     /**
      * @param  string|array<string, string>|list<string>  $key
      * @param  array{query?: array<string, mixed>, connect_timeout?: int, timeout?: int, raw_response?: bool, follow_redirects?: bool}  $options
+     * @param  array<string, mixed>|null  $diagnostics
      */
-    function ApiCall(string $url, string|array $key, array $options = []): mixed
+    function ApiCall(string $url, string|array $key, array $options = [], ?array &$diagnostics = null): mixed
     {
+        $captureDiagnostics = func_num_args() >= 4;
+        $diagnostics = null;
         $query = http_build_query($options['query'] ?? [], '', '&', PHP_QUERY_RFC3986);
         if ($query !== '') {
             $url .= (str_contains($url, '?') ? '&' : '?').$query;
@@ -216,8 +252,14 @@ if (! function_exists('ApiCall')) {
         }
 
         $headers = [];
+        $secrets = [];
         foreach ((array) $key as $name => $value) {
-            $headers[] = is_string($name) ? $name.': '.$value : $value;
+            $header = is_string($name) ? $name.': '.$value : $value;
+            $headers[] = $header;
+            if (preg_match('/^[^:]*?(?:authorization|key|token|secret)[^:]*:\s*(.+)$/i', $header, $matches)) {
+                $secrets[] = $matches[1];
+                $secrets[] = preg_replace('/^Bearer\s+/i', '', $matches[1]);
+            }
         }
 
         $ch = curl_init($url);
@@ -231,19 +273,44 @@ if (! function_exists('ApiCall')) {
                 CURLOPT_MAXREDIRS => 5,
             ]);
             $body = curl_exec($ch);
+            $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $contentType = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+            $curlErrorCode = curl_errno($ch);
+            $curlError = curl_error($ch);
+            $rawResponse = $options['raw_response'] ?? false;
+            $data = null;
+            $jsonError = null;
+            if ($body !== false && (! $rawResponse || str_contains(strtolower($contentType), 'json'))) {
+                $data = json_decode($body, true);
+                $jsonError = json_last_error() === JSON_ERROR_NONE ? null : json_last_error_msg();
+            }
+            $failed = $body === false || $status < 200 || $status >= 300 || $jsonError !== null
+                || (is_array($data) && ($data['success'] ?? true) === false);
+            if ($captureDiagnostics || $failed) {
+                $diagnostics = apiResponseLogContext([
+                    'url' => $url,
+                    'http_status' => $status,
+                    'content_type' => $contentType,
+                    'curl_errno' => $curlErrorCode,
+                    'curl_error' => $curlError !== '' ? $curlError : null,
+                    'json_error' => $jsonError,
+                    'response_body' => $body === false ? null : $body,
+                ], $secrets);
+                if ($failed) {
+                    Log::warning('API request failed', $diagnostics);
+                }
+            }
 
-            if ($options['raw_response'] ?? false) {
-                $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
+            if ($rawResponse) {
                 return [
                     'body' => $body === false ? '' : $body,
                     'status' => $status,
-                    'content_type' => (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE),
+                    'content_type' => $contentType,
                     'successful' => $body !== false && $status >= 200 && $status < 300,
                 ];
             }
 
-            return $body === false ? null : json_decode($body, true);
+            return $data;
         } finally {
             curl_close($ch);
         }
@@ -288,6 +355,7 @@ if (! function_exists('getSportsApiProImage')) {
             [$apiSport, $prefix] = $sports[$sport];
             dispatch(static function () use ($sport, $type, $entityId, $directory, $lockName, $missingKey, $owner, $apiSport, $prefix): void {
                 $lock = Cache::store('redis')->restoreLock($lockName, $owner);
+                $apiDiagnostics = null;
                 try {
                     if (! $lock->isOwnedByCurrentProcess()) {
                         return;
@@ -297,10 +365,11 @@ if (! function_exists('getSportsApiProImage')) {
                         $response = ApiCall("https://api.sportsapipro.com/v2/{$apiSport}/images/{$type}/{$entityId}", [
                             'x-api-key' => GetSportApiProKey(),
                             'Accept' => 'image/png,image/jpeg,image/webp,image/gif',
-                        ], ['connect_timeout' => 3, 'timeout' => 10, 'raw_response' => true, 'follow_redirects' => true]);
+                        ], ['connect_timeout' => 3, 'timeout' => 10, 'raw_response' => true, 'follow_redirects' => true], $apiDiagnostics);
                         $contentType = strtolower(trim(explode(';', $response['content_type'])[0]));
                         $extension = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp', 'image/gif' => 'gif'][$contentType] ?? null;
                         if (! $response['successful'] || $extension === null || $response['body'] === '' || strlen($response['body']) > 5_000_000) {
+                            Log::warning('SportsAPI Pro image response unavailable', ['sport' => $sport, 'type' => $type, 'entity_id' => $entityId, 'api' => $apiDiagnostics]);
                             Cache::store('redis')->put($missingKey, true, in_array($response['status'], [404, 410], true) ? 21600 : 300);
 
                             return;
@@ -338,7 +407,7 @@ if (! function_exists('getSportsApiProImage')) {
                     }
                 } catch (Throwable $e) {
                     Cache::store('redis')->put($missingKey, true, 300);
-                    Log::warning('SportsAPI Pro background image failed', ['sport' => $sport, 'type' => $type, 'entity_id' => $entityId, 'exception' => $e::class]);
+                    Log::warning('SportsAPI Pro background image failed', ['sport' => $sport, 'type' => $type, 'entity_id' => $entityId, 'api' => $apiDiagnostics, 'exception' => $e::class, 'message' => $e->getMessage()]);
                 } finally {
                     $lock->release();
                 }

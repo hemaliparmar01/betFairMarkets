@@ -592,12 +592,17 @@ trait FootballTrait
                 return $confirmedGoals[$side]-- > 0;
             }));
         }
-        $stoppageCount = count(array_filter($events, static fn (array $event): bool => $event['minute'] + $event['added_time'] > 90));
+        $stoppageCount = count(array_filter($events, static function (array $event): bool {
+            $minute = $event['minute'] === 0 && $event['added_time'] === 0 && $event['seconds'] > 0
+                ? (int) floor($event['seconds'] / 60) : $event['minute'];
+
+            return $minute + $event['added_time'] > 90;
+        }));
         $stoppageIndex = 0;
         $lanes = ['home' => [], 'away' => []];
         $untimedEvents = ['home' => [], 'away' => []];
         foreach ($events as &$event) {
-            $event['time_known'] = $event['minute'] > 0 || $event['added_time'] > 0 || $event['seconds'] > 0;
+            $event['time_known'] = $event['time_known'] ?? ($event['minute'] > 0 || $event['added_time'] > 0 || $event['seconds'] > 0);
             if ($event['minute'] === 0 && $event['added_time'] === 0 && $event['seconds'] > 0) {
                 $event['minute'] = (int) floor($event['seconds'] / 60);
             }
@@ -618,15 +623,15 @@ trait FootballTrait
             $event['lane'] = $lane;
             $displayMinute = min(90, $event['minute']);
             $added = $event['added_time'] + max(0, $event['minute'] - 90);
-            $event['minute_label'] = $event['time_known'] ? $displayMinute.($added > 0 ? '+'.$added : '')."'" : __('Minute unavailable');
+            $event['minute_label'] = $event['time_known'] ? $displayMinute.($added > 0 ? '+'.$added : '')."'" : '';
             $event['label'] = match ($event['kind']) {
                 'goal' => __('Goal'),
                 'yellow' => __('Yellow card'),
                 default => __('Red card'),
             };
-            $playerParts = preg_split('/\s+/u', trim($event['player']));
-            $event['player_surname'] = $event['player_surname'] ?? ($event['player'] !== '' ? end($playerParts) : __('Unknown player'));
-            $event['player'] = $event['player'] ?: __('Unknown player');
+            $event['player'] = trim((string) ($event['player'] ?? ''));
+            $playerParts = $event['player'] !== '' ? preg_split('/\s+/u', $event['player']) : [];
+            $event['player_surname'] = trim((string) ($event['player_surname'] ?? '')) ?: ($playerParts !== [] ? end($playerParts) : '');
             if (! $event['time_known']) {
                 $untimedEvents[$side][] = $event;
             }

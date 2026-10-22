@@ -271,11 +271,11 @@
                                         @forelse (array_filter($timeline['events'], static fn (array $incident): bool => $incident['kind'] === 'goal') as $goal)
                                             <div class="flex items-center justify-center gap-1">
                                                 <span aria-hidden="true">⚽</span>
-                                                <span>{{ $goal['player_surname'] }}</span>
-                                                <span>{{ $goal['minute_label'] }}</span>
+                                                @if ($goal['player_surname'] !== '')<span>{{ $goal['player_surname'] }}</span>@endif
+                                                @if ($goal['minute_label'] !== '')<span>{{ $goal['minute_label'] }}</span>@endif
                                             </div>
                                         @empty
-                                            <span>{{ ($timeline['goals_pending'] ?? false) ? __('Goal details are syncing…') : __('No goals yet') }}</span>
+                                            @if (! ($timeline['goals_pending'] ?? false))<span>{{ __('No goals yet') }}</span>@endif
                                         @endforelse
                                     </div>
                                 </div>
@@ -291,9 +291,6 @@
                                     <div class="pointer-events-none absolute inset-x-0 bottom-0.5 flex justify-between text-[9px] leading-none text-[#7891a5] dark:text-[#b0c4d4]" aria-hidden="true">
                                         <span>0'</span><span class="absolute left-1/2 -translate-x-1/2">45'</span><span class="ml-auto">90'</span>
                                     </div>
-                                    @if ($timeline['goals_pending'] ?? false)
-                                        <span class="absolute right-0 top-0.5 text-[9px] font-semibold text-amber-700 dark:text-amber-300" role="status">{{ __('Syncing goal details…') }}</span>
-                                    @endif
                                     @if ($timeline['finished'])
                                         <span class="absolute left-0 top-0.5 text-[9px] font-semibold">FT</span>
                                     @endif
@@ -305,7 +302,6 @@
                                 </div>
                                 @if ($timeline['untimed_events']['home'] !== [] || $timeline['untimed_events']['away'] !== [])
                                     <div data-timeline-untimed class="border-t border-[#dce5ee] px-2 py-1 text-[9px] text-[#7891a5] dark:border-[#365167] dark:text-[#b0c4d4]">
-                                        <span class="block leading-tight">{{ __('Minute unavailable') }}</span>
                                         @foreach ($timeline['untimed_events'] as $side => $incidents)
                                             @if ($incidents !== [])
                                                 <div class="flex min-w-0 items-start gap-1" data-timeline-untimed-side="{{ $side }}">

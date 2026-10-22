@@ -25,7 +25,9 @@ const restoreFootballTimeline = () => {
             : null;
         if (!selected) openFootballTimeline.eventId = null;
         panel.querySelector('[data-timeline-detail-score]').textContent = selected?.dataset.eventScore || timeline.dataset.timelineScore;
-        panel.querySelector('[data-timeline-detail-minute]').textContent = selected?.dataset.eventMinute || timeline.dataset.timelineLabel;
+        const detailMinute = panel.querySelector('[data-timeline-detail-minute]');
+        detailMinute.textContent = selected ? selected.dataset.eventMinute || '' : timeline.dataset.timelineLabel;
+        detailMinute.hidden = Boolean(selected) && !selected.dataset.eventMinute;
         const detail = panel.querySelector('[data-timeline-detail-event]');
         detail.classList.toggle('hidden', !selected);
         detail.classList.toggle('flex', Boolean(selected));

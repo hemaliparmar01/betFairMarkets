@@ -67,7 +67,10 @@ class FootballSyncController extends Controller
                         || ($kind === 'card' && ! in_array($class, ['yellow', 'red', 'yellowRed'], true))) {
                         continue;
                     }
-                    $minute = max(0, (int) $incident['time']);
+                    $incidentMinute = (int) $incident['time'];
+                    $incidentSeconds = is_numeric($incident['timeSeconds'] ?? null) ? (int) $incident['timeSeconds'] : null;
+                    $timeKnown = $incidentMinute >= 0 || $incidentSeconds > 0;
+                    $minute = $incidentMinute >= 0 ? $incidentMinute : ($incidentSeconds > 0 ? (int) floor($incidentSeconds / 60) : 0);
                     $added = max(0, (int) ($incident['addedTime'] ?? 0));
                     $player = trim((string) ($incident['player']['name'] ?? ''));
                     if ($player === '') {
@@ -83,8 +86,9 @@ class FootballSyncController extends Controller
                         'kind' => $kind === 'goal' ? 'goal' : ($class === 'yellow' ? 'yellow' : 'red'),
                         'incident_class' => $class,
                         'minute' => $minute,
+                        'time_known' => $timeKnown,
                         'added_time' => $added,
-                        'seconds' => is_numeric($incident['timeSeconds'] ?? null) ? (int) $incident['timeSeconds'] : ($minute + $added) * 60,
+                        'seconds' => $incidentSeconds !== null && $incidentSeconds >= 0 ? $incidentSeconds : ($minute + $added) * 60,
                         'is_home' => $home,
                         'player' => $player,
                         'player_surname' => ! empty($incident['player']['lastName']) ? (string) $incident['player']['lastName'] : null,
@@ -189,6 +193,7 @@ class FootballSyncController extends Controller
             $repairGoals = ($timeline['initialized'] ?? false) && ! $this->timelineGoalsMatchScore($timeline, $expectedScore);
             dispatch(static function () use ($matchId, $cacheKey, $owner, $finished, $expectedScore, $repairGoals): void {
                 $lock = Cache::store('redis')->restoreLock($cacheKey.':pending', $owner);
+                $apiDiagnostics = null;
                 try {
                     $controller = app(self::class);
                     if ($expectedScore !== null) {
@@ -214,8 +219,10 @@ class FootballSyncController extends Controller
                         }
                         $requestedAt = microtime(true);
                         $response = ApiCall('https://api.sportsapipro.com/v2/football/match/'.$matchId.($suffix === ':odds' ? '/odds/all' : ($suffix === '' ? '' : '/incidents')),
-                            ['x-api-key' => GetSportApiProKey()], ['connect_timeout' => 3, 'timeout' => 15]);
+                            ['x-api-key' => GetSportApiProKey()], ['connect_timeout' => 3, 'timeout' => 15], $apiDiagnostics);
                         if (! is_array($response) || ($response['success'] ?? true) === false) {
+                            Log::warning('Football timeline backfill response unavailable', ['match_id' => $matchId, 'api' => $apiDiagnostics]);
+
                             continue;
                         }
                         $payload = $response['data'] ?? $response;
@@ -248,6 +255,7 @@ class FootballSyncController extends Controller
                     Cache::store('redis')->put($cacheKey.':retry', true, $repairGoals ? 60 : 300);
                     Log::warning('Football timeline backfill failed', [
                         'match_id' => $matchId,
+                        'api' => $apiDiagnostics,
                         'exception' => $e::class,
                         'message' => $e->getMessage(),
                         'file' => $e->getFile(),
@@ -276,10 +284,10 @@ class FootballSyncController extends Controller
     {
         $url = 'https://betfair-odds.com/betfair/v1/livemap?feed=live&sports=soccer';
         $key = 'x-portal-apikey: '.$this->getBetferKeys;
-        $liveData = ApiCall($url, $key, ['connect_timeout' => 3, 'timeout' => 15]);
+        $liveData = ApiCall($url, $key, ['connect_timeout' => 3, 'timeout' => 15], $apiDiagnostics);
         $cacheKey = $this->sports.':matches';
         if (! is_array($liveData['liveMap'] ?? null)) {
-            Log::warning('Football Betfair live snapshot unavailable; existing matches retained');
+            Log::warning('Football Betfair live snapshot unavailable; existing matches retained', $apiDiagnostics ?? []);
 
             return getInRedis($cacheKey) ?? [];
         }
@@ -298,10 +306,10 @@ class FootballSyncController extends Controller
     {
         $url = 'https://betfair-odds.com/betfair/v1/livemap?feed=prematch&sports=soccer';
         $key = 'x-portal-apikey: '.$this->getBetferKeys;
-        $liveData = ApiCall($url, $key, ['connect_timeout' => 3, 'timeout' => 15]);
+        $liveData = ApiCall($url, $key, ['connect_timeout' => 3, 'timeout' => 15], $apiDiagnostics);
         $cacheKey = $this->sports.':matches';
         if (! is_array($liveData['liveMap'] ?? null)) {
-            Log::warning('Football Betfair prematch snapshot unavailable; existing matches retained');
+            Log::warning('Football Betfair prematch snapshot unavailable; existing matches retained', $apiDiagnostics ?? []);
 
             return getInRedis($cacheKey) ?? [];
         }
@@ -320,11 +328,11 @@ class FootballSyncController extends Controller
     {
         $url = 'https://api.sportsapipro.com/v2/football/live/all';
         $key = 'x-api-key: '.$this->getsportsAPIProKeys;
-        $liveData = ApiCall($url, $key, ['connect_timeout' => 3, 'timeout' => 15]);
+        $liveData = ApiCall($url, $key, ['connect_timeout' => 3, 'timeout' => 15], $apiDiagnostics);
         $liveData = is_array($liveData['data'] ?? null) ? $liveData['data'] : $liveData;
         $cacheKey = $this->sports.':matches';
         if (! is_array($liveData['events'] ?? null)) {
-            Log::warning('Football SportsAPI Pro live snapshot unavailable; existing matches retained');
+            Log::warning('Football SportsAPI Pro live snapshot unavailable; existing matches retained', $apiDiagnostics ?? []);
 
             return getInRedis($cacheKey) ?? [];
         }
@@ -390,6 +398,7 @@ class FootballSyncController extends Controller
             $owner = $pending->owner();
             dispatch(static function () use ($date, $page, $cacheKey, $owner): void {
                 $lock = Cache::store('redis')->restoreLock($cacheKey.':pending:'.$page, $owner);
+                $apiDiagnostics = null;
                 try {
                     if (! $lock->isOwnedByCurrentProcess()) {
                         return;
@@ -397,7 +406,7 @@ class FootballSyncController extends Controller
                     $response = ApiCall('https://api.sportsapipro.com/v4/football/matches', ['x-api-key' => GetSportApiProKey()], [
                         'query' => ['sport' => 'football', 'status' => 'all', 'perPage' => 150, 'page' => $page, 'startDate' => $date.'T00:00:00Z', 'endDate' => $date.'T23:59:59Z'],
                         'connect_timeout' => 3, 'timeout' => 15,
-                    ]);
+                    ], $apiDiagnostics);
                     $payload = $response['data'] ?? $response;
                     if (! is_array($payload['matches'] ?? null)) {
                         throw new \RuntimeException('SportsAPI Pro V4 Football catalogue unavailable.');
@@ -430,7 +439,7 @@ class FootballSyncController extends Controller
                     Cache::store('redis')->put($cacheKey.':cooldown', true, 900);
                 } catch (Throwable $e) {
                     Cache::store('redis')->put($cacheKey.':cooldown', true, 300);
-                    Log::warning('Football bet365 catalogue failed', ['date' => $date, 'page' => $page, 'exception' => $e::class, 'message' => $e->getMessage()]);
+                    Log::warning('Football bet365 catalogue failed', ['date' => $date, 'page' => $page, 'api' => $apiDiagnostics, 'exception' => $e::class, 'message' => $e->getMessage()]);
                 } finally {
                     $lock->release();
                 }
@@ -464,6 +473,7 @@ class FootballSyncController extends Controller
             dispatch(static function () use ($matchId, $oddsMatchId, $cacheKey, $cooldownKey, $owner): void {
                 $lock = Cache::store('redis')->restoreLock($cacheKey.':pending', $owner);
                 $status = null;
+                $apiDiagnostics = null;
                 try {
                     if (! $lock->isOwnedByCurrentProcess()) {
                         return;
@@ -474,7 +484,7 @@ class FootballSyncController extends Controller
                         return;
                     }
                     $requestedAt = microtime(true);
-                    $response = ApiCall('https://api.sportsapipro.com/v4/football/match/'.$oddsMatchId.'/odds', ['x-api-key' => GetSportApiProKey()], ['query' => ['oddGroupId' => 1], 'connect_timeout' => 3, 'timeout' => 15, 'raw_response' => true]);
+                    $response = ApiCall('https://api.sportsapipro.com/v4/football/match/'.$oddsMatchId.'/odds', ['x-api-key' => GetSportApiProKey()], ['query' => ['oddGroupId' => 1], 'connect_timeout' => 3, 'timeout' => 15, 'raw_response' => true], $apiDiagnostics);
                     if (is_array($response) && array_key_exists('body', $response)) {
                         $status = (int) $response['status'];
                         $response = json_decode($response['body'], true);
@@ -524,7 +534,7 @@ class FootballSyncController extends Controller
                     }
                 } catch (Throwable $e) {
                     Cache::store('redis')->put($cooldownKey, true, 300);
-                    Log::warning('Football bet365 odds failed', ['match_id' => $matchId, 'odds_match_id' => $oddsMatchId, 'http_status' => $status, 'exception' => $e::class, 'message' => $e->getMessage()]);
+                    Log::warning('Football bet365 odds failed', ['match_id' => $matchId, 'odds_match_id' => $oddsMatchId, 'http_status' => $status, 'api' => $apiDiagnostics, 'exception' => $e::class, 'message' => $e->getMessage()]);
                 } finally {
                     $lock->release();
                 }
@@ -657,6 +667,7 @@ class FootballSyncController extends Controller
             $owner = $pending->owner();
             dispatch(static function () use ($matchId, $cacheKey, $owner): void {
                 $lock = Cache::store('redis')->restoreLock($cacheKey.':pending', $owner);
+                $apiDiagnostics = null;
                 try {
                     if (! $lock->isOwnedByCurrentProcess()) {
                         return;
@@ -671,10 +682,10 @@ class FootballSyncController extends Controller
                     if ($v6Id === null) {
                         $fixtures = Cache::store('redis')->lock('Football:v6:catalogue-lock', 20)->block(2, static function (): array {
                             return Cache::store('redis')->remember('Football:v6:catalogue', 300, static function (): array {
-                                $response = ApiCall('https://api.sportsapipro.com/v6/football/live', ['x-api-key' => GetSportApiProKey()], ['connect_timeout' => 3, 'timeout' => 15]);
+                                $response = ApiCall('https://api.sportsapipro.com/v6/football/live', ['x-api-key' => GetSportApiProKey()], ['connect_timeout' => 3, 'timeout' => 15], $apiDiagnostics);
                                 $payload = is_array($response) ? ($response['data'] ?? $response) : [];
                                 if (! is_array($payload['matches'] ?? null)) {
-                                    Log::warning('Football V6 fallback catalogue unavailable');
+                                    Log::warning('Football V6 fallback catalogue unavailable', $apiDiagnostics ?? []);
                                 }
 
                                 return is_array($payload['matches'] ?? null) ? $payload['matches'] : [];
@@ -695,13 +706,13 @@ class FootballSyncController extends Controller
                         return;
                     }
                     $requestedAt = microtime(true);
-                    $response = ApiCall('https://api.sportsapipro.com/v6/football/match/'.$v6Id.'/team-stats', ['x-api-key' => GetSportApiProKey()], ['connect_timeout' => 3, 'timeout' => 15]);
+                    $response = ApiCall('https://api.sportsapipro.com/v6/football/match/'.$v6Id.'/team-stats', ['x-api-key' => GetSportApiProKey()], ['connect_timeout' => 3, 'timeout' => 15], $apiDiagnostics);
                     $payload = is_array($response) ? ($response['data'] ?? $response) : [];
                     $changed = $controller->mergeCardStatsFallback($matchId, $v6Id, $payload, $requestedAt);
                     Cache::store('redis')->put($cacheKey.':cooldown', true, $changed ? 900 : 3600);
                 } catch (Throwable $e) {
                     Cache::store('redis')->put($cacheKey.':cooldown', true, 3600);
-                    Log::warning('Football card stats fallback failed', ['match_id' => $matchId, 'exception' => $e::class]);
+                    Log::warning('Football card stats fallback failed', ['match_id' => $matchId, 'api' => $apiDiagnostics, 'exception' => $e::class, 'message' => $e->getMessage()]);
                 } finally {
                     $lock->release();
                 }

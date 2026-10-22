@@ -463,6 +463,7 @@ class ListenSportsApiPro extends Command
             $subscriptions[$matchId]['reconciling'] = true;
             $subscriptions[$matchId]['last_reconciled_at'] = $now;
             $reconciled++;
+            $apiDiagnostics = ['url' => "https://api.sportsapipro.com/v2/{$config['path']}/api/match/{$matchId}", 'http_status' => null, 'response_body' => null];
             try {
                 Log::warning('SportsAPI Pro match subscription is stale; reconciling from REST', ['sport' => $sport, 'match_id' => $matchId, 'seconds_since_last_frame' => $now - $subscription['last_frame_at']]);
                 recordSportsApiProRestRequest("/v2/{$config['path']}/api/match/{matchId}");
@@ -472,10 +473,13 @@ class ListenSportsApiPro extends Command
                 $request->setTransferTimeout(7);
                 $request->setInactivityTimeout(7);
                 $response = $httpClient->request($request, $cancellation);
+                $apiDiagnostics['http_status'] = $response->getStatus();
+                $apiDiagnostics['content_type'] = $response->getHeader('Content-Type');
+                $apiDiagnostics['response_body'] = $response->getBody()->buffer($cancellation, 2_000_000);
                 if ($response->getStatus() < 200 || $response->getStatus() >= 300) {
                     throw new \RuntimeException("SportsAPI Pro match endpoint returned HTTP {$response->getStatus()}.");
                 }
-                $payload = json_decode($response->getBody()->buffer($cancellation, 2_000_000), true, 512, JSON_THROW_ON_ERROR);
+                $payload = json_decode($apiDiagnostics['response_body'], true, 512, JSON_THROW_ON_ERROR);
                 $restMatch = $payload['match'] ?? $payload['event'] ?? $payload['data']['match'] ?? $payload['data']['event'] ?? (isset($payload['data']['id']) ? $payload['data'] : null);
                 if (! is_array($restMatch)) {
                     throw new \RuntimeException('SportsAPI Pro match endpoint returned an invalid payload.');
@@ -533,7 +537,7 @@ class ListenSportsApiPro extends Command
                 if ($cancellation->isRequested()) {
                     throw $e;
                 }
-                Log::warning('SportsAPI Pro stale match reconciliation failed', ['sport' => $sport, 'match_id' => $matchId, 'exception' => $e::class, 'message' => $e->getMessage()]);
+                Log::warning('SportsAPI Pro stale match reconciliation failed', ['sport' => $sport, 'match_id' => $matchId, 'api' => apiResponseLogContext($apiDiagnostics, [$key]), 'exception' => $e::class, 'message' => $e->getMessage()]);
             } finally {
                 if (isset($subscriptions[$matchId])) {
                     $subscriptions[$matchId]['reconciling'] = false;
