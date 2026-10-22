@@ -254,48 +254,16 @@ class BaseballSyncController extends Controller
                     }
                 }
 
-                $previousBackOdds = (float) ($previousMarket['currentBackOdds'] ?? $previousMarket['backOdds'] ?? $market['backOdds'] ?? 0);
-                $currentOdds = (float) ($market['backOdds'] ?? 0) > 0 ? (float) $market['backOdds'] : $previousBackOdds;
-                $backOddsHistory = $previousMarket['backOddsHistory'] ?? [];
-                $initialBackOddsTimestamp = $previousMarket['initialBackOddsTimestamp'] ?? null;
+                $previousMarket = prepareOddsMonitoring($previousMarket);
+                $market = updateOddsMonitoring($market, $previousMarket, $now);
+                $previousBackOdds = $market['previousBackOdds'];
+                $currentOdds = $market['currentBackOdds'];
+                $initialBackOdds = (float) ($market['initialBackOdds'] ?? 0);
 
-                if ($initialBackOddsTimestamp !== null) {
-                    $initialBackOdds = (float) ($previousMarket['initialBackOdds'] ?? $currentOdds);
-                } elseif (isset($backOddsHistory[0]['odds'])) {
-                    $initialBackOdds = (float) $backOddsHistory[0]['odds'];
-                    $initialBackOddsTimestamp = (int) ($backOddsHistory[0]['timestamp'] ?? $now);
-                } else {
-                    $initialBackOdds = (float) ($previousMarket['initialBackOdds']
-                        ?? $previousMarket['backOdds']
-                        ?? $currentOdds);
-                    $initialBackOddsTimestamp = $now;
-                }
-
-                if ($initialBackOdds <= 0 && $currentOdds > 0) {
-                    $initialBackOdds = (float) $currentOdds;
-                    $initialBackOddsTimestamp = $now;
-                }
-
-                if ($backOddsHistory === [] && $initialBackOdds > 0) {
-                    $backOddsHistory[] = ['timestamp' => $now, 'odds' => $initialBackOdds];
-                }
-
-                $lastHistoryOdds = (float) ($backOddsHistory[array_key_last($backOddsHistory)]['odds'] ?? 0);
-                if ($currentOdds > 0 && $currentOdds !== $lastHistoryOdds) {
-                    $backOddsHistory[] = ['timestamp' => $now, 'odds' => (float) $currentOdds];
-                }
-
-                $market['previousBackOdds'] = $previousBackOdds;
-                $market['currentBackOdds'] = $currentOdds;
-                $market['initialBackOdds'] = $initialBackOdds;
-                $market['initialBackOddsTimestamp'] = $initialBackOddsTimestamp;
-                $market['backOddsHistory'] = array_slice($backOddsHistory, -12);
-                $market['odds_direction'] = $this->matchDirection($initialBackOdds, $currentOdds);
-
-                if (! $isLiveApi && $currentOdds > 0) {
+                if (! $isLiveApi && $currentOdds > 0 && $initialBackOdds > 1) {
                     $baselineOdds = (float) ($previousMarket['prematch_drop_baseline_odds'] ?? 0);
                     if ($baselineOdds <= 0 && ($marketLiquidity[$marketKey] ?? 0) >= 1000) {
-                        $baselineOdds = (float) $currentOdds;
+                        $baselineOdds = $initialBackOdds;
                     }
 
                     $market['prematch_drop_baseline_odds'] = $baselineOdds ?: null;

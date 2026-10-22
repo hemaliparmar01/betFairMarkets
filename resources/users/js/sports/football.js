@@ -38,9 +38,11 @@ const restoreFootballTimeline = () => {
     if (!found) openFootballTimeline = null;
 };
 
+const footballTimelineClockAnchors = new WeakMap();
 const refreshFootballTimelineClocks = () => {
     document.querySelectorAll('[data-football-timeline][data-timeline-running="true"]').forEach((timeline) => {
-        const elapsed = Math.max(0, Math.floor((Date.now() / 1000 - Number(timeline.dataset.timelineAt)) / 60));
+        if (!footballTimelineClockAnchors.has(timeline)) footballTimelineClockAnchors.set(timeline, performance.now() - Number(timeline.dataset.timelineSecond ?? 0) * 1000);
+        const elapsed = Math.max(0, Math.floor((performance.now() - footballTimelineClockAnchors.get(timeline)) / 60000));
         const minute = Number(timeline.dataset.timelineMinute) + elapsed;
         const limit = Number(timeline.dataset.timelinePeriodLimit);
         const label = (minute > limit ? `${limit}+${minute - limit}` : String(minute)) + "'";

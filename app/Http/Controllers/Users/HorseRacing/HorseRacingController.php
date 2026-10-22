@@ -44,7 +44,7 @@ class HorseRacingController extends Controller
         $hasMore = $this->horseracingHasMore;
         $nextPage = $this->horseracingNextPage;
         if (request()->expectsJson()) {
-            return response()->json(['html' => view('users.sports.horseracing.marketActivity', compact('marketActivites', 'hasMore', 'nextPage'))->fragment('horseracingMarketRows'), 'has_more' => $hasMore, 'next_page' => $nextPage]);
+            return response()->json(['feed' => racingFeedHealth('horseracing'), 'html' => view('users.sports.horseracing.marketActivity', compact('marketActivites', 'hasMore', 'nextPage'))->fragment('horseracingMarketRows'), 'has_more' => $hasMore, 'next_page' => $nextPage]);
         }
 
         return view('users.sports.horseracing.marketActivity', compact('marketActivites', 'hasMore', 'nextPage'));
@@ -66,10 +66,11 @@ class HorseRacingController extends Controller
         $counts = (clone $votes)->select('value')->selectRaw('COUNT(*) as total')->groupBy('value')->pluck('total', 'value');
 
         $detail = [
+            'feed' => racingFeedHealth('horseracing'),
             'race' => ['id' => $matchId, 'course' => $match['team1'], 'description' => $match['team2'], 'meeting' => $match['tournament'], 'country' => $match['country'] ?? null, 'start_time' => gmdate('Y-m-d\TH:i:s\Z', $match['timestamp']), 'status' => $match['status'], 'market_status' => $match['market_status'] ?? 'OPEN'],
-            'markets' => $displayOdds ? array_map(static fn (array $selections): array => ['type' => $selections[array_key_first($selections)]['marketType'], 'runners' => array_values(array_map(static fn (array $runner): array => array_intersect_key($runner, array_flip(['runner', 'runnerId', 'number', 'initialBackOdds', 'currentBackOdds', 'previousBackOdds', 'previousLayOdds', 'backSize', 'layOdds', 'laySize', 'backOddsHistory', 'movementHistory', 'pressure_type', 'pressure_amount', 'pressure_source'])), $selections))], array_values($match['markets'])) : [],
+            'markets' => $displayOdds ? array_map(static fn (array $selections): array => ['type' => $selections[array_key_first($selections)]['marketType'], 'runners' => array_values(array_map(static fn (array $runner): array => array_intersect_key($runner, array_flip(['marketId', 'handicap', 'runner', 'runnerId', 'number', 'initialBackOdds', 'initialBackOddsTimestamp', 'opening_odds_source', 'currentBackOdds', 'previousBackOdds', 'previousLayOdds', 'backSize', 'layOdds', 'laySize', 'backOddsHistory', 'movementHistory', 'pressure_type', 'pressure_amount', 'pressure_source'])), $selections))], array_values($match['markets'])) : [],
             'market' => ['title' => $match['team1'].' · '.$match['team2'], 'status' => $match['status'], 'minutes' => $match['minutes'], 'locked' => ! $displayOdds,
-                'runners' => $displayOdds ? array_map(static fn (array $runner): array => array_intersect_key($runner, array_flip(['runner', 'runnerId', 'number', 'initialBackOdds', 'currentBackOdds', 'previousBackOdds', 'previousLayOdds', 'backSize', 'layOdds', 'laySize', 'backOddsHistory', 'movementHistory', 'pressure_type', 'pressure_amount', 'pressure_source'])), $runners) : [],
+                'runners' => $displayOdds ? array_map(static fn (array $runner): array => array_intersect_key($runner, array_flip(['marketId', 'handicap', 'runner', 'runnerId', 'number', 'initialBackOdds', 'initialBackOddsTimestamp', 'opening_odds_source', 'currentBackOdds', 'previousBackOdds', 'previousLayOdds', 'backSize', 'layOdds', 'laySize', 'backOddsHistory', 'movementHistory', 'pressure_type', 'pressure_amount', 'pressure_source'])), $runners) : [],
                 'indicators' => $displayOdds ? ($match['market_indicators'][$matchId.'_WIN'] ?? []) : []],
             'prediction' => ['choices' => array_column($runners, 'runner', 'runnerId'), 'counts' => $counts,
                 'vote' => $customerId === null ? null : (clone $votes)->where('customer_id', $customerId)->value('value'),
@@ -175,6 +176,7 @@ class HorseRacingController extends Controller
         $data = $this->getHorseRacingMatches();
 
         return response()->json([
+            'feed' => racingFeedHealth('horseracing'),
             'html' => view('users.sports.horseracing.horseracingDetails', [
                 'data' => $data,
                 'append' => request()->boolean('append'),
@@ -191,6 +193,7 @@ class HorseRacingController extends Controller
         $data = $this->getHorseRacingMatches();
 
         return response()->json([
+            'feed' => racingFeedHealth('horseracing'),
             'html' => view('users.sports.horseracing.horseracingDetails', [
                 'data' => $data,
             ])->render(),

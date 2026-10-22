@@ -15,7 +15,7 @@
         <p class="mb-3 text-xs text-[#5a7d99]">{{ __('Pressure shows odds direction and available exchange liquidity, not traded volume.') }}</p>
         <p data-horse-error class="hidden mb-3 text-sm text-red-500"></p>
         <div class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-[#2a3f50] dark:bg-[#1a2a38]">
-            <div class="runner-header"><div>{{ __('Runner') }}</div><div class="text-center">{{ __('Favourite') }}</div><div class="text-center">{{ __('Back') }}</div><div class="text-center">{{ __('Lay') }}</div><div class="text-center">{{ __('Money Flow (Pressure)') }}</div></div>
+            <div class="runner-header"><div>{{ __('Runner') }}</div><div class="text-center">{{ __('Favourite') }}</div><div class="text-center">{{ __('Back') }}</div><div class="text-center">{{ __('Lay') }}</div><div class="text-center">{{ __('Available Liquidity Pressure') }}</div></div>
             <div id="runners-container" aria-live="polite">@if (($detail['race']['available'] ?? true) === false)<p class="p-8 text-center">{{ __('Race details and odds become available five minutes before the start.') }}</p>@elseif (! $checkAuthAndSubscription['display_odds'])<p class="flex items-center justify-center gap-3 p-8">@include('lock_icon') {{ __('Log in with an active subscription to view race odds.') }}</p>@endif</div>
         </div>
             <div class="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200 dark:bg-[#203746] dark:border-[#2a3f50]">
@@ -73,6 +73,8 @@
 @push('head')
 <style>
 #horseRaceDetail {
+.odd-box.flash-size { animation: size-flash 0.65s ease-out; }
+@keyframes size-flash { 50% { box-shadow: inset 0 0 0 3px #e6b422; } }
 .runner-header {
             display: grid;
             grid-template-columns: 2fr 1.2fr 1.4fr 1.4fr 1.6fr;
@@ -114,8 +116,8 @@
             position: relative;
             overflow: hidden;
         }
-        .back-box { background-color: #e8f2fc; border: 1px solid #c6d8ea; color: #0b2a40; }
-        .lay-box { background-color: #fce8ec; border: 1px solid #eac6d0; color: #0b2a40; }
+        .back-box { background-color: #a6d8ff; border: 1px solid #c6d8ea; color: #0b2a40; }
+        .lay-box { background-color: #fac9d1; border: 1px solid #eac6d0; color: #0b2a40; }
 
         
         .odd-value {

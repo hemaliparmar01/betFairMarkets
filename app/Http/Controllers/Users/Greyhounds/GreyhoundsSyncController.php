@@ -115,40 +115,36 @@ class GreyhoundsSyncController extends Controller
                     $marketKey = $runner['marketId'].'_'.$runner['marketType'];
                     $selectionKey = $runner['runnerId'].'|'.($runner['handicap'] ?? 0);
                     $previous = $before['markets'][$marketKey][$selectionKey] ?? [];
-                    $current = (float) ($runner['backOdds'] ?? 0);
-                    $current = $current > 0 ? $current : (float) ($previous['currentBackOdds'] ?? 0);
-                    $initial = (float) ($previous['initialBackOdds'] ?? 0);
-                    $runner['initialBackOdds'] = $initial > 0 ? $initial : $current;
-                    $runner['initialBackOddsTimestamp'] = $initial > 0 ? ($previous['initialBackOddsTimestamp'] ?? (int) $now) : (int) $now;
-                    $runner['previousBackOdds'] = (float) ($previous['currentBackOdds'] ?? $current);
+                    $runner = array_replace($previous, $runner);
+                    $hasPreviousOpening = hasMeaningfulOpeningOdds($previous);
+                    $runner = updateOddsMonitoring($runner, $previous, $now, $now >= $race['timestamp'] - 300 && $now < $race['timestamp']);
+                    $previous = $hasPreviousOpening ? $previous : [];
+                    $current = $runner['currentBackOdds'];
+                    $validQuote = $current > 1;
                     $runner['previousLayOdds'] = (float) ($previous['layOdds'] ?? $runner['layOdds'] ?? 0);
                     $runner['previousBackSize'] = (float) ($previous['backSize'] ?? $runner['backSize'] ?? 0);
                     $runner['currentBackOdds'] = $current;
                     $runner['odds_direction'] = $runner['initialBackOdds'] > 0 && $current > 0 ? ($current < $runner['initialBackOdds'] ? 'down' : ($current > $runner['initialBackOdds'] ? 'up' : 'same')) : 'same';
-                    $runner['trap'] = in_array($runner['marketType'], ['WIN', 'PLACE', 'MATCH_BET', 'MONEY_BACK_2ND'], true) && preg_match('/^(\d+)\.\s*/', $runner['runner'] ?? '', $trap) ? (int) $trap[1] : null;
-                    $history = $previous['backOddsHistory'] ?? [];
-                    if ($current > 0 && ($history === [] || (float) $history[array_key_last($history)]['odds'] !== $current)) {
-                        $history[] = ['timestamp' => (int) $now, 'odds' => $current];
-                    }
-                    $runner['backOddsHistory'] = array_slice($history, -12);
-                    $runner['number'] = $runner['trap'];
+                    $runner['number'] = in_array($runner['marketType'], ['WIN', 'PLACE', 'MATCH_BET', 'MONEY_BACK_2ND'], true) && preg_match('/^(\d+)\.\s*/', $runner['runner'] ?? '', $trap) ? (int) $trap[1] : ($previous['number'] ?? null);
+                    $monitoring = ($runner['initialBackOdds'] ?? 0) > 1;
                     $movement = array_values(array_filter($previous['movementHistory'] ?? [], static fn (array $point): bool => $point['timestamp'] >= $now - 30));
-                    if ($current > 0 && ($previous === [] || $current !== (float) ($previous['currentBackOdds'] ?? 0))) {
+                    if ($monitoring && $validQuote && ($previous === [] || $current !== (float) ($previous['currentBackOdds'] ?? 0))) {
                         $movement[] = ['timestamp' => $now, 'odds' => $current];
                     }
                     $runner['movementHistory'] = array_slice($movement, -8);
-                    $runner['pressure_type'] = $current < $runner['previousBackOdds'] ? 'back' : ($current > $runner['previousBackOdds'] ? 'lay' : 'neutral');
+                    $runner['pressure_type'] = ! $validQuote ? 'neutral' : ($current < $runner['previousBackOdds'] ? 'back' : ($current > $runner['previousBackOdds'] ? 'lay' : 'neutral'));
                     $runner['pressure_amount'] = (float) ($runner['pressure_type'] === 'back' ? ($runner['backSize'] ?? 0) : ($runner['pressure_type'] === 'lay' ? ($runner['laySize'] ?? 0) : 0));
                     $runner['pressure_source'] = 'available_liquidity';
+
                     $recent = array_values(array_filter($previous['recentOddsHistory'] ?? [], static fn (array $point): bool => (float) $point['timestamp'] >= $now - 10));
-                    if ($current > 0 && ($previous === [] || $current !== (float) ($previous['currentBackOdds'] ?? 0) || (float) ($runner['backSize'] ?? 0) !== (float) ($previous['backSize'] ?? 0))) {
+                    if ($monitoring && $validQuote && ($previous === [] || $current !== (float) ($previous['currentBackOdds'] ?? 0))) {
                         $recent[] = ['timestamp' => $now, 'odds' => $current];
                     }
                     $runner['recentOddsHistory'] = array_slice($recent, -50);
                     $runner['prematch_drop_baseline_odds'] = $previous['prematch_drop_baseline_odds'] ?? null;
                     $runner['prematch_drop_triggered'] = (bool) ($previous['prematch_drop_triggered'] ?? false);
                     $snapshots = array_values(array_filter($previous['market_shock_snapshots'] ?? [], static fn (array $point): bool => (int) $point['timestamp'] >= (int) $now - 180));
-                    if ($current > 0 && ($snapshots === [] || (float) $snapshots[array_key_last($snapshots)]['odds'] !== $current)) {
+                    if ($monitoring && $validQuote && ($snapshots === [] || (float) $snapshots[array_key_last($snapshots)]['odds'] !== $current)) {
                         $snapshots[] = ['timestamp' => (int) $now, 'odds' => $current];
                     }
                     $comparison = $snapshots === [] ? 0 : max(array_column($snapshots, 'odds'));
@@ -161,8 +157,8 @@ class GreyhoundsSyncController extends Controller
                     $liquidity = array_sum(array_map(static fn (array $runner): float => (float) ($runner['backSize'] ?? 0) + (float) ($runner['laySize'] ?? 0), $runners));
                     foreach ($runners as &$runner) {
                         $baseline = (float) ($runner['prematch_drop_baseline_odds'] ?? 0);
-                        if ($baseline <= 0 && $liquidity >= 1000 && $runner['currentBackOdds'] > 0) {
-                            $baseline = $runner['currentBackOdds'];
+                        if ($baseline <= 0 && $liquidity >= 1000 && ($runner['initialBackOdds'] ?? 0) > 1) {
+                            $baseline = $runner['initialBackOdds'];
                             $runner['prematch_drop_baseline_odds'] = $baseline;
                         }
                         $runner['prematch_drop_triggered'] = $runner['prematch_drop_triggered'] || ($baseline > 0 && $runner['currentBackOdds'] > 0 && ($baseline - $runner['currentBackOdds']) / $baseline * 100 >= 1);
@@ -173,13 +169,13 @@ class GreyhoundsSyncController extends Controller
                 $race['market_indicators'] = [];
                 foreach ($markets as $marketKey => $runners) {
                     $favorite = array_reduce($runners, static function (?array $favorite, array $runner): ?array {
-                        return $runner['currentBackOdds'] > 0 && ($favorite === null || $runner['currentBackOdds'] < $favorite['currentBackOdds']) ? $runner : $favorite;
+                        return ($runner['initialBackOdds'] ?? 0) > 1 && $runner['currentBackOdds'] > 0 && ($favorite === null || $runner['currentBackOdds'] < $favorite['currentBackOdds']) ? $runner : $favorite;
                     }, null);
                     $totalBack = array_sum(array_column($runners, 'backSize'));
                     $totalLay = array_sum(array_column($runners, 'laySize'));
                     $liquidity = $totalBack + $totalLay;
                     $ratio = $liquidity > 0 ? $totalBack / $liquidity : 0.5;
-                    $previousSize = (float) ($before['market_indicators'][$marketKey]['favorite_back_size'] ?? $favorite['previousBackSize'] ?? 0);
+                    $previousSize = (float) ($favorite['previousBackSize'] ?? 0);
                     $delta = $previousSize > 0 ? ((float) ($favorite['backSize'] ?? 0) - $previousSize) / $previousSize * 100 : 0;
                     $recent = $favorite['recentOddsHistory'] ?? [];
                     $returns = [];

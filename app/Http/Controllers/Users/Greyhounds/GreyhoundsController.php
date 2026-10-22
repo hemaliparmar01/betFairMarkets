@@ -44,7 +44,7 @@ class GreyhoundsController extends Controller
         $hasMore = $this->greyhoundsHasMore;
         $nextPage = $this->greyhoundsNextPage;
         if (request()->expectsJson()) {
-            return response()->json(['html' => view('users.sports.greyhounds.marketActivity', compact('marketActivites', 'hasMore', 'nextPage'))->fragment('greyhoundsMarketRows'), 'has_more' => $hasMore, 'next_page' => $nextPage]);
+            return response()->json(['feed' => array_merge(racingFeedHealth('greyhounds'), ['next_refresh_at' => $this->greyhoundsNextRefreshAt]), 'html' => view('users.sports.greyhounds.marketActivity', compact('marketActivites', 'hasMore', 'nextPage'))->fragment('greyhoundsMarketRows'), 'has_more' => $hasMore, 'next_page' => $nextPage]);
         }
 
         return view('users.sports.greyhounds.marketActivity', compact('marketActivites', 'hasMore', 'nextPage'));
@@ -67,10 +67,11 @@ class GreyhoundsController extends Controller
         $counts = (clone $votes)->select('value')->selectRaw('COUNT(*) as total')->groupBy('value')->pluck('total', 'value');
 
         $detail = [
+            'feed' => array_merge(racingFeedHealth('greyhounds'), ['next_refresh_at' => $this->greyhoundsNextRefreshAt]),
             'race' => ['id' => $matchId, 'available' => $available, 'available_at' => gmdate('Y-m-d\TH:i:s\Z', $match['timestamp'] - 300), 'course' => $match['team1'], 'description' => $match['team2'], 'meeting' => $match['tournament'], 'country' => $match['country'] ?? null, 'start_time' => gmdate('Y-m-d\TH:i:s\Z', $match['timestamp']), 'status' => $match['status'], 'market_status' => $match['market_status'] ?? 'OPEN'],
-            'markets' => $displayOdds ? array_map(static fn (array $selections): array => ['type' => $selections[array_key_first($selections)]['marketType'], 'runners' => array_values(array_map(static fn (array $runner): array => array_intersect_key($runner, array_flip(['runner', 'runnerId', 'trap', 'number', 'initialBackOdds', 'currentBackOdds', 'previousBackOdds', 'previousLayOdds', 'backSize', 'layOdds', 'laySize', 'backOddsHistory', 'movementHistory', 'pressure_type', 'pressure_amount', 'pressure_source'])), $selections))], array_values($match['markets'])) : [],
+            'markets' => $displayOdds ? array_map(static fn (array $selections): array => ['type' => $selections[array_key_first($selections)]['marketType'], 'runners' => array_values(array_map(static fn (array $runner): array => array_intersect_key($runner, array_flip(['marketId', 'handicap', 'runner', 'runnerId', 'trap', 'number', 'initialBackOdds', 'initialBackOddsTimestamp', 'opening_odds_source', 'currentBackOdds', 'previousBackOdds', 'previousLayOdds', 'backSize', 'layOdds', 'laySize', 'backOddsHistory', 'movementHistory', 'pressure_type', 'pressure_amount', 'pressure_source'])), $selections))], array_values($match['markets'])) : [],
             'market' => ['title' => $match['team1'].' · '.$match['team2'], 'status' => $match['status'], 'minutes' => $match['minutes'], 'available' => $available, 'locked' => ! $displayOdds,
-                'runners' => $displayOdds ? array_map(static fn (array $runner): array => array_intersect_key($runner, array_flip(['runner', 'runnerId', 'trap', 'number', 'initialBackOdds', 'currentBackOdds', 'previousBackOdds', 'previousLayOdds', 'backSize', 'layOdds', 'laySize', 'backOddsHistory', 'movementHistory', 'pressure_type', 'pressure_amount', 'pressure_source'])), $runners) : [],
+                'runners' => $displayOdds ? array_map(static fn (array $runner): array => array_intersect_key($runner, array_flip(['marketId', 'handicap', 'runner', 'runnerId', 'trap', 'number', 'initialBackOdds', 'initialBackOddsTimestamp', 'opening_odds_source', 'currentBackOdds', 'previousBackOdds', 'previousLayOdds', 'backSize', 'layOdds', 'laySize', 'backOddsHistory', 'movementHistory', 'pressure_type', 'pressure_amount', 'pressure_source'])), $runners) : [],
                 'indicators' => $displayOdds ? ($match['market_indicators'][$matchId.'_WIN'] ?? []) : []],
             'prediction' => ['choices' => $available ? array_column($runners, 'runner', 'runnerId') : [], 'counts' => $available ? $counts : [],
                 'vote' => $customerId === null ? null : (clone $votes)->where('customer_id', $customerId)->value('value'),
@@ -177,6 +178,7 @@ class GreyhoundsController extends Controller
         $data = $this->getGreyhoundsMatches();
 
         return response()->json([
+            'feed' => array_merge(racingFeedHealth('greyhounds'), ['next_refresh_at' => $this->greyhoundsNextRefreshAt]),
             'html' => view('users.sports.greyhounds.greyhoundsDetails', [
                 'data' => $data,
                 'append' => request()->boolean('append'),
@@ -193,6 +195,7 @@ class GreyhoundsController extends Controller
         $data = $this->getGreyhoundsMatches();
 
         return response()->json([
+            'feed' => array_merge(racingFeedHealth('greyhounds'), ['next_refresh_at' => $this->greyhoundsNextRefreshAt]),
             'html' => view('users.sports.greyhounds.greyhoundsDetails', [
                 'data' => $data,
             ])->render(),

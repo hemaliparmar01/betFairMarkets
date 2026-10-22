@@ -148,9 +148,7 @@ if (dashboard) {
             if (data.locked) body = '<p>Login with an active subscription to view odds.</p>';
             else body = (data.runners ?? []).map((runner) => {
                 const initial = Number(runner.initialBackOdds ?? 0); const current = Number(runner.currentBackOdds ?? 0);
-                const history = (runner.backOddsHistory ?? []).filter((point) => Number(point.odds) > 0).slice(-12);
-                if (initial > 0 && Number(history[0]?.odds) !== initial) history.unshift({odds: initial});
-                if (current > 0 && Number(history.at(-1)?.odds) !== current) history.push({odds: current});
+                const history = (runner.backOddsHistory ?? []).filter((point) => initial > 1 && Number(point.timestamp) >= Number(runner.initialBackOddsTimestamp) && Number(point.odds) > 1);
                 const values = history.map((point) => Number(point.odds));
                 const minimum = Math.min(...values); const maximum = Math.max(...values); const range = maximum - minimum || 1;
                 const points = values.map((value, index) => `${10 + index * 380 / Math.max(1, values.length - 1)},${90 - (value - minimum) / range * 70}`).join(' ');

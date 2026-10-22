@@ -40,6 +40,8 @@ class ListenBetfairOdds extends Command
 
     protected $description = 'Listen to Betfair odds updates for all supported sports';
 
+    private float $lastHealthHeartbeat = 0;
+
     public function handle(): int
     {
         $listenerLock = Cache::store('redis')->lock('Football:betfair-odds-listener', 120);
@@ -64,6 +66,7 @@ class ListenBetfairOdds extends Command
                     'message' => $e->getMessage(),
                 ]);
             } finally {
+                Cache::store('redis')->put('Betfair:racing:connection', ['state' => 'disconnected', 'at' => time()], 86400);
                 $listenerLock->release();
             }
         });
@@ -93,6 +96,9 @@ class ListenBetfairOdds extends Command
             $connectedAt = null;
 
             try {
+                foreach (['greyhounds', 'horse_prematch'] as $racingFeed) {
+                    Cache::store('redis')->put('Betfair:racing:feed:'.$racingFeed, ['state' => 'waiting', 'at' => null], 86400);
+                }
                 $socket = connect(new WebsocketHandshake('wss://betfair-odds.com/betfair/v1/stream'));
                 $connectedAt = microtime(true);
                 $books = ['live' => [], 'prematch' => [], 'greyhounds' => [], 'horse_prematch' => []];
@@ -112,6 +118,8 @@ class ListenBetfairOdds extends Command
                     if (! is_array($frame)) {
                         continue;
                     }
+
+                    $this->recordRacingFeedHealth($frame);
 
                     $type = $frame['type'] ?? null;
 
@@ -173,7 +181,6 @@ class ListenBetfairOdds extends Command
                     if (! isset($books[$feed])) {
                         continue;
                     }
-
                     $changedEvents = [];
 
                     if ($type === 'snapshot') {
@@ -314,6 +321,7 @@ class ListenBetfairOdds extends Command
                 ]);
                 $this->error('Betfair Odds WebSocket disconnected: '.$e->getMessage());
             } finally {
+                Cache::store('redis')->put('Betfair:racing:connection', ['state' => 'disconnected', 'at' => time()], 86400);
                 if ($flushTimer !== null) {
                     EventLoop::cancel($flushTimer);
                     $flushTimer = null;
@@ -344,6 +352,30 @@ class ListenBetfairOdds extends Command
             delay($backoff);
             $backoff = min($backoff * 2, 30);
         }
+    }
+
+    /** @param array<string, mixed> $frame */
+    private function recordRacingFeedHealth(array $frame): void
+    {
+        if (microtime(true) - $this->lastHealthHeartbeat >= 5) {
+            Cache::store('redis')->put('Betfair:racing:connection', ['state' => 'connected', 'at' => time()], 86400);
+            $this->lastHealthHeartbeat = microtime(true);
+        }
+        $feed = $frame['feed'] ?? null;
+        if (! in_array($feed, ['greyhounds', 'horse_prematch'], true)) {
+            return;
+        }
+        $type = $frame['type'] ?? '';
+        if ($type === 'stale') {
+            $state = ($frame['stale'] ?? true) ? 'stale' : 'live';
+        } elseif ($type === 'error') {
+            $state = 'unavailable';
+        } elseif (in_array($type, ['snapshot', 'delta', 'update'], true)) {
+            $state = ($frame['meta']['stale'] ?? false) ? 'stale' : 'live';
+        } else {
+            return;
+        }
+        Cache::store('redis')->put('Betfair:racing:feed:'.$feed, ['state' => $state, 'at' => time()], 86400);
     }
 
     private function flushPendingChanges(array &$pendingChanges): bool
@@ -539,7 +571,7 @@ class ListenBetfairOdds extends Command
                 }
 
                 $marketKey = ($runner['marketId'] ?? '').'_'.($runner['marketType'] ?? '');
-                $sortPriority = $runner['sortPriority'] ?? null;
+                $sortPriority = implode('|', [$runner['runnerId'] ?? $runner['runner'] ?? '', $runner['handicap'] ?? 0]);
                 $previousRunner = $previousMarkets[$marketKey][$sortPriority] ?? [];
 
                 if ($previousRunner === []) {
@@ -551,7 +583,8 @@ class ListenBetfairOdds extends Command
                             ) || strcasecmp((string) ($candidate['runner'] ?? ''), (string) ($runner['runner'] ?? '')) === 0;
 
                             if (
-                                ($candidate['marketType'] ?? null) === ($runner['marketType'] ?? null)
+                                ($candidate['marketId'] ?? null) === ($runner['marketId'] ?? null)
+                                && ($candidate['marketType'] ?? null) === ($runner['marketType'] ?? null)
                                 && $sameRunner
                                 && (float) ($candidate['handicap'] ?? 0) === (float) ($runner['handicap'] ?? 0)
                             ) {
@@ -570,7 +603,8 @@ class ListenBetfairOdds extends Command
                         ) || strcasecmp((string) ($candidate['runner'] ?? ''), (string) ($runner['runner'] ?? '')) === 0;
 
                         if (
-                            ($candidate['marketType'] ?? null) === ($runner['marketType'] ?? null)
+                            ($candidate['marketId'] ?? null) === ($runner['marketId'] ?? null)
+                                && ($candidate['marketType'] ?? null) === ($runner['marketType'] ?? null)
                             && $sameRunner
                             && (float) ($candidate['handicap'] ?? 0) === (float) ($runner['handicap'] ?? 0)
                         ) {
@@ -580,50 +614,16 @@ class ListenBetfairOdds extends Command
                     }
                 }
 
-                $previousOdds = (float) ($previousRunner['currentBackOdds'] ?? $previousRunner['backOdds'] ?? $runner['backOdds'] ?? 0);
-                $receivedOdds = (float) ($runner['backOdds'] ?? 0);
-                $currentOdds = $receivedOdds > 0 ? $receivedOdds : $previousOdds;
-                $backOddsHistory = $previousRunner['backOddsHistory'] ?? [];
-                $initialOddsTimestamp = $previousRunner['initialBackOddsTimestamp'] ?? null;
+                $previousRunner = prepareOddsMonitoring($previousRunner);
+                $runner = updateOddsMonitoring($runner, $previousRunner, $now);
+                $previousOdds = $runner['previousBackOdds'];
+                $currentOdds = $runner['currentBackOdds'];
+                $initialOdds = (float) ($runner['initialBackOdds'] ?? 0);
 
-                if ($initialOddsTimestamp !== null && isset($previousRunner['initialBackOdds'])) {
-                    $initialOdds = (float) $previousRunner['initialBackOdds'];
-                } elseif (isset($backOddsHistory[0]['odds'])) {
-                    $initialOdds = (float) $backOddsHistory[0]['odds'];
-                    $initialOddsTimestamp = (int) ($backOddsHistory[0]['timestamp'] ?? $now);
-                } elseif (isset($previousRunner['initialBackOdds']) && (float) $previousRunner['initialBackOdds'] > 0) {
-                    $initialOdds = (float) $previousRunner['initialBackOdds'];
-                    $initialOddsTimestamp = $now;
-                } else {
-                    $initialOdds = null;
-                    $initialOddsTimestamp = null;
-                }
-
-                if ($backOddsHistory === [] && $initialOdds !== null && $initialOdds > 0) {
-                    $backOddsHistory[] = ['timestamp' => $now, 'odds' => $initialOdds];
-                }
-
-                $lastHistoryOdds = (float) ($backOddsHistory[array_key_last($backOddsHistory)]['odds'] ?? 0);
-                if ($initialOdds !== null && $currentOdds > 0 && $currentOdds !== $lastHistoryOdds) {
-                    $backOddsHistory[] = ['timestamp' => $now, 'odds' => $currentOdds];
-                }
-
-                $runner['previousBackOdds'] = $previousOdds;
-                $runner['currentBackOdds'] = $currentOdds;
-                unset($runner['initialBackOdds'], $runner['initialBackOddsTimestamp']);
-                if ($initialOdds !== null) {
-                    $runner['initialBackOdds'] = $initialOdds;
-                    $runner['initialBackOddsTimestamp'] = $initialOddsTimestamp;
-                }
-                $runner['backOddsHistory'] = array_slice($backOddsHistory, -12);
-                $runner['odds_direction'] = $initialOdds === null || $initialOdds <= 0 || $currentOdds === $initialOdds
-                    ? 'same'
-                    : ($currentOdds < $initialOdds ? 'down' : 'up');
-
-                if (! $isLive && $currentOdds > 0) {
+                if (! $isLive && $currentOdds > 0 && $initialOdds > 1) {
                     $baselineOdds = (float) ($previousRunner['prematch_drop_baseline_odds'] ?? 0);
                     if ($baselineOdds <= 0 && ($marketLiquidity[$marketKey] ?? 0) >= 1000) {
-                        $baselineOdds = $currentOdds;
+                        $baselineOdds = $initialOdds;
                     }
 
                     $runner['prematch_drop_baseline_odds'] = $baselineOdds ?: null;

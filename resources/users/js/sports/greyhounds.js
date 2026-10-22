@@ -1,3 +1,5 @@
+import { watchRacingFeed } from '../racingFeed.js';
+
 let oddsTooltip = null;
 const hideOddsTooltip = () => { oddsTooltip?.remove(); oddsTooltip = null; };
 const showOddsTooltip = (event) => {
@@ -50,10 +52,10 @@ if (dashboard) {
         if (!notice) { notice = document.createElement('p'); notice.dataset.greyhoundsError = ''; notice.className = 'p-3 text-center text-sm text-red-600'; dashboard.prepend(notice); }
         notice.textContent = message;
     };
-    let refreshInterval = 3000;
+    let refreshInterval = 100;
     document.querySelector("[data-greyhounds-speeds]")?.addEventListener("click", (event) => {
         const button = event.target.closest("[data-speed]"); if (!button) return;
-        refreshInterval = Number(button.dataset.speed);
+        refreshInterval = Math.min(100, Number(button.dataset.speed));
         document.querySelectorAll("[data-greyhounds-speeds] button").forEach((item) => { item.classList.toggle("active",item === button); item.classList.toggle("bg-[#0b2a40]",item === button); item.classList.toggle("!text-white",item === button); });
     });
     function scheduleRefresh() {
@@ -84,6 +86,7 @@ if (dashboard) {
             if (response.status === 401) { window.location.assign(dashboard.dataset.loginUrl); return; }
             if (!response.ok) throw new Error('Unable to load races. Please try again.');
             const result = await response.json();
+            feedMonitor.update(result.feed);
             hideOddsTooltip();
             const target = content();
             const priceKey = (cell) => `${cell.closest('[data-match-id]')?.dataset.matchId}:${cell.getAttribute('title') ?? 'favorite'}`;
@@ -131,7 +134,7 @@ if (dashboard) {
                 }
                 if (activeModal === opened) renderModal();
             }
-        } catch (error) { showError(error.message); }
+        } catch (error) { feedMonitor.failed(); showError(error.message); }
         finally {
             loading = false;
             content()?.classList.remove('fixtures-loading');
@@ -158,13 +161,11 @@ if (dashboard) {
             else if (data.locked) body = '<p>Login with an active subscription to view odds.</p>';
             else body = (data.runners ?? []).map((runner) => {
                 const initial = Number(runner.initialBackOdds ?? 0); const current = Number(runner.currentBackOdds ?? 0);
-                const history = (runner.backOddsHistory ?? []).filter((point) => Number(point.odds) > 0).slice(-12);
-                if (initial > 0 && Number(history[0]?.odds) !== initial) history.unshift({odds: initial});
-                if (current > 0 && Number(history.at(-1)?.odds) !== current) history.push({odds: current});
+                const history = (runner.backOddsHistory ?? []).filter(point => Number(runner.initialBackOdds) > 1 && Number(point.timestamp) >= Number(runner.initialBackOddsTimestamp) && Number(point.odds) > 1);
                 const values = history.map((point) => Number(point.odds));
                 const minimum = Math.min(...values); const maximum = Math.max(...values); const range = maximum - minimum || 1;
                 const points = values.map((value, index) => `${10 + index * 380 / Math.max(1, values.length - 1)},${90 - (value - minimum) / range * 70}`).join(' ');
-                return `<section class="mb-4 rounded-xl border border-[#d4e0ec] p-4"><h3 class="font-bold">${escape(runner.runner)}</h3><p class="mt-1 text-sm">Initial ${number(initial)} → Current ${number(current)}</p>${values.length ? `<svg viewBox="0 0 400 110" class="mt-3 h-32 w-full" role="img" aria-label="Back odds history"><polyline fill="none" stroke="#1a6b9c" stroke-width="3" points="${points}" /></svg>` : '<p class="mt-3 text-sm">No odds history available.</p>'}</section>`;
+                return `<section class="mb-4 rounded-xl border border-[#d4e0ec] p-4"><h3 class="font-bold">${escape(runner.runner)}</h3><p class="mt-1 text-sm">Opening ${number(initial)} → Current ${number(current)}</p>${values.length ? `<svg viewBox="0 0 400 110" class="mt-3 h-32 w-full" role="img" aria-label="Back odds history"><polyline fill="none" stroke="#1a6b9c" stroke-width="3" points="${points}" /></svg>` : '<p class="mt-3 text-sm">Waiting for meaningful market activity.</p>'}</section>`;
             }).join('') || '<p>Market data is not available yet.</p>';
         } else if (activeModal.action === 'prediction') {
             const data = parse(row.dataset.greyhoundsPrediction); title = 'Race Predictions';
@@ -175,10 +176,10 @@ if (dashboard) {
             body = `<p class="mb-4 text-sm">🐕 ${escape(data.status)} · ${escape(data.minutes)}</p>`;
             if (data.available === false) body += '<p>Race details and odds become available five minutes before the start.</p>';
             else if (data.locked) body += '<p>Login with an active subscription to view odds.</p>';
-            else body += `<div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr>${['Selection', 'Initial', 'Back', 'Size', 'Lay', 'Size'].map((label) => `<th class="px-2 py-2">${label}</th>`).join('')}</tr></thead><tbody>${(data.runners ?? []).map((runner) => {
+            else body += `<div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr>${['Selection', 'Opening', 'Back', 'Size', 'Lay', 'Size'].map((label) => `<th class="px-2 py-2">${label}</th>`).join('')}</tr></thead><tbody>${(data.runners ?? []).map((runner) => {
                 const initial = Number(runner.initialBackOdds ?? 0); const current = Number(runner.currentBackOdds ?? runner.backOdds ?? 0);
                 const arrow = initial > 0 && current > 0 ? current > initial ? ' ↑' : current < initial ? ' ↓' : '' : '';
-                return `<tr class="border-t border-[#e3ecf5]"><td class="px-2 py-3">${escape(runner.runner)}${String(runner.runnerId) === String(data.indicators?.favorite_id) ? " ⭐" : ""}</td>${[initial, current, runner.backSize, runner.layOdds, runner.laySize].map((value, index) => `<td ${index === 1 && current > 0 ? `tabindex="0" data-greyhounds-odds-tooltip="${number(initial)} → ${number(current)}"` : ''} class="whitespace-nowrap px-2 py-3 font-semibold">${number(value)}${index === 1 ? arrow : ''}</td>`).join('')}</tr>`;
+                return `<tr class="border-t border-[#e3ecf5]"><td class="px-2 py-3">${escape(runner.runner)}${String(runner.runnerId) === String(data.indicators?.favorite_id) ? " ⭐" : ""}</td>${[initial, current, runner.backSize, runner.layOdds, runner.laySize].map((value, index) => `<td ${index === 1 && current > 0 ? `tabindex="0" data-greyhounds-odds-tooltip="${number(initial)} → ${number(current)}"` : ''} class="whitespace-nowrap px-2 py-3 font-semibold ${index === 1 ? 'bg-[#a6d8ff] text-[#0b2a40]' : index === 3 ? 'bg-[#fac9d1] text-[#4a1520]' : ''}">${(index === 2 || index === 4) && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value).toFixed(2) : number(value)}${index === 1 ? arrow : ''}</td>`).join('')}</tr>`;
             }).join('')}</tbody></table></div><a class="mt-4 inline-block rounded-xl bg-[#0b2a40] px-4 py-2 text-sm font-bold text-white" href="${escape(row.dataset.greyhoundsMatchUrl)}">Race markets &amp; charts →</a>`;
         }
         hideOddsTooltip();
@@ -187,7 +188,7 @@ if (dashboard) {
             if (!data.locked) {
                 const indicator = data.indicators ?? {};
                 const backPercent = Number(indicator.back_percent ?? 50);
-                body += `<section class="mt-5"><h3 class="mb-2 font-bold">Liquidity Distribution</h3><div class="flex overflow-hidden rounded-lg text-center text-xs text-white"><div class="bg-[#1a6b9c] p-2" style="width:${backPercent}%">Back ${backPercent.toFixed(0)}%</div><div class="bg-[#bc3d60] p-2" style="width:${100-backPercent}%">Lay ${(100-backPercent).toFixed(0)}%</div></div><div class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">${[ ["Balance",indicator.balance], ["Momentum",indicator.momentum], ["Delta",`${Number(indicator.delta ?? 0).toFixed(1)}%`], ["Volatility",indicator.volatility] ].map(([label,value])=>`<div class="rounded-lg border border-[#d4e0ec] p-3"><small>${label}</small><b class="block">${escape(value ?? "—")}</b></div>`).join("")}</div></section>`;
+                body += `<section class="mt-5"><h3 class="mb-2 font-bold">Available Liquidity Distribution</h3><p class="mb-2 text-xs">Sizes are available offers, not matched trades. Traded volume is not supplied by this feed.</p><div class="flex overflow-hidden rounded-lg text-center text-xs text-white"><div class="bg-[#1a6b9c] p-2" style="width:${backPercent}%">Back ${backPercent.toFixed(0)}%</div><div class="bg-[#bc3d60] p-2" style="width:${100-backPercent}%">Lay ${(100-backPercent).toFixed(0)}%</div></div><div class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">${[ ["Balance",indicator.balance], ["Size momentum",indicator.momentum], ["Size delta",`${Number(indicator.delta ?? 0).toFixed(1)}%`], ["Volatility",indicator.volatility] ].map(([label,value])=>`<div class="rounded-lg border border-[#d4e0ec] p-3"><small>${label}</small><b class="block">${escape(value ?? "—")}</b></div>`).join("")}</div></section>`;
             }
             body += `<details class="mt-5 border-t border-[#d4e0ec] pt-3"><summary class="cursor-pointer font-bold">Terms</summary><dl class="space-y-2 py-3 text-sm"><dt class="font-bold">Balance</dt><dd>Back heavy above 58%; Lay heavy below 42%.</dd><dt class="font-bold">Momentum</dt><dd>Change in the favorite runner’s back size: strong above 10%, directional above 3%.</dd><dt class="font-bold">Delta</dt><dd>Percentage change in the current favorite runner’s back size.</dd><dt class="font-bold">Volatility</dt><dd>Standard deviation of log odds returns over the latest ten seconds.</dd></dl></details>`;
         }
@@ -232,6 +233,5 @@ if (dashboard) {
         if (times.length) availabilityTimer = setTimeout(()=>load(),Math.max(0,Math.min(...times)-Date.now()+50));
     }
     scheduleAvailability();
-    const subscribe = () => window.Echo?.channel('sports.greyhounds.live').listen('.score.updated', scheduleRefresh);
-    if (window.Echo) subscribe(); else window.addEventListener('load', subscribe, { once: true });
+    const feedMonitor = watchRacingFeed(dashboard, scheduleRefresh, 'greyhounds');
 }

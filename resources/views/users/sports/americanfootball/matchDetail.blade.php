@@ -92,6 +92,7 @@
                                 <div class="col-span-2 md:col-span-1">
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Movement</span>
                                     @if ($checkAuthAndSubscription['display_odds'])
+                                        @if ($runner['initial_back_odds'] > 1)
                                         <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-extrabold {{ $runner['direction'] < 0 ? 'bg-red-50 text-[#c74e4e] dark:bg-red-950/30' : ($runner['direction'] > 0 ? 'bg-emerald-50 text-[#1f9a6e] dark:bg-emerald-950/30' : 'bg-slate-100 text-slate-500 dark:bg-slate-700') }}">
                                             @if ($runner['direction'] < 0)
                                                 <i class="fas fa-arrow-down"></i>
@@ -102,6 +103,9 @@
                                             @endif
                                             {{ $runner['change_percent'] > 0 ? '+' : '' }}{{ number_format($runner['change_percent'], 1) }}%
                                         </span>
+                                        @else
+                                            <span class="text-xs text-slate-400">{{ __('Waiting for opening odds') }}</span>
+                                        @endif
                                     @else
                                         <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-extrabold">
                                             @include('lock_icon')

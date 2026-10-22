@@ -772,7 +772,9 @@
                     marketLazyLoader.querySelector('[data-market-loader-text]').textContent = '↓ Scroll for more matches ↓';
                 }
 
+                let racingFeedMonitor = null;
                 function receiveMarketRows(payload, append = false) {
+                    racingFeedMonitor?.update(payload.feed);
                     const template = document.createElement('template');
                     template.innerHTML = `<table><tbody>${payload.html}</tbody></table>`;
                     const body = template.content.querySelector('tbody');
@@ -847,6 +849,7 @@
                         if (reset) marketLoadedPages = 1;
                         updateMarketLoader(payload.has_more, marketLoadedPages + 1);
                     } catch (error) {
+                        racingFeedMonitor?.failed();
                         console.error('Market activity filter request failed:', error);
                     } finally {
                         marketLoading = false;
@@ -910,6 +913,13 @@
 
                 let marketRealtimeRefreshTimer = null;
                 window.addEventListener('load', function() {
+                    @if ($raceActivity)
+                    racingFeedMonitor = window.watchRacingFeed(document.getElementById('eventsWrap').parentElement, () => {
+                        if (marketRealtimeRefreshTimer !== null) return;
+                        marketRealtimeRefreshTimer = window.setTimeout(() => { marketRealtimeRefreshTimer = null; reloadMarketActivity(); }, 100);
+                    }, @json($marketActivitySport));
+                    return;
+                    @endif
                     if (!window.Echo) return;
 
                     window.Echo.channel(@json('sports.'.$marketActivitySport.'.live'))
@@ -997,6 +1007,7 @@
                             <div class="detail-meta [font-size:11.5px] [opacity:0.9] flex items-center [gap:8px] flex-wrap [margin-top:2px] max-[480px]:[font-size:10.5px]">${metaHtml}</div>
                         </div>
                         <div class="detail-body [padding:16px_20px] max-[480px]:[padding:14px_16px]">
+                            @if ($raceActivity)<p class="mb-3 text-xs text-[#5a7d99]">Sizes and liquidity indicators describe available offers, not matched trades. Traded volume is not supplied by this feed.</p>@endif
                             <div class="detail-section [margin-bottom:20px] [&:last-child]:[margin-bottom:0]">
                                 <div class="detail-section-title [font-size:11px] font-extrabold uppercase [letter-spacing:0.6px] [color:#1a6b9c] [margin-bottom:10px] flex items-center [gap:6px] dark:[color:#6aafdf]"><i class="fas fa-users"></i> Runners</div>
                                 <div class="runners-list flex flex-col [gap:8px]">${runnersHtml}</div>

@@ -14,25 +14,26 @@
     <section class="overflow-hidden rounded-2xl border border-[#dbe7f2] bg-white shadow-sm dark:border-[#2a3f50] dark:bg-[#162532]">
         <div class="bg-gradient-to-r from-[#0b2a40] to-[#1a6b9c] px-4 py-6 text-white sm:px-8">
             <div class="mb-3 text-center text-xs font-bold uppercase tracking-[0.14em] text-[#b9def3]">{{ $match['tournament'] }}</div>
-            <div class="grid grid-cols-[minmax(0,1fr)_48px_minmax(0,1fr)] items-center gap-2 text-center sm:grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)] sm:gap-4">
+            <div class="grid grid-cols-[minmax(0,1fr)_minmax(130px,200px)_minmax(0,1fr)] items-center gap-2 text-center sm:grid-cols-[minmax(0,1fr)_260px_minmax(0,1fr)] sm:gap-4">
                 <div class="min-w-0">
                     <h1 class="flex items-center justify-center gap-2 text-base font-bold sm:text-2xl">
                         @if ($match['home_team_logo'] ?? null)<img src="{{ $match['home_team_logo'] }}" alt="" class="size-7 shrink-0 object-contain" onerror="this.remove()">@endif
                         <span class="min-w-0 break-words">{{ $match['team1'] }}</span>
                     </h1>
-                    @if ($match['status'] !== 'Prematch')<p class="mt-3 text-sm font-bold sm:text-xl">{{ $match['home_score_display'] }}</p>@endif
                 </div>
-                <strong class="text-lg text-[#b9def3] sm:text-2xl">vs</strong>
+                <div class="rounded-xl bg-white px-2 py-3 dark:bg-[#162532]">
+                    @include('users.sports.cricket.partials.score', ['scoreDisplay' => $match['score_display'], 'status' => $match['status']])
+                </div>
                 <div class="min-w-0">
                     <h1 class="flex items-center justify-center gap-2 text-base font-bold sm:text-2xl">
                         <span class="min-w-0 break-words">{{ $match['team2'] }}</span>
                         @if ($match['away_team_logo'] ?? null)<img src="{{ $match['away_team_logo'] }}" alt="" class="size-7 shrink-0 object-contain" onerror="this.remove()">@endif
                     </h1>
-                    @if ($match['status'] !== 'Prematch')<p class="mt-3 text-sm font-bold sm:text-xl">{{ $match['away_score_display'] }}</p>@endif
                 </div>
             </div>
             <div class="mt-4 text-center text-xs font-bold uppercase tracking-wide text-[#b9def3]">{{ $match['status'] }} · {{ $match['minutes'] }}</div>
             @if ($match['match_status_description'] ?? null)<p class="mt-3 text-center text-sm text-[#b9def3]">{{ $match['match_status_description'] }}</p>@endif
+            @if ($match['score_display']['toss'])<p class="mt-3 text-center text-xs text-[#b9def3]" data-cricket-toss>{{ $match['score_display']['toss'] }}</p>@endif
         </div>
 
         <div class="p-4 sm:p-7">
@@ -71,7 +72,7 @@
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Initial</span>
                                     <span class="font-mono text-base font-bold tabular-nums text-slate-500 dark:text-slate-300">
                                         @if ($checkAuthAndSubscription['display_odds'])
-                                            {{ number_format($runner['initial_back_odds'], 2) }}
+                                            {{ $runner['initial_back_odds'] > 1 ? number_format($runner['initial_back_odds'], 2) : '—' }}
                                         @else
                                             @include('lock_icon')
                                         @endif
@@ -80,7 +81,7 @@
 
                                 <div class="text-right md:text-left">
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Current</span>
-                                    <span @if ($checkAuthAndSubscription['display_odds'] && $runner['current_back_odds'] > 0) tabindex="0" data-cricket-odds-tooltip="{{ number_format($runner['initial_back_odds'], 2) }} {{ $runner['direction'] > 0 ? '<<' : '>>' }} {{ number_format($runner['current_back_odds'], 2) }}" @endif class="inline-flex min-w-[72px] items-center justify-center gap-1 rounded-lg border border-[#b9d8ee] bg-[#e8f5ff] px-2.5 py-1.5 font-mono text-base font-extrabold tabular-nums text-[#0b2a40] dark:border-[#3d6d8d] dark:bg-[#17364b] dark:text-white">
+                                    <span @if ($checkAuthAndSubscription['display_odds'] && $runner['current_back_odds'] > 0) tabindex="0" data-cricket-odds-tooltip="{{ $runner['initial_back_odds'] > 1 ? number_format($runner['initial_back_odds'], 2) : '—' }} {{ $runner['direction'] > 0 ? '<<' : '>>' }} {{ number_format($runner['current_back_odds'], 2) }}" @endif class="inline-flex min-w-[72px] items-center justify-center gap-1 rounded-lg border border-[#b9d8ee] bg-[#e8f5ff] px-2.5 py-1.5 font-mono text-base font-extrabold tabular-nums text-[#0b2a40] dark:border-[#3d6d8d] dark:bg-[#17364b] dark:text-white">
                                         @if ($checkAuthAndSubscription['display_odds'])
                                             {{ number_format($runner['current_back_odds'], 2) }}
                                         @else
@@ -92,6 +93,7 @@
                                 <div class="col-span-2 md:col-span-1">
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Movement</span>
                                     @if ($checkAuthAndSubscription['display_odds'])
+                                        @if ($runner['initial_back_odds'] > 1)
                                         <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-extrabold {{ $runner['direction'] < 0 ? 'bg-red-50 text-[#c74e4e] dark:bg-red-950/30' : ($runner['direction'] > 0 ? 'bg-emerald-50 text-[#1f9a6e] dark:bg-emerald-950/30' : 'bg-slate-100 text-slate-500 dark:bg-slate-700') }}">
                                             @if ($runner['direction'] < 0)
                                                 <i class="fas fa-arrow-down"></i>
@@ -102,6 +104,9 @@
                                             @endif
                                             {{ $runner['change_percent'] > 0 ? '+' : '' }}{{ number_format($runner['change_percent'], 1) }}%
                                         </span>
+                                        @else
+                                            <span class="text-xs text-slate-400">{{ __('Waiting for opening odds') }}</span>
+                                        @endif
                                     @else
                                         <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-extrabold">
                                             @include('lock_icon')

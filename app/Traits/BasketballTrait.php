@@ -24,7 +24,7 @@ trait BasketballTrait
             abort_unless($checkAuthAndSubscription['display_odds'], 403, __('An active 7-day free trial or paid subscription is required to use smart filters.'));
         }
 
-        $matches = array_values(getInRedis('Basketball:matches') ?? []);
+        $matches = array_values(array_map('prepareMatchOddsMonitoring', getInRedis('Basketball:matches') ?? []));
         $customerId = request()->user('customers')?->getAuthIdentifier();
         $favoriteKeys = $customerId === null ? [] : array_fill_keys(Favorite::query()->where('sport', 'basketball')->where('customer_id', $customerId)->pluck('event_key')->all(), true);
         $today = Carbon::now(getCurrentUserTimezone())->toDateString();
@@ -208,6 +208,7 @@ trait BasketballTrait
                 $match[$logo] = $images && is_file($images[0]) ? '/images/basketball/teams/'.basename($images[0]) : null;
             }
         }
+        $match = prepareMatchOddsMonitoring($match);
         $markets = [];
         foreach ($match['markets'] ?? [] as $runners) {
             if ($runners === []) {
@@ -219,14 +220,8 @@ trait BasketballTrait
             $selections = [];
             foreach ($runners as $runner) {
                 $current = (float) ($runner['currentBackOdds'] ?? $runner['backOdds'] ?? 0);
-                $initial = (float) ($runner['initialBackOdds'] ?? $current);
+                $initial = (float) ($runner['initialBackOdds'] ?? 0);
                 $history = array_values(array_filter($runner['backOddsHistory'] ?? [], static fn (array $point): bool => (float) ($point['odds'] ?? 0) > 0));
-                if ($initial > 0 && ($history === [] || (float) $history[0]['odds'] !== $initial)) {
-                    array_unshift($history, ['timestamp' => (int) ($runner['initialBackOddsTimestamp'] ?? $match['timestamp']), 'odds' => $initial]);
-                }
-                if ($current > 0 && (float) ($history[array_key_last($history)]['odds'] ?? 0) !== $current) {
-                    $history[] = ['timestamp' => time(), 'odds' => $current];
-                }
                 $selections[] = ['name' => $runner['runner'] ?? 'Selection', 'initial_back_odds' => $initial, 'current_back_odds' => $current, 'direction' => $current > 0 && $initial > 0 ? $current <=> $initial : 0, 'change_percent' => $initial > 0 && $current > 0 ? (($current - $initial) / $initial) * 100 : 0, 'history' => count($history) > 12 ? array_merge([$history[0]], array_slice($history, -11)) : $history];
             }
             $markets[] = ['type' => $first['marketType'] ?? '', 'label' => $first['name'] ?? 'Market', 'runners' => $selections];
@@ -245,7 +240,7 @@ trait BasketballTrait
         $rows = [];
         foreach ($groups as $group) {
             foreach ($group['matches'] as $match) {
-                $raw = $matchesById[$match['unique_key']] ?? $match;
+                $raw = prepareMatchOddsMonitoring($matchesById[$match['unique_key']] ?? $match);
                 foreach ($raw['markets'] ?? [] as $key => $runners) {
                     if (request()->filled('market_name') && ($runners[array_key_first($runners)]['marketType'] ?? '') !== request()->input('market_name')) {
                         continue;

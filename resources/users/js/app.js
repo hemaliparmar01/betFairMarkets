@@ -1,7 +1,9 @@
+import { watchRacingFeed } from './racingFeed.js';
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
 
 window.Pusher = Pusher;
+window.watchRacingFeed = watchRacingFeed;
 
 window.Echo = new Echo({
     broadcaster: 'reverb',

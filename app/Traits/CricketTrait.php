@@ -24,7 +24,7 @@ trait CricketTrait
             abort_unless($checkAuthAndSubscription['display_odds'], 403, __('An active 7-day free trial or paid subscription is required to use smart filters.'));
         }
 
-        $matches = array_values(getInRedis('Cricket:matches') ?? []);
+        $matches = array_values(array_map('prepareMatchOddsMonitoring', getInRedis('Cricket:matches') ?? []));
         $customerId = request()->user('customers')?->getAuthIdentifier();
         $favoriteKeys = $customerId === null ? [] : array_fill_keys(Favorite::query()->where('sport', 'cricket')->where('customer_id', $customerId)->pluck('event_key')->all(), true);
         $today = Carbon::now(getCurrentUserTimezone())->toDateString();
@@ -109,6 +109,7 @@ trait CricketTrait
                 'status' => $match['result_status'],
                 'is_favorite' => isset($favoriteKeys[$match['unique_key']]),
                 'score' => $this->getScore($match),
+                'score_display' => $this->cricketScoreDisplay($match),
                 'home_score_display' => $this->formatCricketScore($match['home_score_data'] ?? []),
                 'away_score_display' => $this->formatCricketScore($match['away_score_data'] ?? []),
                 'minutes' => $match['result_status'] === 'Prematch' ? Carbon::createFromTimestamp((int) $match['timestamp'], getCurrentUserTimezone())->format('H:i') : ($match['minutes_status'] ?? $match['result_status']),
@@ -148,6 +149,80 @@ trait CricketTrait
         return ($match['result_status'] ?? 'Prematch') === 'Prematch' ? 'vs' : $this->formatCricketScore($match['home_score_data'] ?? []).' - '.$this->formatCricketScore($match['away_score_data'] ?? []);
     }
 
+    /**
+     * The provider's `current` is a cumulative total in multi-innings matches.
+     * Never use it in place of the current individual innings score.
+     *
+     * @param  array<string, mixed>  $match
+     * @return array{main: list<array{side: string, team: string, score: string, overs: ?string, number: int}>, innings: ?string, previous: list<string>, toss: ?string}
+     */
+    public function cricketScoreDisplay(array $match): array
+    {
+        $display = ['main' => [], 'innings' => null, 'previous' => [], 'toss' => $match['toss_info'] ?? null];
+        if (($match['result_status'] ?? 'Prematch') === 'Prematch') {
+            return $display;
+        }
+        $innings = [];
+        foreach (['home' => 'team1', 'away' => 'team2'] as $side => $team) {
+            $score = $match[$side.'_score_data'] ?? [];
+            foreach ($score['innings'] ?? [] as $key => $inning) {
+                if (! is_array($inning) || ! is_numeric($inning['score'] ?? null)) {
+                    continue;
+                }
+                preg_match('/(\d+)/', (string) $key, $number);
+                $wickets = is_numeric($inning['wickets'] ?? null) ? '/'.$inning['wickets'] : '';
+                $innings[$side][] = ['side' => $side, 'team' => $match[$team] ?? ucfirst($side), 'score' => (string) $inning['score'].$wickets,
+                    'overs' => is_numeric($inning['overs'] ?? null) ? (string) $inning['overs'] : null, 'number' => (int) ($number[1] ?? 1)];
+            }
+            if (empty($score['innings']) && is_numeric($score['current'] ?? null)
+                && ((float) $score['current'] > 0 || is_numeric($score['wickets'] ?? null) || is_numeric($score['overs'] ?? null))) {
+                $innings[$side][] = ['side' => $side, 'team' => $match[$team] ?? ucfirst($side),
+                    'score' => (string) $score['current'].(isset($score['wickets']) ? '/'.$score['wickets'] : ''),
+                    'overs' => is_numeric($score['overs'] ?? null) ? (string) $score['overs'] : null, 'number' => 1];
+            }
+            if (isset($innings[$side])) {
+                usort($innings[$side], static fn (array $left, array $right): int => $left['number'] <=> $right['number']);
+            }
+        }
+        $latest = array_map(static fn (array $scores): array => $scores[array_key_last($scores)], $innings);
+        $battingSide = $match['cricket_batting_side'] ?? null;
+        if (! isset($latest[$battingSide ?? ''])) {
+            $battingSide = null;
+        }
+        if ($battingSide === null && count($latest) === 1) {
+            $battingSide = array_key_first($latest);
+        } elseif ($battingSide === null && count($latest) === 2) {
+            if ($latest['home']['number'] !== $latest['away']['number']) {
+                $battingSide = $latest['home']['number'] > $latest['away']['number'] ? 'home' : 'away';
+            } elseif ($latest['home']['number'] === 1 && isset($match['cricket_first_batting_side'])) {
+                $battingSide = $match['cricket_first_batting_side'] === 'home' ? 'away' : 'home';
+            }
+        }
+        $display['main'] = $battingSide !== null ? [$latest[$battingSide]] : array_values($latest);
+        if ($display['main'] !== []) {
+            $number = $display['main'][0]['number'];
+            if ($number === 1 && preg_match('/^([1-4])(?:st|nd|rd|th) Innings?$/i', $match['minutes_status'] ?? '', $phase)) {
+                $number = (int) $phase[1];
+            }
+            $display['innings'] = ($number === 1 ? '1st' : ($number === 2 ? '2nd' : ($number === 3 ? '3rd' : $number.'th'))).' Innings';
+        }
+        $previous = [];
+        foreach ($innings as $side => $scores) {
+            foreach ($scores as $inning) {
+                if (array_any($display['main'], static fn (array $current): bool => $current['side'] === $side && $current['number'] === $inning['number'])) {
+                    continue;
+                }
+                $previous[$inning['number']][] = $inning['team'].': '.$inning['score'];
+            }
+        }
+        ksort($previous);
+        foreach ($previous as $number => $scores) {
+            $display['previous'][] = ($number === 1 ? '1st' : ($number === 2 ? '2nd' : $number.'th')).' Inn: '.implode(' · ', $scores);
+        }
+
+        return $display;
+    }
+
     public function getAllMarkets(): array
     {
         $options = ['MATCH_ODDS' => ['value' => 'MATCH_ODDS', 'label' => 'Match Odds', 'oddsCount' => 3]];
@@ -182,6 +257,7 @@ trait CricketTrait
                 $match[$logo] = $images && is_file($images[0]) ? '/images/cricket/teams/'.basename($images[0]) : null;
             }
         }
+        $match = prepareMatchOddsMonitoring($match);
         $markets = [];
         foreach ($match['markets'] ?? [] as $runners) {
             if ($runners === []) {
@@ -193,21 +269,15 @@ trait CricketTrait
             $selections = [];
             foreach ($runners as $runner) {
                 $current = (float) ($runner['currentBackOdds'] ?? $runner['backOdds'] ?? 0);
-                $initial = (float) ($runner['initialBackOdds'] ?? $current);
+                $initial = (float) ($runner['initialBackOdds'] ?? 0);
                 $history = array_values(array_filter($runner['backOddsHistory'] ?? [], static fn (array $point): bool => (float) ($point['odds'] ?? 0) > 0));
-                if ($initial > 0 && ($history === [] || (float) $history[0]['odds'] !== $initial)) {
-                    array_unshift($history, ['timestamp' => (int) ($runner['initialBackOddsTimestamp'] ?? $match['timestamp']), 'odds' => $initial]);
-                }
-                if ($current > 0 && (float) ($history[array_key_last($history)]['odds'] ?? 0) !== $current) {
-                    $history[] = ['timestamp' => time(), 'odds' => $current];
-                }
                 $selections[] = ['name' => $runner['runner'] ?? 'Selection', 'initial_back_odds' => $initial, 'current_back_odds' => $current, 'direction' => $current > 0 && $initial > 0 ? $current <=> $initial : 0, 'change_percent' => $initial > 0 && $current > 0 ? (($current - $initial) / $initial) * 100 : 0, 'history' => count($history) > 12 ? array_merge([$history[0]], array_slice($history, -11)) : $history];
             }
             $markets[] = ['type' => $first['marketType'] ?? '', 'label' => $first['name'] ?? 'Market', 'runners' => $selections];
         }
         usort($markets, static fn (array $left, array $right): int => (($left['type'] !== 'MATCH_ODDS') <=> ($right['type'] !== 'MATCH_ODDS')) ?: ($left['label'] <=> $right['label']));
 
-        return array_replace($match, ['home_score_display' => $this->formatCricketScore($match['home_score_data'] ?? []), 'away_score_display' => $this->formatCricketScore($match['away_score_data'] ?? []), 'id' => $matchId, 'status' => $match['result_status'], 'score' => $this->getScore($match), 'minutes' => $match['minutes_status'] ?? $match['result_status'], 'markets' => $markets]);
+        return array_replace($match, ['score_display' => $this->cricketScoreDisplay($match), 'home_score_display' => $this->formatCricketScore($match['home_score_data'] ?? []), 'away_score_display' => $this->formatCricketScore($match['away_score_data'] ?? []), 'id' => $matchId, 'status' => $match['result_status'], 'score' => $this->getScore($match), 'minutes' => $match['minutes_status'] ?? $match['result_status'], 'markets' => $markets]);
     }
 
     public function getMarketActivites(): array
@@ -219,7 +289,7 @@ trait CricketTrait
         $rows = [];
         foreach ($groups as $group) {
             foreach ($group['matches'] as $match) {
-                $raw = $matchesById[$match['unique_key']] ?? $match;
+                $raw = prepareMatchOddsMonitoring($matchesById[$match['unique_key']] ?? $match);
                 foreach ($raw['markets'] ?? [] as $key => $runners) {
                     if (request()->filled('market_name') && ($runners[array_key_first($runners)]['marketType'] ?? '') !== request()->input('market_name')) {
                         continue;

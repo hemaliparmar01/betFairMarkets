@@ -6,6 +6,163 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 
+if (! function_exists('hasMeaningfulOpeningOdds')) {
+    /** @param array<string, mixed> $runner */
+    function hasMeaningfulOpeningOdds(array $runner): bool
+    {
+        return ($runner['monitoring_baseline_version'] ?? null) === 1
+            && in_array($runner['opening_odds_source'] ?? null, ['available_liquidity', 'first_observed'], true)
+            && is_numeric($runner['initialBackOdds'] ?? null)
+            && is_finite((float) $runner['initialBackOdds'])
+            && (float) $runner['initialBackOdds'] > 1
+            && (int) ($runner['initialBackOddsTimestamp'] ?? 0) > 0;
+    }
+}
+
+if (! function_exists('prepareOddsMonitoring')) {
+    /**
+     * Legacy price history has no liquidity evidence and cannot establish an opening.
+     *
+     * @param  array<string, mixed>  $runner
+     * @return array<string, mixed>
+     */
+    function prepareOddsMonitoring(array $runner): array
+    {
+        if (hasMeaningfulOpeningOdds($runner)) {
+            return $runner;
+        }
+
+        return array_replace($runner, [
+            'initialBackOdds' => null, 'initialBackOddsTimestamp' => null,
+            'opening_odds_source' => null, 'opening_odds_evidence' => null,
+            'odds_direction' => 'same', 'backOddsHistory' => [],
+            'movementHistory' => [], 'recentOddsHistory' => [],
+            'prematch_drop_baseline_odds' => null, 'prematch_drop_triggered' => false,
+            'prematch_drop_detected_at' => null, 'market_shock_detected_at' => null,
+            'market_shock_snapshots' => [], 'pressure_type' => 'neutral', 'pressure_amount' => 0,
+        ]);
+    }
+}
+
+if (! function_exists('meaningfulOpeningOdds')) {
+    /**
+     * Available sizes are quote evidence, not traded volume. A funded competitive
+     * Back/Lay book permits genuine low prices too. Without size data, use only
+     * the first observed valid quote, never an invented historical opening.
+     *
+     * @param  array<string, mixed>  $quote
+     * @param  array<string, mixed>  $previous
+     * @return array{initialBackOdds: ?float, initialBackOddsTimestamp: ?int, opening_odds_source: ?string, opening_odds_evidence: ?array<string, float>}
+     */
+    function meaningfulOpeningOdds(array $quote, array $previous, float $now, bool $canStart = true): array
+    {
+        if (hasMeaningfulOpeningOdds($previous)) {
+            return array_intersect_key($previous, array_flip(['initialBackOdds', 'initialBackOddsTimestamp', 'opening_odds_source', 'opening_odds_evidence']));
+        }
+        $opening = ['initialBackOdds' => null, 'initialBackOddsTimestamp' => null, 'opening_odds_source' => null, 'opening_odds_evidence' => null];
+        $price = $quote['backOdds'] ?? null;
+        if (! $canStart || ! is_numeric($price) || ! is_finite((float) $price) || (float) $price <= 1) {
+            return $opening;
+        }
+        $hasLiquidity = array_key_exists('backSize', $quote) || array_key_exists('laySize', $quote);
+        if ($hasLiquidity) {
+            $lay = $quote['layOdds'] ?? null;
+            $backSize = $quote['backSize'] ?? null;
+            $laySize = $quote['laySize'] ?? null;
+            if (! is_numeric($lay) || ! is_finite((float) $lay) || (float) $lay < (float) $price
+                || ! is_numeric($backSize) || ! is_finite((float) $backSize) || (float) $backSize <= 0
+                || ! is_numeric($laySize) || ! is_finite((float) $laySize) || (float) $laySize <= 0
+                || ((float) $lay - (float) $price) / (float) $price > 0.20 + 1e-9) {
+                return $opening;
+            }
+            $opening['opening_odds_evidence'] = ['back_size' => (float) $backSize, 'lay_odds' => (float) $lay, 'lay_size' => (float) $laySize];
+        }
+        $opening['initialBackOdds'] = (float) $price;
+        $opening['initialBackOddsTimestamp'] = (int) $now;
+        $opening['opening_odds_source'] = $hasLiquidity ? 'available_liquidity' : 'first_observed';
+
+        return $opening;
+    }
+}
+
+if (! function_exists('updateOddsMonitoring')) {
+    /**
+     * Keep the opening and the chart anchor together for this market/selection.
+     *
+     * @param  array<string, mixed>  $quote
+     * @param  array<string, mixed>  $previous
+     * @return array<string, mixed>
+     */
+    function updateOddsMonitoring(array $quote, array $previous, float $now, bool $canStart = true): array
+    {
+        foreach (['marketId', 'marketType', 'runnerId', 'handicap'] as $identity) {
+            if (isset($quote[$identity], $previous[$identity]) && (string) $quote[$identity] !== (string) $previous[$identity]) {
+                $previous = [];
+                break;
+            }
+        }
+        $hasPreviousOpening = hasMeaningfulOpeningOdds($previous);
+        $previous = prepareOddsMonitoring($previous);
+        $opening = meaningfulOpeningOdds($quote, $previous, $now, $canStart);
+        $runner = array_replace(prepareOddsMonitoring(array_replace($previous, $quote)), $opening);
+        $price = $quote['backOdds'] ?? null;
+        $current = is_numeric($price) && is_finite((float) $price) && (float) $price > 1 ? (float) $price : 0.0;
+        $runner['monitoring_baseline_version'] = 1;
+        $runner['monitoring_started_at'] = $previous['monitoring_started_at'] ?? (int) $now;
+        $previousPrice = (float) ($previous['currentBackOdds'] ?? 0);
+        $previousHistory = $previous['backOddsHistory'] ?? [];
+        $runner['previousBackOdds'] = ! $hasPreviousOpening ? $current
+            : ($previousPrice > 1 ? $previousPrice : (float) ($previousHistory[array_key_last($previousHistory)]['odds'] ?? $current));
+        $runner['currentBackOdds'] = $current;
+        $initial = (float) ($opening['initialBackOdds'] ?? 0);
+        $runner['odds_direction'] = $initial > 1 && $current > 1 ? ($current < $initial ? 'down' : ($current > $initial ? 'up' : 'same')) : 'same';
+        $history = $initial > 1 ? array_values(array_filter($previous['backOddsHistory'] ?? [], static fn (array $point): bool => is_numeric($point['odds'] ?? null)
+            && is_finite((float) $point['odds']) && (float) $point['odds'] > 1
+            && (int) ($point['timestamp'] ?? 0) >= $opening['initialBackOddsTimestamp'])) : [];
+        if ($initial > 1 && ($history === [] || (float) $history[0]['odds'] !== $initial || (int) $history[0]['timestamp'] !== $opening['initialBackOddsTimestamp'])) {
+            array_unshift($history, ['timestamp' => $opening['initialBackOddsTimestamp'], 'odds' => $initial]);
+        }
+        if ($initial > 1 && $current > 1 && (float) $history[array_key_last($history)]['odds'] !== $current) {
+            $history[] = ['timestamp' => (int) $now, 'odds' => $current];
+        }
+        $runner['backOddsHistory'] = count($history) > 12 ? array_merge([$history[0]], array_slice($history, -11)) : $history;
+
+        return $runner;
+    }
+}
+
+if (! function_exists('prepareMatchOddsMonitoring')) {
+    /**
+     * @param  array<string, mixed>  $match
+     * @return array<string, mixed>
+     */
+    function prepareMatchOddsMonitoring(array $match): array
+    {
+        foreach ($match['markets'] ?? [] as $key => $runners) {
+            $match['markets'][$key] = array_map('prepareOddsMonitoring', $runners);
+            if (! array_any($match['markets'][$key], 'hasMeaningfulOpeningOdds')) {
+                unset($match['market_indicators'][$key]);
+            }
+        }
+
+        return $match;
+    }
+}
+
+if (! function_exists('racingFeedHealth')) {
+    /** @return array{state: string, last_frame_at: ?int} */
+    function racingFeedHealth(string $sport): array
+    {
+        $feed = $sport === 'greyhounds' ? 'greyhounds' : 'horse_prematch';
+        $connection = Cache::store('redis')->get('Betfair:racing:connection', []);
+        $health = Cache::store('redis')->get('Betfair:racing:feed:'.$feed, []);
+        $state = ($connection['state'] ?? '') === 'connected' && time() - ($connection['at'] ?? 0) <= 75
+            ? ($health['state'] ?? 'waiting') : 'disconnected';
+
+        return ['state' => $state, 'last_frame_at' => $health['at'] ?? null];
+    }
+}
+
 if (! function_exists('GetBetfairKey')) {
     function GetBetfairKey()
     {

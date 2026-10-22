@@ -13,6 +13,8 @@ trait GreyhoundsTrait
 
     protected ?int $greyhoundsNextPage = null;
 
+    protected ?int $greyhoundsNextRefreshAt = null;
+
     public function getGreyhoundsMatches(bool $grouped = true): array
     {
         if (in_array(request()->input('type'), ['ht00', '00_70', 'fav_losing', 'prematch_drops', 'market_shock', 'fav_not_winning'], true)) {
@@ -25,13 +27,25 @@ trait GreyhoundsTrait
         $today = Carbon::now(getCurrentUserTimezone())->toDateString();
         $type = request()->input('type', 'all');
         $matches = array_map(function (array $race): array {
+            $race = prepareMatchOddsMonitoring($race);
             $race['country'] = $this->getGreyhoundsCountry($race);
             $race['details_available'] = now()->timestamp >= (int) $race['timestamp'] - 300;
 
             return $race;
         }, getInRedis('Greyhounds:matches') ?? []);
+        $boundaries = [];
+        foreach ($matches as $race) {
+            if (($race['result_status'] ?? '') === 'Finished') {
+                continue;
+            }
+            $boundary = $race['details_available'] ? (int) $race['timestamp'] : (int) $race['timestamp'] - 300;
+            if ($boundary > time()) {
+                $boundaries[] = $boundary;
+            }
+        }
+        $this->greyhoundsNextRefreshAt = $boundaries === [] ? null : min($boundaries);
         $matches = array_values(array_filter($matches, static function (array $race) use ($today, $type, $favorites): bool {
-            if (empty($race['betfair_match_id']) || Carbon::createFromTimestamp((int) $race['timestamp'], getCurrentUserTimezone())->toDateString() !== $today) {
+            if (! $race['details_available'] || (int) $race['timestamp'] <= time() || ($race['result_status'] ?? '') === 'Finished' || empty($race['betfair_match_id']) || Carbon::createFromTimestamp((int) $race['timestamp'], getCurrentUserTimezone())->toDateString() !== $today) {
                 return false;
             }
 
@@ -119,6 +133,7 @@ trait GreyhoundsTrait
                 $match['markets'][$runner->market_id.'_'.$runner->market_type][] = $runner->payload;
             }
         }
+        $match = prepareMatchOddsMonitoring($match);
         $match['details_available'] = now()->timestamp >= (int) $match['timestamp'] - 300;
         $match['country'] = $this->getGreyhoundsCountry($match);
         $match['id'] = $matchId;
@@ -126,30 +141,5 @@ trait GreyhoundsTrait
         $match['minutes'] = $this->calculateMinutes($match);
 
         return $match;
-    }
-
-    private function getGreyhoundsCountry(array $race): string
-    {
-        if (is_string($race['country'] ?? null) && $race['country'] !== '') {
-            return $race['country'];
-        }
-        $venue = trim((string) ($race['team1'] ?? ''));
-        if (preg_match('/\((AUS|AU|NZ|USA|US|IRE|IRL|GB|UK)\)\s*$/i', $venue, $country)) {
-            return match (strtoupper($country[1])) {
-                'AUS', 'AU' => 'Australia', 'NZ' => 'New Zealand', 'USA', 'US' => 'United States', 'IRE', 'IRL' => 'Ireland', default => 'United Kingdom',
-            };
-        }
-        $countries = [
-            'Central Park' => 'United Kingdom', 'Dunstall Park' => 'United Kingdom', 'Harlow' => 'United Kingdom', 'Hove' => 'United Kingdom',
-            'Kinsley' => 'United Kingdom', 'Monmore' => 'United Kingdom', 'Monmore Green' => 'United Kingdom', 'Newcastle' => 'United Kingdom',
-            'Nottingham' => 'United Kingdom', 'Romford' => 'United Kingdom', 'Sheffield' => 'United Kingdom', 'Towcester' => 'United Kingdom',
-            'Valley' => 'United Kingdom', 'Yarmouth' => 'United Kingdom', 'Oxford' => 'United Kingdom', 'Sunderland' => 'United Kingdom',
-            'Doncaster' => 'United Kingdom', 'Star Pelaw' => 'United Kingdom', 'Swindon' => 'United Kingdom', 'Suffolk Downs' => 'United Kingdom',
-            'Clonmel' => 'Ireland', 'Cork' => 'Ireland', 'Curraheen Park' => 'Ireland', 'Dundalk' => 'Ireland', 'Galway' => 'Ireland',
-            'Kilkenny' => 'Ireland', 'Lifford' => 'Ireland', 'Limerick' => 'Ireland', 'Mullingar' => 'Ireland', 'Newbridge' => 'Ireland',
-            'Shelbourne Park' => 'Ireland', 'Thurles' => 'Ireland', 'Tralee' => 'Ireland', 'Waterford' => 'Ireland', 'Youghal' => 'Ireland',
-        ];
-
-        return $countries[$venue] ?? 'Country unavailable';
     }
 }

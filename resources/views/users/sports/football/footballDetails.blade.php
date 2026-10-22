@@ -243,6 +243,7 @@
                             <div data-football-timeline="{{ $event['sportsApiPro_match_id'] }}"
                                 data-timeline-minute="{{ $timeline['minute'] }}"
                                 data-timeline-at="{{ $timeline['calculated_at'] }}"
+                                data-timeline-second="{{ $timeline['seconds_into_minute'] }}"
                                 data-timeline-running="{{ $timeline['running'] ? 'true' : 'false' }}"
                                 data-timeline-period-limit="{{ $timeline['period_limit'] }}"
                                 data-timeline-label="{{ $timeline['minute_label'] }}"
@@ -274,42 +275,51 @@
                                                 <span>{{ $goal['minute_label'] }}</span>
                                             </div>
                                         @empty
-                                            <span>{{ __('No goals yet') }}</span>
+                                            <span>{{ ($timeline['goals_pending'] ?? false) ? __('Goal details are syncing…') : __('No goals yet') }}</span>
                                         @endforelse
                                     </div>
                                 </div>
-                                <div class="relative mx-3 h-16">
+                                <div class="relative mx-3 h-16" style="height: {{ $timeline['height'] }}px">
                                     <button type="button" data-timeline-toggle aria-expanded="false"
                                         aria-controls="timeline-panel-{{ $event['sportsApiPro_match_id'] }}"
                                         aria-label="{{ __('Show match timeline for :home vs :away', ['home' => $event['team1'], 'away' => $event['team2']]) }}"
                                         class="absolute inset-0 h-full w-full cursor-pointer rounded bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"></button>
                                     <span class="pointer-events-none absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[#d3dde6] dark:bg-[#bacbd9]" aria-hidden="true"></span>
-                                    <span data-timeline-progress class="pointer-events-none absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[#34566e] transition-[width] duration-300 dark:bg-[#5e849f]"
+                                    <span data-timeline-progress class="pointer-events-none absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[#249b61] transition-[width] duration-300 dark:bg-[#45bc7b]"
                                         style="width: {{ $timeline['progress'] }}%" aria-hidden="true"></span>
                                     <span class="pointer-events-none absolute left-1/2 top-1/2 h-3 w-px -translate-x-1/2 -translate-y-1/2 bg-[#90a7b9]" aria-hidden="true"></span>
                                     <div class="pointer-events-none absolute inset-x-0 bottom-0.5 flex justify-between text-[9px] leading-none text-[#7891a5] dark:text-[#b0c4d4]" aria-hidden="true">
                                         <span>0'</span><span class="absolute left-1/2 -translate-x-1/2">45'</span><span class="ml-auto">90'</span>
                                     </div>
+                                    @if ($timeline['goals_pending'] ?? false)
+                                        <span class="absolute right-0 top-0.5 text-[9px] font-semibold text-amber-700 dark:text-amber-300" role="status">{{ __('Syncing goal details…') }}</span>
+                                    @endif
                                     @if ($timeline['finished'])
                                         <span class="absolute left-0 top-0.5 text-[9px] font-semibold">FT</span>
                                     @endif
                                     @foreach ($timeline['events'] as $incident)
-                                        <button type="button" data-timeline-event="{{ $incident['id'] }}"
-                                            data-event-minute="{{ $incident['minute_label'] }}" data-event-player="{{ $incident['player'] }}" data-event-surname="{{ $incident['player_surname'] }}"
-                                            data-event-kind="{{ $incident['kind'] }}" data-event-label="{{ $incident['label'] }}"
-                                            data-event-score="{{ $incident['home_score'] !== null && $incident['away_score'] !== null ? $incident['home_score'].' - '.$incident['away_score'] : '' }}"
-                                            aria-label="{{ $incident['label'].' '.$incident['minute_label'].' '.$incident['player'] }}"
-                                            title="{{ $incident['label'].' '.$incident['minute_label'].' '.$incident['player'] }}"
-                                            style="left: {{ $incident['end_offset'] ? 'calc(100% - max('.($incident['end_offset'] * 2).'%, '.($incident['end_offset'] * 14).'px))' : $incident['left'].'%' }}"
-                                            class="absolute z-10 flex h-3.5 w-3.5 -translate-x-1/2 cursor-pointer items-center justify-center rounded-sm outline-none hover:ring-2 hover:ring-[#90a7b9]/60 focus-visible:ring-2 focus-visible:ring-cyan-500 {{ $incident['is_home'] ? 'bottom-[calc(50%+6px)]' : 'top-[calc(50%+6px)]' }}">
-                                            @if ($incident['kind'] === 'goal')
-                                                <span class="flex h-2.5 w-2.5 items-center justify-center text-[9px] leading-none" aria-hidden="true">⚽</span>
-                                            @else
-                                                <span class="h-3 w-2 rounded-[1px] shadow-sm {{ $incident['kind'] === 'yellow' ? 'bg-[#e6b422]' : 'bg-[#c74e4e]' }}" aria-hidden="true"></span>
-                                            @endif
-                                        </button>
+                                        @if ($incident['time_known'])
+                                            @include('users.sports.football.partials.timelineEvent', ['incident' => $incident, 'positioned' => true])
+                                        @endif
                                     @endforeach
                                 </div>
+                                @if ($timeline['untimed_events']['home'] !== [] || $timeline['untimed_events']['away'] !== [])
+                                    <div data-timeline-untimed class="border-t border-[#dce5ee] px-2 py-1 text-[9px] text-[#7891a5] dark:border-[#365167] dark:text-[#b0c4d4]">
+                                        <span class="block leading-tight">{{ __('Minute unavailable') }}</span>
+                                        @foreach ($timeline['untimed_events'] as $side => $incidents)
+                                            @if ($incidents !== [])
+                                                <div class="flex min-w-0 items-start gap-1" data-timeline-untimed-side="{{ $side }}">
+                                                    <span class="w-7 shrink-0 leading-[14px]" title="{{ $side === 'home' ? $event['team1'] : $event['team2'] }}">{{ $side === 'home' ? __('Home') : __('Away') }}</span>
+                                                    <div class="flex min-w-0 flex-wrap gap-0.5">
+                                                        @foreach ($incidents as $incident)
+                                                            @include('users.sports.football.partials.timelineEvent', ['incident' => $incident, 'positioned' => false])
+                                                        @endforeach
+                                                    </div>
+                                                </div>
+                                            @endif
+                                        @endforeach
+                                    </div>
+                                @endif
                             </div>
                         @else
                             <div class="flex min-h-8 items-center justify-center">@include('lock_icon')</div>

@@ -253,48 +253,16 @@ class CricketSyncController extends Controller
                     }
                 }
 
-                $previousBackOdds = (float) ($previousMarket['currentBackOdds'] ?? $previousMarket['backOdds'] ?? $market['backOdds'] ?? 0);
-                $currentOdds = (float) ($market['backOdds'] ?? 0) > 0 ? (float) $market['backOdds'] : $previousBackOdds;
-                $backOddsHistory = $previousMarket['backOddsHistory'] ?? [];
-                $initialBackOddsTimestamp = $previousMarket['initialBackOddsTimestamp'] ?? null;
+                $previousMarket = prepareOddsMonitoring($previousMarket);
+                $market = updateOddsMonitoring($market, $previousMarket, $now);
+                $previousBackOdds = $market['previousBackOdds'];
+                $currentOdds = $market['currentBackOdds'];
+                $initialBackOdds = (float) ($market['initialBackOdds'] ?? 0);
 
-                if ($initialBackOddsTimestamp !== null) {
-                    $initialBackOdds = (float) ($previousMarket['initialBackOdds'] ?? $currentOdds);
-                } elseif (isset($backOddsHistory[0]['odds'])) {
-                    $initialBackOdds = (float) $backOddsHistory[0]['odds'];
-                    $initialBackOddsTimestamp = (int) ($backOddsHistory[0]['timestamp'] ?? $now);
-                } else {
-                    $initialBackOdds = (float) ($previousMarket['initialBackOdds']
-                        ?? $previousMarket['backOdds']
-                        ?? $currentOdds);
-                    $initialBackOddsTimestamp = $now;
-                }
-
-                if ($initialBackOdds <= 0 && $currentOdds > 0) {
-                    $initialBackOdds = (float) $currentOdds;
-                    $initialBackOddsTimestamp = $now;
-                }
-
-                if ($backOddsHistory === [] && $initialBackOdds > 0) {
-                    $backOddsHistory[] = ['timestamp' => $now, 'odds' => $initialBackOdds];
-                }
-
-                $lastHistoryOdds = (float) ($backOddsHistory[array_key_last($backOddsHistory)]['odds'] ?? 0);
-                if ($currentOdds > 0 && $currentOdds !== $lastHistoryOdds) {
-                    $backOddsHistory[] = ['timestamp' => $now, 'odds' => (float) $currentOdds];
-                }
-
-                $market['previousBackOdds'] = $previousBackOdds;
-                $market['currentBackOdds'] = $currentOdds;
-                $market['initialBackOdds'] = $initialBackOdds;
-                $market['initialBackOddsTimestamp'] = $initialBackOddsTimestamp;
-                $market['backOddsHistory'] = array_slice($backOddsHistory, -12);
-                $market['odds_direction'] = $this->matchDirection($initialBackOdds, $currentOdds);
-
-                if (! $isLiveApi && $currentOdds > 0) {
+                if (! $isLiveApi && $currentOdds > 0 && $initialBackOdds > 1) {
                     $baselineOdds = (float) ($previousMarket['prematch_drop_baseline_odds'] ?? 0);
                     if ($baselineOdds <= 0 && ($marketLiquidity[$marketKey] ?? 0) >= 1000) {
-                        $baselineOdds = (float) $currentOdds;
+                        $baselineOdds = $initialBackOdds;
                     }
 
                     $market['prematch_drop_baseline_odds'] = $baselineOdds ?: null;
@@ -528,6 +496,7 @@ class CricketSyncController extends Controller
         }
         $homeIsTeam1 = $match['sports_api_home_is_team1'] ?? true;
         $scoreSides = $homeIsTeam1 ? ['home' => 'homeScore', 'away' => 'awayScore'] : ['home' => 'awayScore', 'away' => 'homeScore'];
+        $updatedSides = [];
         foreach ($scoreSides as $side => $scoreKey) {
             $score = $this->eventValue($event, $scoreKey);
             $patch = is_array($score) ? $score : [];
@@ -545,6 +514,9 @@ class CricketSyncController extends Controller
             if ($patch !== []) {
                 $match[$side.'_score_data'] = array_replace_recursive($match[$side.'_score_data'] ?? [], $patch);
                 $match[$side.'_score'] = $match[$side.'_score_data']['current'] ?? $match[$side.'_score_data']['display'] ?? ($match[$side.'_score'] ?? null);
+                if (($before[$side.'_score_data']['innings'] ?? []) != ($match[$side.'_score_data']['innings'] ?? [])) {
+                    $updatedSides[] = $side;
+                }
             }
         }
         foreach (['home_team_id' => $homeIsTeam1 ? 'homeTeam.id' : 'awayTeam.id', 'away_team_id' => $homeIsTeam1 ? 'awayTeam.id' : 'homeTeam.id', 'tournament_id' => 'tournament.id', 'country_id' => 'tournament.category.country.id', 'winner_code' => 'winnerCode'] as $field => $key) {
@@ -552,6 +524,39 @@ class CricketSyncController extends Controller
             if ($value !== null) {
                 $match[$field] = $field === 'winner_code' && ! $homeIsTeam1 && in_array((int) $value, [1, 2], true) ? 3 - (int) $value : $value;
             }
+        }
+        $battingTeamId = $this->eventValue($event, 'battingTeamId') ?? $this->eventValue($event, 'battingTeam.id');
+        $battingSide = is_numeric($battingTeamId) && (int) $battingTeamId > 0
+            ? ((string) $battingTeamId === (string) ($match['home_team_id'] ?? '') ? 'home'
+                : ((string) $battingTeamId === (string) ($match['away_team_id'] ?? '') ? 'away' : null)) : null;
+        if ($battingSide !== null) {
+            $match['cricket_batting_side'] = $battingSide;
+        } elseif (count($updatedSides) === 1) {
+            $match['cricket_batting_side'] = $updatedSides[0];
+        }
+        $populatedSides = array_values(array_filter(['home', 'away'], static fn (string $side): bool => array_any($match[$side.'_score_data']['innings'] ?? [], static fn (array $inning): bool => is_numeric($inning['score'] ?? null))));
+        if (count($populatedSides) === 1) {
+            $match['cricket_first_batting_side'] ??= $populatedSides[0];
+        }
+        $tossWinner = $this->eventValue($event, 'tossWinnerCode');
+        if (in_array((int) $tossWinner, [1, 2], true)) {
+            $match['toss_winner_side'] = ((int) $tossWinner === 1) === $homeIsTeam1 ? 'home' : 'away';
+        }
+        $decision = $this->eventValue($event, 'tossDecision');
+        if (is_string($decision) && in_array(strtolower($decision), ['bat', 'batting', 'bowl', 'bowling', 'field', 'fielding'], true)) {
+            $match['toss_decision'] = in_array(strtolower($decision), ['bat', 'batting'], true) ? 'bat' : 'bowl';
+        }
+        foreach (['tossText', 'toss.text', 'toss'] as $key) {
+            $text = $this->eventValue($event, $key);
+            if (is_string($text) && trim($text) !== '') {
+                $match['toss_info'] = $text;
+                break;
+            }
+        }
+        if (isset($match['toss_winner_side'], $match['toss_decision'])) {
+            $winner = $match['toss_winner_side'];
+            $match['toss_info'] = ($match[$winner === 'home' ? 'team1' : 'team2'] ?? ucfirst($winner)).' won the toss and elected to '.$match['toss_decision'].'.';
+            $match['cricket_first_batting_side'] = $match['toss_decision'] === 'bat' ? $winner : ($winner === 'home' ? 'away' : 'home');
         }
         if ($type === 'finished' || (int) $code === 100) {
             $match['result_status'] = 'Finished';
@@ -614,6 +619,9 @@ class CricketSyncController extends Controller
                 } elseif (str_ends_with($channel, ':incidents')) {
                     $incidents = $event['incidents'] ?? $event['events'] ?? (array_is_list($event) ? $event : [$event]);
                     $latest = $incidents[0] ?? null;
+                    if (is_array($latest) && isset($latest['battingTeamId'])) {
+                        $this->applySportsApiEvent($match, ['battingTeamId' => $latest['battingTeamId']], $channel);
+                    }
                     if (is_array($latest) && in_array($latest['incidentType'] ?? null, ['wicket', 'boundary', 'milestone'], true)) {
                         $incidentId = (string) ($latest['id'] ?? hash('sha256', json_encode($latest)));
                         if (($match['incidents_initialized'] ?? false) && ($match['last_incident']['id'] ?? null) !== $incidentId) {

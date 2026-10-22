@@ -110,12 +110,23 @@ class FootballSyncController extends Controller
                     'status_type' => $read('status.type'),
                     'status_description' => $read('status.description'),
                     'period_start' => $read('time.currentPeriodStartTimestamp'),
+                    'initial' => $read('time.initial'),
+                    'max' => $read('time.max'),
                     'last_period_timestamp' => $read('time.lastPeriodTimestamp'),
                 ], static fn (mixed $value): bool => $value !== null);
                 foreach (['period_start', 'last_period_timestamp'] as $field) {
                     if (isset($clock[$field]) && (! is_numeric($clock[$field]) || (int) $clock[$field] <= 0)) {
                         unset($clock[$field]);
                     }
+                }
+                foreach (['initial', 'max'] as $field) {
+                    if (isset($clock[$field]) && (! is_numeric($clock[$field]) || (int) $clock[$field] < ($field === 'initial' ? 0 : 1))) {
+                        unset($clock[$field]);
+                    }
+                }
+                if (in_array((int) ($clock['status_code'] ?? 0), [6, 7], true)) {
+                    $clock['initial'] ??= (int) $clock['status_code'] === 7 ? 2700 : 0;
+                    $clock['max'] ??= (int) $clock['status_code'] === 7 ? 5400 : 2700;
                 }
                 if ($clock === []) {
                     return false;
@@ -135,7 +146,27 @@ class FootballSyncController extends Controller
         });
     }
 
-    public function queueTimelineBackfill(int|string $matchId, bool $finished = false): void
+    /**
+     * @param  array<string, mixed>  $timeline
+     * @param  array{home: int, away: int}|null  $score
+     */
+    public function timelineGoalsMatchScore(array $timeline, ?array $score): bool
+    {
+        if ($score === null) {
+            return true;
+        }
+        $goals = ['home' => 0, 'away' => 0];
+        foreach ($timeline['events'] ?? [] as $event) {
+            if (($event['kind'] ?? '') === 'goal') {
+                $goals[$event['is_home'] ? 'home' : 'away']++;
+            }
+        }
+
+        return $goals['home'] === $score['home'] && $goals['away'] === $score['away'];
+    }
+
+    /** @param array{home: int, away: int}|null $expectedScore */
+    public function queueTimelineBackfill(int|string $matchId, bool $finished = false, ?array $expectedScore = null): void
     {
         if (! ctype_digit((string) $matchId) || (int) $matchId <= 0) {
             return;
@@ -144,7 +175,7 @@ class FootballSyncController extends Controller
         $pending = null;
         try {
             $timeline = Cache::store('redis')->get($cacheKey, []);
-            if (($timeline['initialized'] ?? false) && (! $finished || ($timeline['finalized'] ?? false))) {
+            if (($timeline['initialized'] ?? false) && (! $finished || ($timeline['finalized'] ?? false)) && $this->timelineGoalsMatchScore($timeline, $expectedScore)) {
                 return;
             }
             if (Cache::store('redis')->has($cacheKey.':retry')) {
@@ -155,17 +186,24 @@ class FootballSyncController extends Controller
                 return;
             }
             $owner = $pending->owner();
-            dispatch(static function () use ($matchId, $cacheKey, $owner, $finished): void {
+            $repairGoals = ($timeline['initialized'] ?? false) && ! $this->timelineGoalsMatchScore($timeline, $expectedScore);
+            dispatch(static function () use ($matchId, $cacheKey, $owner, $finished, $expectedScore, $repairGoals): void {
                 $lock = Cache::store('redis')->restoreLock($cacheKey.':pending', $owner);
                 try {
+                    $controller = app(self::class);
+                    if ($expectedScore !== null) {
+                        $match = array_find(getInRedis('Football:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === (string) $matchId);
+                        if (isset($match['home_score'], $match['away_score'])) {
+                            $expectedScore = ['home' => (int) $match['home_score'], 'away' => (int) $match['away_score']];
+                        }
+                    }
                     $timeline = Cache::store('redis')->get($cacheKey, []);
-                    if (! $lock->isOwnedByCurrentProcess() || (($timeline['initialized'] ?? false) && (! $finished || ($timeline['finalized'] ?? false)))) {
+                    if (! $lock->isOwnedByCurrentProcess() || (($timeline['initialized'] ?? false) && (! $finished || ($timeline['finalized'] ?? false)) && $controller->timelineGoalsMatchScore($timeline, $expectedScore))) {
                         return;
                     }
-                    $controller = app(self::class);
-                    foreach ($finished ? ['', ':incidents'] : ['', ':incidents', ':odds'] as $suffix) {
+                    foreach ($repairGoals ? [':incidents'] : ($finished ? ['', ':incidents'] : ['', ':incidents', ':odds']) as $suffix) {
                         $current = Cache::store('redis')->get($cacheKey, []);
-                        if (($suffix === '' && ! $finished && ! empty($current['clock'])) || ($suffix === ':incidents' && ($current['initialized'] ?? false) && (! $finished || ($current['finalized'] ?? false)))) {
+                        if (($suffix === '' && ! $finished && ! empty($current['clock'])) || ($suffix === ':incidents' && ($current['initialized'] ?? false) && (! $finished || ($current['finalized'] ?? false)) && $controller->timelineGoalsMatchScore($current, $expectedScore))) {
                             continue;
                         }
                         if ($suffix === ':odds') {
@@ -199,15 +237,15 @@ class FootballSyncController extends Controller
                         }
                     }
                     $timeline = Cache::store('redis')->get($cacheKey, []);
-                    if (! ($timeline['initialized'] ?? false) || ($finished && ! ($timeline['finalized'] ?? false))) {
-                        Cache::store('redis')->put($cacheKey.':retry', true, 300);
-                        if (! $finished) {
+                    if (! ($timeline['initialized'] ?? false) || ($finished && ! ($timeline['finalized'] ?? false)) || ! $controller->timelineGoalsMatchScore($timeline, $expectedScore)) {
+                        Cache::store('redis')->put($cacheKey.':retry', true, $repairGoals ? 60 : 300);
+                        if (! $finished && ! $repairGoals) {
                             $controller->queueCardStatsFallback($matchId);
                         }
                     }
                     Event::dispatch(new FootballSportsScoreUpdated);
                 } catch (Throwable $e) {
-                    Cache::store('redis')->put($cacheKey.':retry', true, 300);
+                    Cache::store('redis')->put($cacheKey.':retry', true, $repairGoals ? 60 : 300);
                     Log::warning('Football timeline backfill failed', [
                         'match_id' => $matchId,
                         'exception' => $e::class,
@@ -218,9 +256,9 @@ class FootballSyncController extends Controller
                 } finally {
                     $lock->release();
                 }
-            })->name('Football timeline backfill '.$matchId)->onQueue('default')->catch(static function (Throwable $e) use ($cacheKey, $owner): void {
+            })->name('Football timeline backfill '.$matchId)->onQueue('default')->delay(now()->addSeconds($repairGoals ? 2 : 0))->catch(static function (Throwable $e) use ($cacheKey, $owner, $repairGoals): void {
                 Cache::store('redis')->restoreLock($cacheKey.':pending', $owner)->release();
-                Cache::store('redis')->put($cacheKey.':retry', true, 300);
+                Cache::store('redis')->put($cacheKey.':retry', true, $repairGoals ? 60 : 300);
             });
         } catch (Throwable $e) {
             $pending?->release();
@@ -460,8 +498,15 @@ class FootballSyncController extends Controller
                                 || ($match['bet365_prematch']['fetched_at'] ?? 0) > $requestedAt) {
                                 continue;
                             }
+                            $openings = [];
+                            foreach (['home_odds', 'draw_odds', 'away_odds'] as $selection) {
+                                $previous = (int) ($match['bet365_prematch']['match_id'] ?? 0) === $oddsMatchId
+                                    ? ($match['bet365_prematch']['opening_odds'][$selection] ?? []) : [];
+                                $openings[$selection] = array_merge(meaningfulOpeningOdds(['backOdds' => $favorite[$selection] ?? null], $previous, $requestedAt), ['monitoring_baseline_version' => 1]);
+                            }
                             $matches[$key]['bet365_prematch'] = array_merge($favorite, [
                                 'bookmaker_id' => 126, 'match_id' => $oddsMatchId, 'fetched_at' => $requestedAt,
+                                'opening_odds' => $openings,
                                 'finalized' => $match['result_status'] === 'Live',
                                 'previous_odds' => array_intersect_key($match['bet365_prematch'] ?? [], array_flip(['home_odds', 'draw_odds', 'away_odds'])),
                             ]);
@@ -550,7 +595,6 @@ class FootballSyncController extends Controller
                     'id' => $choice['sourceId'] ?? $choice['id'] ?? null,
                     'name' => (string) ($choice['name'] ?? ''),
                     'decimal_odds' => $suspended ? null : $this->bet365DecimalOdds($choice['fractionalValue'] ?? null),
-                    'initial_decimal_odds' => $this->bet365DecimalOdds($choice['initialFractionalValue'] ?? null),
                 ];
             }
             $markets[] = [
@@ -570,7 +614,19 @@ class FootballSyncController extends Controller
                 || ($sourceTimestamp !== null && ($latest['source_timestamp'] ?? 0) > $sourceTimestamp)) {
                 return false;
             }
-            Cache::store('redis')->put($cacheKey, ['provider_id' => 1, 'markets' => $markets, 'updated_at' => $receivedAt, 'source_timestamp' => $sourceTimestamp], 86400);
+            $openings = $latest['openings'] ?? [];
+            foreach ($markets as &$market) {
+                foreach ($market['choices'] as &$choice) {
+                    $selection = hash('sha256', json_encode([$market['id'], $market['market_id'], $market['period'], $market['name'], $choice['id'], $choice['name']], JSON_THROW_ON_ERROR));
+                    $opening = array_merge(meaningfulOpeningOdds(['backOdds' => $choice['decimal_odds']], $openings[$selection] ?? [], $receivedAt, ! $market['suspended']), ['monitoring_baseline_version' => 1]);
+                    $openings[$selection] = $opening;
+                    $choice['initial_decimal_odds'] = $opening['initialBackOdds'];
+                    $choice['opening_odds'] = $opening;
+                }
+                unset($choice);
+            }
+            unset($market);
+            Cache::store('redis')->put($cacheKey, ['provider_id' => 1, 'markets' => $markets, 'openings' => $openings, 'updated_at' => $receivedAt, 'source_timestamp' => $sourceTimestamp], 86400);
 
             return true;
         });
@@ -756,7 +812,8 @@ class FootballSyncController extends Controller
 
                     continue;
                 }
-                $baseline = (float) ($state['baseline_odds'] ?? $from);
+                $opening = meaningfulOpeningOdds(['backOdds' => $from], $state, $at);
+                $baseline = (float) $opening['initialBackOdds'];
                 $dropTriggered = ($state['drop_triggered'] ?? false) || round(($baseline - $to) / $baseline * 100, 8) >= 1;
                 $snapshots = array_values(array_filter($state['snapshots'] ?? [], static fn (array $snapshot): bool => $snapshot['timestamp'] >= $at - 180 && $snapshot['timestamp'] <= $at));
                 $interval = $alert['interval'] ?? null;
@@ -781,7 +838,8 @@ class FootballSyncController extends Controller
                     }
                 }
                 $snapshots[] = ['timestamp' => $at, 'odds' => $to];
-                $matches[$key]['pinnacle_markets'][$selection] = array_merge($display, [
+                $matches[$key]['pinnacle_markets'][$selection] = array_merge($display, $opening, [
+                    'monitoring_baseline_version' => 1,
                     'baseline_odds' => $baseline, 'current_odds' => $to, 'drop_triggered' => $dropTriggered,
                     'shock_detected_at' => $shockAt, 'snapshots' => array_slice($snapshots, -7),
                     'updated_at' => $at, 'alert_key' => $alert['alert_key'] ?? json_encode($alert),
@@ -898,7 +956,7 @@ class FootballSyncController extends Controller
             }
 
             foreach ($markets as $market) {
-                $sortPriority = $market['sortPriority'] ?? null;
+                $sortPriority = implode('|', [$market['runnerId'] ?? $market['runner'] ?? '', $market['handicap'] ?? 0]);
                 $marketKey = $market['marketId'].'_'.$market['marketType'];
 
                 $previousMarket = $getSingleRecords['markets'][$marketKey][$sortPriority] ?? [];
@@ -911,7 +969,8 @@ class FootballSyncController extends Controller
                                 : strcasecmp((string) ($candidate['runner'] ?? ''), (string) ($market['runner'] ?? '')) === 0;
 
                             if (
-                                ($candidate['marketType'] ?? null) === ($market['marketType'] ?? null)
+                                ($candidate['marketId'] ?? null) === ($market['marketId'] ?? null)
+                                && ($candidate['marketType'] ?? null) === ($market['marketType'] ?? null)
                                 && $sameRunner
                                 && (float) ($candidate['handicap'] ?? 0) === (float) ($market['handicap'] ?? 0)
                             ) {
@@ -932,7 +991,8 @@ class FootballSyncController extends Controller
                             : strcasecmp((string) ($candidate['runner'] ?? ''), (string) ($market['runner'] ?? '')) === 0;
 
                         if (
-                            ($candidate['marketType'] ?? null) === ($market['marketType'] ?? null)
+                            ($candidate['marketId'] ?? null) === ($market['marketId'] ?? null)
+                            && ($candidate['marketType'] ?? null) === ($market['marketType'] ?? null)
                             && $sameRunner
                             && (float) ($candidate['handicap'] ?? 0) === (float) ($market['handicap'] ?? 0)
                         ) {
@@ -942,48 +1002,16 @@ class FootballSyncController extends Controller
                     }
                 }
 
-                $previousBackOdds = $previousMarket['currentBackOdds'] ?? $previousMarket['backOdds'] ?? $market['backOdds'];
-                $currentOdds = (float) $market['backOdds'] > 0 ? $market['backOdds'] : $previousBackOdds;
-                $backOddsHistory = $previousMarket['backOddsHistory'] ?? [];
-                $initialBackOddsTimestamp = $previousMarket['initialBackOddsTimestamp'] ?? null;
+                $previousMarket = prepareOddsMonitoring($previousMarket);
+                $market = updateOddsMonitoring($market, $previousMarket, $now);
+                $previousBackOdds = $market['previousBackOdds'];
+                $currentOdds = $market['currentBackOdds'];
+                $initialBackOdds = (float) ($market['initialBackOdds'] ?? 0);
 
-                if ($initialBackOddsTimestamp !== null) {
-                    $initialBackOdds = (float) ($previousMarket['initialBackOdds'] ?? $currentOdds);
-                } elseif (isset($backOddsHistory[0]['odds'])) {
-                    $initialBackOdds = (float) $backOddsHistory[0]['odds'];
-                    $initialBackOddsTimestamp = (int) ($backOddsHistory[0]['timestamp'] ?? $now);
-                } else {
-                    $initialBackOdds = (float) ($previousMarket['initialBackOdds']
-                        ?? $previousMarket['backOdds']
-                        ?? $currentOdds);
-                    $initialBackOddsTimestamp = $now;
-                }
-
-                if ($initialBackOdds <= 0 && $currentOdds > 0) {
-                    $initialBackOdds = (float) $currentOdds;
-                    $initialBackOddsTimestamp = $now;
-                }
-
-                if ($backOddsHistory === [] && $initialBackOdds > 0) {
-                    $backOddsHistory[] = ['timestamp' => $now, 'odds' => $initialBackOdds];
-                }
-
-                $lastHistoryOdds = (float) ($backOddsHistory[array_key_last($backOddsHistory)]['odds'] ?? 0);
-                if ($currentOdds > 0 && $currentOdds !== $lastHistoryOdds) {
-                    $backOddsHistory[] = ['timestamp' => $now, 'odds' => (float) $currentOdds];
-                }
-
-                $market['previousBackOdds'] = $previousBackOdds;
-                $market['currentBackOdds'] = $currentOdds;
-                $market['initialBackOdds'] = $initialBackOdds;
-                $market['initialBackOddsTimestamp'] = $initialBackOddsTimestamp;
-                $market['backOddsHistory'] = array_slice($backOddsHistory, -12);
-                $market['odds_direction'] = $this->matchDirection($initialBackOdds, $currentOdds);
-
-                if (! $isLiveApi && $currentOdds > 0) {
+                if (! $isLiveApi && $currentOdds > 0 && $initialBackOdds > 1) {
                     $baselineOdds = (float) ($previousMarket['prematch_drop_baseline_odds'] ?? 0);
                     if ($baselineOdds <= 0 && ($marketLiquidity[$marketKey] ?? 0) >= 1000) {
-                        $baselineOdds = (float) $currentOdds;
+                        $baselineOdds = $initialBackOdds;
                     }
 
                     $market['prematch_drop_baseline_odds'] = $baselineOdds ?: null;

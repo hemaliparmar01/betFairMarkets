@@ -24,8 +24,12 @@ trait HorseRacingTrait
         $favorites = $customerId === null ? [] : array_fill_keys(Favorite::query()->where('sport', 'horseracing')->where('customer_id', $customerId)->pluck('event_key')->all(), true);
         $today = Carbon::now(getCurrentUserTimezone())->toDateString();
         $type = request()->input('type', 'all');
-        $matches = array_values(array_filter(getInRedis('HorseRacing:matches') ?? [], static function (array $race) use ($today, $type, $favorites): bool {
-            if (($race['data_sync_complete'] ?? false) !== true || Carbon::createFromTimestamp((int) $race['timestamp'], getCurrentUserTimezone())->toDateString() !== $today) {
+        $matches = array_map(
+            fn (array $race): array => prepareMatchOddsMonitoring($race),
+            array_filter(getInRedis('HorseRacing:matches') ?? [], static fn (array $race): bool => ($race['result_status'] ?? '') !== 'Finished')
+        );
+        $matches = array_values(array_filter($matches, static function (array $race) use ($today, $type, $favorites): bool {
+            if (($race['result_status'] ?? '') === 'Finished' || ($race['data_sync_complete'] ?? false) !== true || Carbon::createFromTimestamp((int) $race['timestamp'], getCurrentUserTimezone())->toDateString() !== $today) {
                 return false;
             }
 
@@ -118,6 +122,7 @@ trait HorseRacingTrait
                 $match['markets'][$runner->market_id.'_'.$runner->market_type][] = $runner->payload;
             }
         }
+        $match = prepareMatchOddsMonitoring($match);
         $match['id'] = $matchId;
         $match['status'] = $match['result_status'];
         $match['minutes'] = $this->calculateMinutes($match);

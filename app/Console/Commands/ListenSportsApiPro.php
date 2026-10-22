@@ -394,6 +394,13 @@ class ListenSportsApiPro extends Command
             if ($matchId === null || ! isset($syncedIds[(string) $matchId])) {
                 continue;
             }
+            if ($sport === 'football') {
+                try {
+                    app(FootballSyncController::class)->mergeTimelineFrame('match:'.$matchId, $event, $type);
+                } catch (Throwable $e) {
+                    Log::warning('Football timeline clock could not be cached', ['match_id' => $matchId, 'exception' => $e::class]);
+                }
+            }
             $finished = in_array((int) $this->eventValue($event, 'status.code'), $config['finished_codes'], true)
                 || in_array($this->eventValue($event, 'status.type'), $config['finished_types'], true);
             if (isset($subscriptions[$matchId])) {
