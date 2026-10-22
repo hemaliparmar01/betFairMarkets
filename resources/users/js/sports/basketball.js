@@ -1,3 +1,4 @@
+import { renderOddsHistory } from '../oddsHistory';
 let oddsTooltip = null;
 const hideOddsTooltip = () => { oddsTooltip?.remove(); oddsTooltip = null; };
 const showOddsTooltip = (event) => {
@@ -133,12 +134,13 @@ if (dashboard) {
         const modal = dashboard.querySelector('#basketballModal');
         const panel = modal.querySelector('[data-basketball-modal-panel]');
         const scrollTop = panel.scrollTop;
+        const scoreStatus = escape(row.dataset.matchStatus ?? '');
         let title = ''; let body = '';
         if (activeModal.action === 'stats') {
             const data = parse(row.dataset.basketballStats); title = 'Live Match Statistics';
             body = `<div class="grid gap-3 sm:grid-cols-2">${[['home', data.team1], ['away', data.team2]].map(([side, team]) => {
                 const score = data[side] ?? {};
-                return `<section class="rounded-xl border border-[#d4e0ec] p-4"><h3 class="mb-2 font-bold">${escape(team)}</h3><p class="mb-2 text-xl font-bold">${escape(score.current ?? score.display ?? '—')}</p>${[['period1', 'Q1'], ['period2', 'Q2'], ['period3', 'Q3'], ['period4', 'Q4'], ['overtime', 'OT']].filter(([key]) => score[key] != null).map(([key, label]) => `<p class="py-1">${escape(data.periods?.[key] ?? label)}: <b>${escape(score[key])}</b></p>`).join('')}</section>`;
+                return `<section class="rounded-xl border border-[#d4e0ec] p-4"><h3 class="mb-2 font-bold">${escape(team)}</h3><p class="mb-2 text-xl font-bold"><span class="match-score" data-score-status="${scoreStatus}">${escape(score.current ?? score.display ?? '—')}</span></p>${[['period1', 'Q1'], ['period2', 'Q2'], ['period3', 'Q3'], ['period4', 'Q4'], ['overtime', 'OT']].filter(([key]) => score[key] != null).map(([key, label]) => `<p class="py-1">${escape(data.periods?.[key] ?? label)}: <b>${escape(score[key])}</b></p>`).join('')}</section>`;
             }).join('')}</div>`;
             const statistics = Array.isArray(data.statistics) ? data.statistics : [data.statistics];
             body += statistics.map((period) => (period?.groups ?? []).map((group) => `<h3 class="mt-4 font-bold">${escape(group.groupName)}</h3>${(group.statisticsItems ?? []).map((item) => `<div class="grid grid-cols-[1fr_2fr_1fr] border-b border-[#e3ecf5] py-2 text-center text-sm"><span>${escape(item.home ?? item.homeValue ?? '—')}</span><span>${escape(item.name)}</span><span>${escape(item.away ?? item.awayValue ?? '—')}</span></div>`).join('')}`).join('')).join('');
@@ -148,12 +150,12 @@ if (dashboard) {
             body = `<p class="mb-4 text-sm">${data.locked ? 'Voting closes when the match starts.' : data.vote ? 'Your prediction has been recorded.' : 'Who will win this match?'}</p><div class="grid gap-3">${Object.entries(data.choices ?? {}).map(([value, label]) => `<button type="button" data-action="vote" data-value="${escape(value)}" ${data.locked || data.vote ? 'disabled' : ''} class="rounded-xl border border-[#b9d7f3] p-3 text-left disabled:cursor-default ${data.vote === value ? 'bg-[#d5edff] text-[#1a6b9c]' : ''}"><b>${escape(label)}</b><span class="float-right">${Number(data.counts?.[value] ?? 0)} votes · ${total ? Math.round(Number(data.counts?.[value] ?? 0) / total * 100) : 0}%</span></button>`).join('')}</div>`;
         } else {
             const data = parse(row.dataset.basketballMarket); title = data.title ?? 'Market Details';
-            body = `<p class="mb-2 font-bold">${escape(data.team1)} vs ${escape(data.team2)}</p><p class="mb-4 text-sm">${escape(data.score)} · ${escape(data.status)} · ${escape(data.minutes)}</p>`;
+            body = `<p class="mb-2 font-bold">${escape(data.team1)} vs ${escape(data.team2)}</p><p class="mb-4 text-sm"><span class="match-score" data-score-status="${escape(data.status)}">${escape(data.score)}</span> · ${escape(data.status)} · ${escape(data.minutes)}</p>`;
             if (data.locked) body += '<p>Login with an active subscription to view odds.</p>';
             else body += `<div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr>${['Selection', 'Initial', 'Back', 'Size', 'Lay', 'Size'].map((label) => `<th class="px-2 py-2">${label}</th>`).join('')}</tr></thead><tbody>${(data.runners ?? []).map((runner) => {
                 const initial = Number(runner.initialBackOdds ?? 0); const current = Number(runner.currentBackOdds ?? runner.backOdds ?? 0);
                 const arrow = initial > 0 && current > 0 ? current > initial ? ' ↑' : current < initial ? ' ↓' : '' : '';
-                return `<tr class="border-t border-[#e3ecf5]"><td class="px-2 py-3">${escape(runner.runner)}</td>${[initial, current, runner.backSize, runner.layOdds, runner.laySize].map((value, index) => `<td ${index === 1 && current > 0 ? `tabindex="0" data-basketball-odds-tooltip="${number(initial)} ${current > initial ? '&lt;&lt;' : '&gt;&gt;'} ${number(current)}"` : ''} class="whitespace-nowrap px-2 py-3 font-semibold">${number(value)}${index === 1 ? arrow : ''}</td>`).join('')}</tr>`;
+                return `<tr class="border-t border-[#e3ecf5]"><td class="px-2 py-3">${escape(runner.runner)}${renderOddsHistory(runner)}</td>${[initial, current, runner.backSize, runner.layOdds, runner.laySize].map((value, index) => `<td ${index === 1 && current > 0 ? `tabindex="0" data-basketball-odds-tooltip="${number(initial)} ${current > initial ? '&lt;&lt;' : '&gt;&gt;'} ${number(current)}"` : ''} class="whitespace-nowrap px-2 py-3 font-semibold">${number(value)}${index === 1 ? arrow : ''}</td>`).join('')}</tr>`;
             }).join('')}</tbody></table></div><a class="mt-4 inline-block rounded-xl bg-[#0b2a40] px-4 py-2 text-sm font-bold text-white" href="${escape(row.dataset.basketballMatchUrl)}">Match markets &amp; charts →</a>`;
         }
         hideOddsTooltip();

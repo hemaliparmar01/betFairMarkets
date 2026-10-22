@@ -143,10 +143,8 @@ trait TennisTrait
         }
         $home = $match['home_score_data'] ?? [];
         $away = $match['away_score_data'] ?? [];
-        $period = 'period'.($match['current_set'] ?? 1);
-        if (($match['result_status'] ?? null) === 'Live' && isset($home[$period], $away[$period])) {
-            return $home[$period].' - '.$away[$period];
-        }
+        $home['current'] ??= $home['display'] ?? $match['home_score'] ?? null;
+        $away['current'] ??= $away['display'] ?? $match['away_score'] ?? null;
 
         return $this->formatTennisScore($home).' - '.$this->formatTennisScore($away);
     }
@@ -178,9 +176,12 @@ trait TennisTrait
 
     public function getTennisMatchDetail(string $matchId): ?array
     {
-        $match = array_find(getInRedis('Tennis:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === $matchId && ($match['data_sync_complete'] ?? false) === true);
+        // $match = array_find(getInRedis('Tennis:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === $matchId && ($match['data_sync_complete'] ?? false) === true);
+        $match = collect(getInRedis('Tennis:matches') ?? [])->first(static fn (array $candidate): bool => (string) ($candidate['sportsApiPro_match_id'] ?? '') === $matchId);
         if ($match === null) {
-            $stored = TennisMatch::query()->with('markets')->where('sports_api_pro_match_id', $matchId)->where('data_sync_complete', true)->first();
+            $stored = TennisMatch::query()->with('markets')->where('sports_api_pro_match_id', $matchId)
+                // ->where('data_sync_complete', true)
+                ->first();
             if ($stored === null) {
                 return null;
             }
@@ -194,25 +195,40 @@ trait TennisTrait
                 $match[$logo] = $images && is_file($images[0]) ? '/images/tennis/teams/'.basename($images[0]) : null;
             }
         }
-        $match = prepareMatchOddsMonitoring($match);
+        // $match = prepareMatchOddsMonitoring($match);
         $markets = [];
-        foreach ($match['markets'] ?? [] as $runners) {
-            if ($runners === []) {
+        foreach ($match['markets'] ?? [] as $marketRunners) {
+            if (! is_array($marketRunners)) {
                 continue;
             }
-            $runners = array_values($runners);
-            usort($runners, static fn (array $left, array $right): int => (int) ($left['sortPriority'] ?? 0) <=> (int) ($right['sortPriority'] ?? 0));
-            $first = $runners[0];
-            $selections = [];
-            foreach ($runners as $runner) {
+            // $runners = array_values($marketRunners);
+            // usort($runners, static fn (array $left, array $right): int => (int) ($left['sortPriority'] ?? 0) <=> (int) ($right['sortPriority'] ?? 0));
+            foreach ($marketRunners as $runner) {
+                $marketType = $runner['marketType'] ?? '';
                 $current = (float) ($runner['currentBackOdds'] ?? $runner['backOdds'] ?? 0);
+                // if ($current <= 0) {
+                //     continue;
+                // }
                 $initial = (float) ($runner['initialBackOdds'] ?? 0);
-                $history = array_values(array_filter($runner['backOddsHistory'] ?? [], static fn (array $point): bool => (float) ($point['odds'] ?? 0) > 0));
-                $selections[] = ['name' => $runner['runner'] ?? 'Selection', 'initial_back_odds' => $initial, 'current_back_odds' => $current, 'direction' => $current > 0 && $initial > 0 ? $current <=> $initial : 0, 'change_percent' => $initial > 0 && $current > 0 ? (($current - $initial) / $initial) * 100 : 0, 'history' => count($history) > 12 ? array_merge([$history[0]], array_slice($history, -11)) : $history];
+                // $history = array_values(array_filter($runner['backOddsHistory'] ?? [], static fn (array $point): bool => (float) ($point['odds'] ?? 0) > 0));
+                $markets[$marketType] ??= ['type' => $marketType, 'label' => $runner['name'] ?? 'Market', 'runners' => []];
+                $markets[$marketType]['runners'][] = [
+                    'runner_id' => $runner['runnerId'] ?? null,
+                    'match_id' => $matchId,
+                    'market_id' => $runner['marketId'] ?? null,
+                    'chart_url' => betfairMarketChartUrl($runner),
+                    'history' => oddsMovementHistory($runner),
+                    'history_incomplete' => (bool) ($runner['odds_history_incomplete'] ?? false),
+                    'name' => $runner['runner'] ?? 'Selection',
+                    'initial_back_odds' => $initial,
+                    'current_back_odds' => $current,
+                    'direction' => $initial > 1 ? $current <=> $initial : 0,
+                    'change_percent' => $initial > 0 ? (($current - $initial) / $initial) * 100 : 0,
+                    // 'history' => count($history) > 12 ? array_merge([$history[0]], array_slice($history, -11)) : $history,
+                ];
             }
-            $markets[] = ['type' => $first['marketType'] ?? '', 'label' => $first['name'] ?? 'Market', 'runners' => $selections];
         }
-        usort($markets, static fn (array $left, array $right): int => (($left['type'] !== 'MATCH_ODDS') <=> ($right['type'] !== 'MATCH_ODDS')) ?: ($left['label'] <=> $right['label']));
+        // usort($markets, static fn (array $left, array $right): int => (($left['type'] !== 'MATCH_ODDS') <=> ($right['type'] !== 'MATCH_ODDS')) ?: ($left['label'] <=> $right['label']));
 
         return array_replace($match, ['home_score_display' => $this->formatTennisScore($match['home_score_data'] ?? []), 'away_score_display' => $this->formatTennisScore($match['away_score_data'] ?? []), 'id' => $matchId, 'status' => $match['result_status'], 'score' => $this->getScore($match), 'minutes' => $this->calculateMinutes($match), 'markets' => $markets]);
     }

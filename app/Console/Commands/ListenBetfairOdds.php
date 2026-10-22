@@ -16,6 +16,7 @@ use App\Http\Controllers\Users\AmericanFootball\AmericanFootballSyncController;
 use App\Http\Controllers\Users\Baseball\BaseballSyncController;
 use App\Http\Controllers\Users\Basketball\BasketballSyncController;
 use App\Http\Controllers\Users\Cricket\CricketSyncController;
+use App\Http\Controllers\Users\Football\FootballSyncController;
 use App\Http\Controllers\Users\Greyhounds\GreyhoundsSyncController;
 use App\Http\Controllers\Users\HorseRacing\HorseRacingSyncController;
 use App\Http\Controllers\Users\IceHockey\IceHockeySyncController;
@@ -278,7 +279,20 @@ class ListenBetfairOdds extends Command
                     }
 
                     foreach ($changedEvents as $eventId => $event) {
-                        $pendingChanges[$feed][$eventId] = $event;
+                        if (in_array($feed, ['greyhounds', 'horse_prematch'], true) && isset($pendingChanges[$feed][$eventId])
+                            && (($event['removed'] ?? false) || in_array($event['win_market_status'] ?? $event['status'] ?? '', ['SUSPENDED', 'CLOSED'], true))) {
+                            try {
+                                if ($this->flushPendingChanges($pendingChanges)) {
+                                    Event::dispatch(new FootballSportsScoreUpdated);
+                                }
+                            } catch (Throwable $e) {
+                                $pendingChanges[$feed][$eventId]['_next_event'] = $event;
+                                Log::warning('Betfair race status deferred until pending odds are recorded', ['exception' => $e::class]);
+
+                                continue;
+                            }
+                        }
+                        $pendingChanges[$feed][$eventId] = $this->bufferOddsEvent($pendingChanges[$feed][$eventId] ?? [], $event, microtime(true));
                     }
 
                     if ($flushTimer === null) {
@@ -388,6 +402,21 @@ class ListenBetfairOdds extends Command
             }
 
             $events = $pendingChanges[$feed];
+            $followingEvents = [];
+            foreach ($events as $eventId => &$event) {
+                if (isset($event['_next_event'])) {
+                    $followingEvents[$eventId] = $event['_next_event'];
+                }
+                unset($event['_next_event']);
+                foreach ($event['markets'] ?? [] as $index => $runner) {
+                    $updates = $event['_odds_updates'][$this->rowKey($runner)] ?? [];
+                    if ($updates !== []) {
+                        $event['markets'][$index]['_odds_updates'] = $updates;
+                    }
+                }
+                unset($event['_odds_updates']);
+            }
+            unset($event);
             try {
                 if ($feed === 'greyhounds') {
                     if (app(GreyhoundsSyncController::class)->mergeBetfairWebSocketData($events)) {
@@ -397,7 +426,7 @@ class ListenBetfairOdds extends Command
                             Log::warning('Greyhounds odds refresh broadcast failed', ['exception' => $e::class]);
                         }
                     }
-                    $pendingChanges[$feed] = [];
+                    $pendingChanges[$feed] = $followingEvents;
 
                     continue;
                 }
@@ -409,7 +438,7 @@ class ListenBetfairOdds extends Command
                             Log::warning('HorseRacing odds refresh broadcast failed', ['exception' => $e::class]);
                         }
                     }
-                    $pendingChanges[$feed] = [];
+                    $pendingChanges[$feed] = $followingEvents;
 
                     continue;
                 }
@@ -475,11 +504,37 @@ class ListenBetfairOdds extends Command
                 continue;
             }
 
-            $pendingChanges[$feed] = [];
+            $pendingChanges[$feed] = $followingEvents;
             $updated = $feedUpdated || $updated;
         }
 
         return $updated;
+    }
+
+    /**
+     * Keep every received quote while cache writes remain batched.
+     *
+     * @param  array<string, mixed>  $pending
+     * @param  array<string, mixed>  $event
+     * @return array<string, mixed>
+     */
+    private function bufferOddsEvent(array $pending, array $event, float $receivedAt): array
+    {
+        $updates = $pending['_odds_updates'] ?? [];
+        foreach ($event['markets'] ?? [] as $runner) {
+            $key = $this->rowKey($runner);
+            $quote = array_intersect_key($runner, array_flip(['backOdds', 'backSize', 'layOdds', 'laySize']));
+            $points = $updates[$key] ?? [];
+            $last = $points !== [] ? $points[array_key_last($points)] : null;
+            unset($last['observed_at']);
+            if ($last !== $quote) {
+                $quote['observed_at'] = $receivedAt;
+                $updates[$key][] = $quote;
+            }
+        }
+        $event['_odds_updates'] = $updates;
+
+        return $event;
     }
 
     private function rowKey(array $row): string
@@ -516,6 +571,7 @@ class ListenBetfairOdds extends Command
         ];
         $updated = false;
         $now = time();
+        $changedMatches = [];
         $databaseMarkets = [];
         $missingMarketMatchKeys = [];
 
@@ -714,9 +770,11 @@ class ListenBetfairOdds extends Command
             }
 
             $updated = true;
+            $changedMatches[$matchKey] = $matches[$matchKey];
         }
 
         if ($updated) {
+            app(FootballSyncController::class)->persistOddsSnapshots($changedMatches);
             storeInRedis('Football:matches', $matches, 30);
         }
 

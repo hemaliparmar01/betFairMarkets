@@ -114,6 +114,16 @@ trait GreyhoundsTrait
         return $match['result_status'] === 'Finished' ? 'Finished' : Carbon::createFromTimestamp((int) $match['timestamp'], getCurrentUserTimezone())->format('H:i');
     }
 
+    private function getGreyhoundsCountry(array $race): string
+    {
+        $country = $race['country'] ?? null;
+        if (is_array($country)) {
+            $country = $country['name'] ?? $country['code'] ?? null;
+        }
+
+        return is_string($country) && trim($country) !== '' ? trim($country) : __('Other');
+    }
+
     public function getMarketActivites(): array
     {
         return $this->getGreyhoundsMatches(false);
@@ -121,7 +131,8 @@ trait GreyhoundsTrait
 
     public function getGreyhoundsMatchDetail(string $matchId): ?array
     {
-        $match = array_find(getInRedis('Greyhounds:matches') ?? [], static fn (array $race): bool => (string) $race['betfair_match_id'] === $matchId);
+        // $match = array_find(getInRedis('Greyhounds:matches') ?? [], static fn (array $race): bool => (string) $race['betfair_match_id'] === $matchId);
+        $match = collect(getInRedis('Greyhounds:matches') ?? [])->first(static fn (array $race): bool => (string) ($race['betfair_match_id'] ?? '') === $matchId);
         if ($match === null) {
             $stored = GreyhoundsMatch::query()->with('markets')->where('betfair_match_id', $matchId)->first();
             if ($stored === null) {
@@ -133,7 +144,7 @@ trait GreyhoundsTrait
                 $match['markets'][$runner->market_id.'_'.$runner->market_type][] = $runner->payload;
             }
         }
-        $match = prepareMatchOddsMonitoring($match);
+        // $match = prepareMatchOddsMonitoring($match);
         $match['details_available'] = now()->timestamp >= (int) $match['timestamp'] - 300;
         $match['country'] = $this->getGreyhoundsCountry($match);
         $match['id'] = $matchId;

@@ -6,6 +6,18 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 
+if (! function_exists('betfairMarketChartUrl')) {
+    /** @param array<string, mixed> $runner */
+    function betfairMarketChartUrl(array $runner): ?string
+    {
+        $baseUrl = config('services.betfair.chart_url');
+        $marketId = (string) ($runner['marketId'] ?? '');
+        $selectionId = (string) ($runner['runnerId'] ?? '');
+
+        return $baseUrl.'?marketId='.$marketId.'&selectionId='.$selectionId;
+    }
+}
+
 if (! function_exists('hasMeaningfulOpeningOdds')) {
     /** @param array<string, mixed> $runner */
     function hasMeaningfulOpeningOdds(array $runner): bool
@@ -36,6 +48,8 @@ if (! function_exists('prepareOddsMonitoring')) {
             'initialBackOdds' => null, 'initialBackOddsTimestamp' => null,
             'opening_odds_source' => null, 'opening_odds_evidence' => null,
             'odds_direction' => 'same', 'backOddsHistory' => [],
+            'odds_history_version' => 1, 'odds_history_incomplete' => false,
+            'odds_history_processed_at' => 0,
             'movementHistory' => [], 'recentOddsHistory' => [],
             'prematch_drop_baseline_odds' => null, 'prematch_drop_triggered' => false,
             'prematch_drop_detected_at' => null, 'market_shock_detected_at' => null,
@@ -101,6 +115,26 @@ if (! function_exists('updateOddsMonitoring')) {
                 break;
             }
         }
+        $updates = $quote['_odds_updates'] ?? [];
+        unset($quote['_odds_updates']);
+        $beforeBatch = $previous;
+        if ($updates !== []) {
+            $processedAt = (float) ($previous['odds_history_processed_at'] ?? 0);
+            $updates = array_filter($updates, static fn (array $update): bool => (float) ($update['observed_at'] ?? $now) > $processedAt);
+            if ($updates === []) {
+                return $previous;
+            }
+            $lastUpdate = array_key_last($updates);
+            foreach ($updates as $index => $update) {
+                $observedAt = (float) ($update['observed_at'] ?? $now);
+                unset($update['observed_at']);
+                if ($index === $lastUpdate) {
+                    $now = $observedAt;
+                } else {
+                    $previous = updateOddsMonitoring(array_replace($quote, $update), $previous, $observedAt, $canStart);
+                }
+            }
+        }
         $hasPreviousOpening = hasMeaningfulOpeningOdds($previous);
         $previous = prepareOddsMonitoring($previous);
         $opening = meaningfulOpeningOdds($quote, $previous, $now, $canStart);
@@ -116,18 +150,62 @@ if (! function_exists('updateOddsMonitoring')) {
         $runner['currentBackOdds'] = $current;
         $initial = (float) ($opening['initialBackOdds'] ?? 0);
         $runner['odds_direction'] = $initial > 1 && $current > 1 ? ($current < $initial ? 'down' : ($current > $initial ? 'up' : 'same')) : 'same';
-        $history = $initial > 1 ? array_values(array_filter($previous['backOddsHistory'] ?? [], static fn (array $point): bool => is_numeric($point['odds'] ?? null)
-            && is_finite((float) $point['odds']) && (float) $point['odds'] > 1
-            && (int) ($point['timestamp'] ?? 0) >= $opening['initialBackOddsTimestamp'])) : [];
+        $history = $initial > 1 ? ($previous['backOddsHistory'] ?? []) : [];
+        $legacyHistory = ($previous['odds_history_version'] ?? null) !== 1;
+        if ($legacyHistory && $history !== []) {
+            $history = array_values(array_filter($history, static fn (array $point): bool => is_numeric($point['odds'] ?? null)
+                && is_finite((float) $point['odds']) && (float) $point['odds'] > 1
+                && (int) ($point['timestamp'] ?? 0) >= $opening['initialBackOddsTimestamp']));
+        }
         if ($initial > 1 && ($history === [] || (float) $history[0]['odds'] !== $initial || (int) $history[0]['timestamp'] !== $opening['initialBackOddsTimestamp'])) {
             array_unshift($history, ['timestamp' => $opening['initialBackOddsTimestamp'], 'odds' => $initial]);
         }
         if ($initial > 1 && $current > 1 && (float) $history[array_key_last($history)]['odds'] !== $current) {
             $history[] = ['timestamp' => (int) $now, 'odds' => $current];
         }
-        $runner['backOddsHistory'] = count($history) > 12 ? array_merge([$history[0]], array_slice($history, -11)) : $history;
+        $runner['backOddsHistory'] = $history;
+        $runner['odds_history_version'] = 1;
+        $runner['odds_history_processed_at'] = max($now, (float) ($previous['odds_history_processed_at'] ?? 0));
+        $runner['odds_history_incomplete'] = ($previous['odds_history_incomplete'] ?? false)
+            || ($legacyHistory && count($previous['backOddsHistory'] ?? []) === 12);
+        if (count($updates) > 1) {
+            $previousBatchHistory = $beforeBatch['backOddsHistory'] ?? [];
+            $previousBatchPrice = (float) ($beforeBatch['currentBackOdds'] ?? 0);
+            $runner['previousBackOdds'] = hasMeaningfulOpeningOdds($beforeBatch)
+                ? ($previousBatchPrice > 1 ? $previousBatchPrice : (float) ($previousBatchHistory[array_key_last($previousBatchHistory)]['odds'] ?? $current))
+                : ($initial > 1 ? $initial : $current);
+        }
 
         return $runner;
+    }
+}
+
+if (! function_exists('oddsMovementHistory')) {
+    /** @return list<array{timestamp: int, odds: float}> */
+    function oddsMovementHistory(array $runner): array
+    {
+        return hasMeaningfulOpeningOdds($runner) && is_array($runner['backOddsHistory'] ?? null)
+            ? $runner['backOddsHistory'] : [];
+    }
+}
+
+if (! function_exists('oddsMovementSequence')) {
+    /** @param list<array{timestamp?: int, odds?: float}> $history */
+    function oddsMovementSequence(array $history): string
+    {
+        $prices = [];
+        $previous = null;
+        foreach ($history as $point) {
+            $price = $point['odds'] ?? null;
+            if (! is_numeric($price) || ! is_finite((float) $price) || (float) $price <= 1 || (float) $price === $previous) {
+                continue;
+            }
+            $previous = (float) $price;
+            $formatted = rtrim(number_format($previous, 6, '.', ''), '0');
+            $prices[] = str_pad($formatted, strpos($formatted, '.') + 3, '0');
+        }
+
+        return implode(' → ', $prices);
     }
 }
 
@@ -178,13 +256,41 @@ if (! function_exists('GetSportApiProKey')) {
 }
 
 if (! function_exists('recordSportsApiProRestRequest')) {
-    function recordSportsApiProRestRequest(string $endpoint): int
+    function recordSportsApiProRestRequest(string $endpoint, bool $lowPriority = false): int
     {
-        $cacheKey = 'SportsAPIPro:rest-requests:'.gmdate('Y-m-d');
-        $requestCount = (int) Redis::incr($cacheKey);
+        $date = gmdate('Y-m-d');
+        $requestCount = (int) Redis::eval(<<<'LUA'
+local total = tonumber(redis.call('GET', KEYS[1]) or '0')
+local remaining = tonumber(redis.call('GET', KEYS[2]) or '-1')
+local limit = math.min(tonumber(redis.call('GET', KEYS[3]) or ARGV[2]), tonumber(ARGV[2]))
+if ARGV[1] == '1' and (total >= limit - tonumber(ARGV[3])
+    or (remaining >= 0 and remaining <= tonumber(ARGV[3]))
+    or tonumber(redis.call('GET', KEYS[4]) or '0') >= tonumber(ARGV[4])
+    or tonumber(redis.call('GET', KEYS[5]) or '0') > tonumber(ARGV[6])) then
+    return 0
+end
+total = redis.call('INCR', KEYS[1])
+redis.call('EXPIREAT', KEYS[1], ARGV[5])
+if remaining > 0 then redis.call('DECR', KEYS[2]) end
+if ARGV[1] == '1' then
+    redis.call('INCR', KEYS[4])
+    redis.call('EXPIREAT', KEYS[4], ARGV[5])
+end
+return total
+LUA, 5, 'SportsAPIPro:rest-requests:'.$date, 'SportsAPIPro:rest-remaining:'.$date,
+            'SportsAPIPro:rest-limit:'.$date, 'SportsAPIPro:football-v6-requests:'.$date,
+            'SportsAPIPro:rest-backoff:'.$date, $lowPriority ? '1' : '0',
+            max(1, (int) config('services.sports_api_pro.daily_rest_limit', 75000)),
+            max(0, (int) config('services.sports_api_pro.rest_reserve', 7500)),
+            max(0, (int) config('services.sports_api_pro.football_v6_daily_budget', 30000)),
+            strtotime('tomorrow 00:05 UTC'), time());
 
-        if ($requestCount === 1) {
-            Redis::expireat($cacheKey, strtotime('tomorrow 00:05 UTC'));
+        if ($requestCount === 0) {
+            if (Cache::store('redis')->add('SportsAPIPro:v6-budget-notice:'.$date, true, 3600)) {
+                Log::notice('Football V6 polling paused for API quota reserve or backoff; cached statistics retained');
+            }
+
+            return 0;
         }
 
         if (in_array($requestCount, [60000, 67500, 71250], true)) {
@@ -196,6 +302,37 @@ if (! function_exists('recordSportsApiProRestRequest')) {
         }
 
         return $requestCount;
+    }
+}
+
+if (! function_exists('recordSportsApiProRestResponse')) {
+    /** @param array<string, string> $headers */
+    function recordSportsApiProRestResponse(array $headers, int $requestNumber, int $status): void
+    {
+        $date = gmdate('Y-m-d');
+        $expiresAt = strtotime('tomorrow 00:05 UTC');
+        if (is_numeric($headers['x-ratelimit-limit'] ?? null)) {
+            Redis::setex('SportsAPIPro:rest-limit:'.$date, $expiresAt - time(), (int) $headers['x-ratelimit-limit']);
+        }
+        if (is_numeric($headers['x-ratelimit-remaining'] ?? null)) {
+            Redis::eval(<<<'LUA'
+local total = tonumber(redis.call('GET', KEYS[1]) or ARGV[2])
+local remaining = math.max(0, tonumber(ARGV[1]) - math.max(0, total - tonumber(ARGV[2])))
+local previous = tonumber(redis.call('GET', KEYS[2]) or '-1')
+if previous >= 0 then remaining = math.min(previous, remaining) end
+redis.call('SET', KEYS[2], remaining)
+redis.call('EXPIREAT', KEYS[2], ARGV[3])
+LUA, 2, 'SportsAPIPro:rest-requests:'.$date, 'SportsAPIPro:rest-remaining:'.$date,
+                (int) $headers['x-ratelimit-remaining'], $requestNumber, $expiresAt);
+        }
+        if ($status === 429) {
+            $retryAt = is_numeric($headers['retry-after'] ?? null) ? time() + (int) $headers['retry-after']
+                : (strtotime($headers['retry-after'] ?? '') ?: time() + 300);
+            if (isset($headers['x-ratelimit-remaining']) && (int) $headers['x-ratelimit-remaining'] === 0) {
+                $retryAt = strtotime($headers['x-ratelimit-reset'] ?? '') ?: strtotime('tomorrow 00:00 UTC');
+            }
+            Redis::setex('SportsAPIPro:rest-backoff:'.$date, $expiresAt - time(), max(time() + 60, $retryAt));
+        }
     }
 }
 
@@ -235,7 +372,7 @@ if (! function_exists('apiResponseLogContext')) {
 if (! function_exists('ApiCall')) {
     /**
      * @param  string|array<string, string>|list<string>  $key
-     * @param  array{query?: array<string, mixed>, connect_timeout?: int, timeout?: int, raw_response?: bool, follow_redirects?: bool}  $options
+     * @param  array{query?: array<string, mixed>, connect_timeout?: int, timeout?: int, raw_response?: bool, follow_redirects?: bool, low_priority?: bool}  $options
      * @param  array<string, mixed>|null  $diagnostics
      */
     function ApiCall(string $url, string|array $key, array $options = [], ?array &$diagnostics = null): mixed
@@ -247,8 +384,15 @@ if (! function_exists('ApiCall')) {
             $url .= (str_contains($url, '?') ? '&' : '?').$query;
         }
 
-        if (parse_url($url, PHP_URL_HOST) === 'api.sportsapipro.com') {
-            recordSportsApiProRestRequest((string) parse_url($url, PHP_URL_PATH));
+        $isSportsApiPro = parse_url($url, PHP_URL_HOST) === 'api.sportsapipro.com';
+        $requestNumber = 0;
+        if ($isSportsApiPro) {
+            $requestNumber = recordSportsApiProRestRequest((string) parse_url($url, PHP_URL_PATH), $options['low_priority'] ?? false);
+            if ($requestNumber === 0) {
+                $diagnostics = apiResponseLogContext(['url' => $url, 'http_status' => null, 'skipped' => 'quota_reserve']);
+
+                return null;
+            }
         }
 
         $headers = [];
@@ -262,6 +406,7 @@ if (! function_exists('ApiCall')) {
             }
         }
 
+        $responseHeaders = [];
         $ch = curl_init($url);
         try {
             curl_setopt_array($ch, [
@@ -271,12 +416,25 @@ if (! function_exists('ApiCall')) {
                 CURLOPT_TIMEOUT => $options['timeout'] ?? 0,
                 CURLOPT_FOLLOWLOCATION => $options['follow_redirects'] ?? false,
                 CURLOPT_MAXREDIRS => 5,
+                CURLOPT_HEADERFUNCTION => static function (CurlHandle $handle, string $line) use (&$responseHeaders): int {
+                    if (str_starts_with($line, 'HTTP/')) {
+                        $responseHeaders = [];
+                    } elseif (str_contains($line, ':')) {
+                        [$name, $value] = explode(':', $line, 2);
+                        $responseHeaders[strtolower(trim($name))] = trim($value);
+                    }
+
+                    return strlen($line);
+                },
             ]);
             $body = curl_exec($ch);
             $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
             $contentType = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
             $curlErrorCode = curl_errno($ch);
             $curlError = curl_error($ch);
+            if ($isSportsApiPro) {
+                recordSportsApiProRestResponse($responseHeaders, $requestNumber, $status);
+            }
             $rawResponse = $options['raw_response'] ?? false;
             $data = null;
             $jsonError = null;

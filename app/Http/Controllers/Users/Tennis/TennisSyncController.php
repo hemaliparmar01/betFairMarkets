@@ -527,7 +527,7 @@ class TennisSyncController extends Controller
         $changeTimestamp = $this->eventValue($event, 'changes.changeTimestamp');
         if (is_numeric($changeTimestamp) && (int) $changeTimestamp > 0) {
             $previousTimestamp = max($match['websocket_change_timestamps'][$channel] ?? 0, $match['sports_change_timestamp'] ?? 0);
-            if ($previousTimestamp > 0 && (int) $changeTimestamp <= $previousTimestamp && ! $terminal) {
+            if ($previousTimestamp > 0 && (int) $changeTimestamp < $previousTimestamp && ! $terminal) {
                 return false;
             }
             $match['websocket_change_timestamps'][$channel] = (int) $changeTimestamp;
@@ -626,12 +626,20 @@ class TennisSyncController extends Controller
         if ($this->eventValue($event, 'status.description') !== null) {
             $match['match_status_description'] = $this->eventValue($event, 'status.description');
         }
+        if (($pointPatches['home'] || $pointPatches['away']) && isset($match['home_score_data']['point'], $match['away_score_data']['point'])) {
+            $match['tennis_points_source'] = 'match';
+        } elseif (! isset($match['home_score_data']['point'], $match['away_score_data']['point'])) {
+            unset($match['tennis_points_source']);
+        }
 
         return $match !== $before;
     }
 
-    public function mergeSportsWebSocketData(string $channel, array $frameData): bool
+    /** @param list<array{id: string, version: int, status: string, current_set: int, home: array, away: array}>|null $scoreUpdates */
+    public function mergeSportsWebSocketData(string $channel, array $frameData, ?array &$scoreUpdates = null, ?int $sourceTimestamp = null): bool
     {
+        $scoreUpdates = [];
+        $sourceTimestamp = $sourceTimestamp === null ? null : ($sourceTimestamp < 100000000000 ? $sourceTimestamp * 1000 : $sourceTimestamp);
         $matches = getInRedis('Tennis:matches') ?? [];
         $events = str_starts_with($channel, 'live-scores')
             ? (isset($frameData['id']) || isset($frameData['eventId']) ? [$frameData] : ($frameData['events'] ?? (array_is_list($frameData) ? $frameData : [])))
@@ -679,10 +687,27 @@ class TennisSyncController extends Controller
                         $previous = $match['last_point_sequence'] ?? [];
                         if ([$sequence['set'], $sequence['game'], $sequence['point_count']] >= [$previous['set'] ?? 0, $previous['game'] ?? 0, $previous['point_count'] ?? 0]) {
                             $match['last_point_sequence'] = $sequence;
+                            $this->applyPointSequence($match, $sequence, $sourceTimestamp);
                         }
                     }
                 } else {
-                    $this->applySportsApiEvent($match, $event, $channel);
+                    if ($sourceTimestamp === null || $sourceTimestamp >= (int) ($match['tennis_score_source_timestamp'] ?? 0)) {
+                        $this->applySportsApiEvent($match, $event, $channel);
+                    }
+                }
+                if (($before['home_score_data'] ?? []) !== ($match['home_score_data'] ?? []) || ($before['away_score_data'] ?? []) !== ($match['away_score_data'] ?? []) || ($before['current_set'] ?? null) !== ($match['current_set'] ?? null) || ($before['result_status'] ?? null) !== ($match['result_status'] ?? null)) {
+                    if ($sourceTimestamp !== null && ! str_ends_with($channel, ':point-by-point')) {
+                        $match['tennis_score_source_timestamp'] = $sourceTimestamp;
+                    }
+                    $match['tennis_score_version'] = max((int) ($before['tennis_score_version'] ?? 0) + 1, (int) floor(microtime(true) * 1000));
+                    $scoreUpdates[] = [
+                        'id' => (string) $match['sportsApiPro_match_id'],
+                        'version' => $match['tennis_score_version'],
+                        'status' => $match['result_status'] ?? 'Live',
+                        'current_set' => (int) ($match['current_set'] ?? 1),
+                        'home' => $match['home_score_data'] ?? [],
+                        'away' => $match['away_score_data'] ?? [],
+                    ];
                 }
                 if ($before !== $match) {
                     $changed[$key] = $match;
@@ -697,6 +722,29 @@ class TennisSyncController extends Controller
         }
 
         return $changed !== [];
+    }
+
+    private function applyPointSequence(array &$match, array $sequence, ?int $sourceTimestamp): void
+    {
+        if (($match['tennis_points_source'] ?? null) === 'match' && isset($match['home_score_data']['point'], $match['away_score_data']['point'])) {
+            return;
+        }
+        if ($sourceTimestamp !== null && $sourceTimestamp < (int) ($match['tennis_score_source_timestamp'] ?? 0)) {
+            return;
+        }
+        $period = 'period'.$sequence['set'];
+        $homeGames = $match['home_score_data'][$period] ?? null;
+        $awayGames = $match['away_score_data'][$period] ?? null;
+        if ($sequence['set'] !== (int) ($match['current_set'] ?? 1) || $homeGames === null || $awayGames === null || $sequence['game'] !== (int) $homeGames + (int) $awayGames + 1 || in_array((int) ($sequence['score']['scoring'] ?? -1), [1, 2], true)) {
+            return;
+        }
+        $point = $sequence['point'];
+        if (! is_array($point) || ! isset($point['homePoint'], $point['awayPoint'])) {
+            return;
+        }
+        $homeIsTeam1 = $match['sports_api_home_is_team1'] ?? true;
+        $match['home_score_data']['point'] = (string) $point[$homeIsTeam1 ? 'homePoint' : 'awayPoint'];
+        $match['away_score_data']['point'] = (string) $point[$homeIsTeam1 ? 'awayPoint' : 'homePoint'];
     }
 
     public function persistMatches(array $matches): void

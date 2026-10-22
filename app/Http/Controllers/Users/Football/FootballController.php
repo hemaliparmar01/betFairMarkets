@@ -191,6 +191,21 @@ class FootballController extends Controller
         return view('users.sports.football.matchDetail', compact('match'));
     }
 
+    public function statistics(string $matchId): JsonResponse
+    {
+        abort_unless(checkAuthAndSubscription()['display_odds'], 403, __('An active 7-day free trial or paid subscription is required to view statistics.'));
+        $match = app(FootballSyncController::class)->loadMatchStatistics($matchId, request()->input('scope') !== 'live');
+        abort_if($match === null, 404);
+        $event = array_replace($match, [
+            'status' => $match['result_status'],
+            'score' => $this->getScore($match),
+        ]);
+
+        return response()->json([
+            'html' => view('users.sports.football.partials.statisticsContent', compact('event'))->render(),
+        ]);
+    }
+
     public function filterFootball()
     {
         $prediction = request()->input('prediction');

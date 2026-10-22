@@ -2,11 +2,11 @@
     @forelse ($scoreDisplay['main'] as $inning)
         <span class="flex flex-wrap items-baseline justify-center gap-x-1.5">
             @if (count($scoreDisplay['main']) > 1)<span class="text-[10px] text-slate-500 dark:text-slate-400">{{ $inning['team'] }}</span>@endif
-            <strong class="text-xl leading-tight font-extrabold tabular-nums {{ $status === 'Live' ? 'text-[#dc2e08]' : 'text-[#12324a] dark:text-[#e8edf2]' }}">{{ $inning['score'] }}</strong>
+            <strong data-score-status="{{ $status }}" @class(['match-score text-xl leading-tight font-extrabold tabular-nums', 'match-score-on-dark' => $scoreOnDark ?? false])>{{ $inning['score'] }}</strong>
             @if ($inning['overs'] !== null)<span class="text-xs font-medium text-slate-500 dark:text-slate-400">({{ $inning['overs'] }} ov)</span>@endif
         </span>
     @empty
-        <strong class="text-lg font-bold text-[#12324a] dark:text-[#e8edf2]">{{ $status === 'Prematch' ? 'vs' : '—' }}</strong>
+        <strong data-score-status="{{ $status }}" @class(['match-score text-lg font-bold', 'match-score-on-dark' => $scoreOnDark ?? false])>{{ $status === 'Prematch' ? 'vs' : '—' }}</strong>
     @endforelse
     @if ($scoreDisplay['innings'])<span class="text-[10px] font-medium text-slate-500 dark:text-slate-400">{{ $scoreDisplay['innings'] }}</span>@endif
     @foreach ($scoreDisplay['previous'] as $previous)

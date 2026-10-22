@@ -1,3 +1,4 @@
+import { renderOddsHistory } from '../oddsHistory';
 let oddsTooltip = null;
 const hideOddsTooltip = () => { oddsTooltip?.remove(); oddsTooltip = null; };
 const showOddsTooltip = (event) => {
@@ -133,6 +134,7 @@ if (dashboard) {
         const modal = dashboard.querySelector('#baseballModal');
         const panel = modal.querySelector('[data-baseball-modal-panel]');
         const scrollTop = panel.scrollTop;
+        const scoreStatus = escape(row.dataset.matchStatus ?? '');
         let title = ''; let body = '';
         if (activeModal.action === 'stats') {
             const data = parse(row.dataset.baseballStats); title = 'Live Match Statistics';
@@ -140,7 +142,7 @@ if (dashboard) {
                 const score = data[side] ?? {};
                 const innings = [...new Set([...Object.keys(score.innings ?? {}).map((key) => Number(key.replace(/^inning/, ''))), ...Object.keys(score).filter((key) => /^period\d+$/.test(key)).map((key) => Number(key.slice(6)))])].filter((inning) => Number.isInteger(inning) && inning > 0).sort((a, b) => a - b);
                 const totals = score.inningsBaseball ?? {};
-                return `<section class="rounded-xl border border-[#d4e0ec] p-4"><h3 class="mb-2 font-bold">${escape(team)}</h3><p class="mb-2 text-xl font-bold">Runs: ${escape(score.current ?? score.display ?? totals.run ?? '—')}</p><p class="mb-3 text-sm">Hits: <b>${escape(totals.hits ?? '—')}</b> · Errors: <b>${escape(totals.errors ?? '—')}</b></p>${innings.map((inning) => {
+                return `<section class="rounded-xl border border-[#d4e0ec] p-4"><h3 class="mb-2 font-bold">${escape(team)}</h3><p class="mb-2 text-xl font-bold">Runs: <span class="match-score" data-score-status="${scoreStatus}">${escape(score.current ?? score.display ?? totals.run ?? '—')}</span></p><p class="mb-3 text-sm">Hits: <b>${escape(totals.hits ?? '—')}</b> · Errors: <b>${escape(totals.errors ?? '—')}</b></p>${innings.map((inning) => {
                     const runs = score.innings?.[`inning${inning}`]?.run ?? score[`period${inning}`];
                     return `<p class="py-1">Inning ${inning}: <b>${runs != null && Number(runs) >= 0 ? escape(runs) : '—'}</b></p>`;
                 }).join('')}</section>`;
@@ -153,12 +155,12 @@ if (dashboard) {
             body = `<p class="mb-4 text-sm">${data.locked ? 'Voting closes when the match starts.' : data.vote ? 'Your prediction has been recorded.' : 'Who will win this match?'}</p><div class="grid gap-3">${Object.entries(data.choices ?? {}).map(([value, label]) => `<button type="button" data-action="vote" data-value="${escape(value)}" ${data.locked || data.vote ? 'disabled' : ''} class="rounded-xl border border-[#b9d7f3] p-3 text-left disabled:cursor-default ${data.vote === value ? 'bg-[#d5edff] text-[#1a6b9c]' : ''}"><b>${escape(label)}</b><span class="float-right">${Number(data.counts?.[value] ?? 0)} votes · ${total ? Math.round(Number(data.counts?.[value] ?? 0) / total * 100) : 0}%</span></button>`).join('')}</div>`;
         } else {
             const data = parse(row.dataset.baseballMarket); title = data.title ?? 'Market Details';
-            body = `<p class="mb-2 font-bold">${escape(data.team1)} vs ${escape(data.team2)}</p><p class="mb-4 text-sm">${escape(data.score)} · ${escape(data.status)} · ${escape(data.minutes)}</p>`;
+            body = `<p class="mb-2 font-bold">${escape(data.team1)} vs ${escape(data.team2)}</p><p class="mb-4 text-sm"><span class="match-score" data-score-status="${escape(data.status)}">${escape(data.score)}</span> · ${escape(data.status)} · ${escape(data.minutes)}</p>`;
             if (data.locked) body += '<p>Login with an active subscription to view odds.</p>';
             else body += `<div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr>${['Selection', 'Initial', 'Back', 'Size', 'Lay', 'Size'].map((label) => `<th class="px-2 py-2">${label}</th>`).join('')}</tr></thead><tbody>${(data.runners ?? []).map((runner) => {
                 const initial = Number(runner.initialBackOdds ?? 0); const current = Number(runner.currentBackOdds ?? runner.backOdds ?? 0);
                 const arrow = initial > 0 && current > 0 ? current > initial ? ' ↑' : current < initial ? ' ↓' : '' : '';
-                return `<tr class="border-t border-[#e3ecf5]"><td class="px-2 py-3">${escape(runner.runner)}</td>${[initial, current, runner.backSize, runner.layOdds, runner.laySize].map((value, index) => `<td ${index === 1 && current > 0 ? `tabindex="0" data-baseball-odds-tooltip="${number(initial)} ${current > initial ? '&lt;&lt;' : '&gt;&gt;'} ${number(current)}"` : ''} class="whitespace-nowrap px-2 py-3 font-semibold">${number(value)}${index === 1 ? arrow : ''}</td>`).join('')}</tr>`;
+                return `<tr class="border-t border-[#e3ecf5]"><td class="px-2 py-3">${escape(runner.runner)}${renderOddsHistory(runner)}</td>${[initial, current, runner.backSize, runner.layOdds, runner.laySize].map((value, index) => `<td ${index === 1 && current > 0 ? `tabindex="0" data-baseball-odds-tooltip="${number(initial)} ${current > initial ? '&lt;&lt;' : '&gt;&gt;'} ${number(current)}"` : ''} class="whitespace-nowrap px-2 py-3 font-semibold">${number(value)}${index === 1 ? arrow : ''}</td>`).join('')}</tr>`;
             }).join('')}</tbody></table></div><a class="mt-4 inline-block rounded-xl bg-[#0b2a40] px-4 py-2 text-sm font-bold text-white" href="${escape(row.dataset.baseballMatchUrl)}">Match markets &amp; charts →</a>`;
         }
         hideOddsTooltip();

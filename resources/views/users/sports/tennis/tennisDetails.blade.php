@@ -17,24 +17,45 @@
             if ($event['prediction_has_draw']) { $choices['X'] = 'Tie'; }
             $prediction = ['match_id' => (string) $event['sportsApiPro_match_id'], 'choices' => $choices, 'counts' => $event['prediction_counts'], 'vote' => $event['prediction_vote'], 'locked' => $event['status'] !== 'Prematch'];
             $highlight = (int) ($event['incident_highlight_until'] ?? 0) > time();
+            $currentSet = $event['current_set'] ?? null;
+            if ($currentSet === null && preg_match('/\b([1-5])(?:st|nd|rd|th)?\s*set\b/i', (string) ($event['minutes'] ?? ''), $setMatch) === 1) {
+                $currentSet = (int) $setMatch[1];
+            }
+            $currentSet = max(1, min(5, (int) ($currentSet ?? 1)));
+            $currentPeriod = 'period'.$currentSet;
             $setScores = [];
-            for ($set = 1; $set <= 5; $set++) {
+            $lastHistorySet = $event['status'] === 'Live' ? $currentSet - 1 : 5;
+            for ($set = 1; $set <= $lastHistorySet; $set++) {
                 $period = 'period'.$set;
-                if (isset($event['home_score_data'][$period], $event['away_score_data'][$period])) {
+                if (isset($event['home_score_data'][$period], $event['away_score_data'][$period]) && $event['home_score_data'][$period] >= 0 && $event['away_score_data'][$period] >= 0) {
                     $setScores[] = $event['home_score_data'][$period].'-'.$event['away_score_data'][$period];
                 }
             }
             $chart = ['title' => request()->input('market_name', 'MATCH_ODDS') === 'NUMBER_OF_SETS' ? 'Total Sets' : 'Match Winner', 'runners' => $checkAuthAndSubscription['display_odds'] ? array_map(static fn (array $runner): array => array_intersect_key($runner, array_flip(['runner', 'initialBackOdds', 'currentBackOdds', 'backOddsHistory'])), $event['markets']) : [], 'locked' => ! $checkAuthAndSubscription['display_odds']];
         @endphp
-        <div data-tennis-match-url="{{ route('tennis.matches.show', $event['sportsApiPro_match_id']) }}" data-match-id="{{ $event['sportsApiPro_match_id'] }}" data-tennis-stats="{{ json_encode(['team1' => $event['team1'], 'team2' => $event['team2'], 'home' => $event['home_score_data'] ?? [], 'away' => $event['away_score_data'] ?? [], 'statistics' => $event['live_stats'] ?? [], 'periods' => $event['period_labels'] ?? [], 'serving' => $event['serving_side'] ?? null, 'surface' => $event['ground_type'] ?? null, 'current_set' => $event['current_set'] ?? null]) }}" data-tennis-chart="{{ json_encode($chart) }}" data-tennis-prediction="{{ json_encode($prediction) }}"
+        <div data-tennis-match-url="{{ route('tennis.matches.show', $event['sportsApiPro_match_id']) }}" data-match-id="{{ $event['sportsApiPro_match_id'] }}" data-match-status="{{ $event['status'] }}" data-tennis-score-version="{{ $event['tennis_score_version'] ?? 0 }}" data-tennis-status="{{ $event['status'] }}" data-tennis-stats="{{ json_encode(['team1' => $event['team1'], 'team2' => $event['team2'], 'home' => $event['home_score_data'] ?? [], 'away' => $event['away_score_data'] ?? [], 'statistics' => $event['live_stats'] ?? [], 'periods' => $event['period_labels'] ?? [], 'serving' => $event['serving_side'] ?? null, 'surface' => $event['ground_type'] ?? null, 'current_set' => $event['current_set'] ?? null]) }}" data-tennis-chart="{{ json_encode($chart) }}" data-tennis-prediction="{{ json_encode($prediction) }}"
             class="event-row my-2 grid min-w-[960px] grid-cols-[28px_94px_minmax(420px,1fr)_120px_220px] items-center gap-3 rounded-xl border border-[#e6eff8] bg-[#fafdff] px-3 py-3 text-[#12324a] hover:bg-[#f2f8ff] dark:border-[#2a3f50] dark:bg-[#1a2a38] dark:text-[#e8edf2]">
             <button type="button" data-action="favorite" data-requires-login="{{ $authenticated ? 'false' : 'true' }}" data-login-url="{{ route('login') }}" data-sport="tennis" data-event-key="{{ $event['unique_key'] }}" data-event-id="{{ $event['sportsApiPro_match_id'] }}" data-team1="{{ $event['team1'] }}" data-team2="{{ $event['team2'] }}" data-start-timestamp="{{ $event['timestamp'] }}" aria-pressed="{{ $event['is_favorite'] ? 'true' : 'false' }}" @class(['fav-star cursor-pointer border-0 bg-transparent text-lg text-[#b8ccdf]', '!text-[#e6b422]' => $event['is_favorite']])><i class="fas fa-star"></i></button>
             <span class="whitespace-nowrap text-center text-xs font-semibold {{ $event['status'] === 'Live' ? 'text-[#dc2e08]' : 'text-[#5a7d99]' }}">{{ $event['minutes'] }}</span>
-            <button type="button" data-action="open-match" class="grid min-w-0 grid-cols-[minmax(0,1fr)_80px_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-sm">
+            <button type="button" data-action="open-match" class="grid min-w-0 grid-cols-[minmax(0,1fr)_96px_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-sm">
                 <span class="flex min-w-0 items-center justify-end gap-1.5 text-right font-bold">@if ($event['home_team_logo'] ?? null)<img src="{{ $event['home_team_logo'] }}" alt="" class="size-5 shrink-0 object-contain" onerror="this.remove()">@endif<span class="break-words">{{ $event['team1'] }}</span>@if ($event['status'] === 'Live' && ($event['serving_side'] ?? null) === 'home')<span class="shrink-0 text-[10px] text-amber-500" title="{{ __('Serving') }}">●</span>@endif</span>
-                <span class="text-center"><strong class="whitespace-nowrap {{ $event['status'] === 'Live' ? 'text-[#dc4c4c]' : 'text-[#12324a] dark:text-[#e8edf2]' }}">{{ $event['score'] }}</strong>@if ($event['status'] === 'Live' && isset($event['home_score_data']['point'], $event['away_score_data']['point']))<small class="block whitespace-nowrap text-[10px] font-medium text-[#5a7d99]">{{ $event['home_score_data']['point'] }} : {{ $event['away_score_data']['point'] }}</small>@endif</span>
+                <span class="flex min-w-0 flex-col items-center gap-0.5 text-center tabular-nums" data-tennis-score>
+                    <strong data-tennis-overall-score data-score-status="{{ $event['status'] }}" aria-label="{{ __('Sets won') }}" class="match-score whitespace-nowrap text-base font-extrabold leading-5">{{ $event['score'] }}</strong>
+                    @if ($event['status'] === 'Live')
+                        <span data-tennis-points aria-label="{{ __('Current game points') }}" aria-live="polite" @class(['whitespace-nowrap text-xs font-bold leading-4 text-[#12324a] dark:text-[#e8edf2]', 'hidden' => ! isset($event['home_score_data']['point'], $event['away_score_data']['point'])])>
+                            <span data-tennis-point="home" class="transition-colors duration-200 [&.highlight-purple]:text-[#7c3aed] [&.highlight-purple]:transition-none dark:[&.highlight-purple]:text-[#c084fc]">{{ $event['home_score_data']['point'] ?? '—' }}</span>
+                            :
+                            <span data-tennis-point="away" class="transition-colors duration-200 [&.highlight-purple]:text-[#7c3aed] [&.highlight-purple]:transition-none dark:[&.highlight-purple]:text-[#c084fc]">{{ $event['away_score_data']['point'] ?? '—' }}</span>
+                        </span>
+                    @endif
+                    @if ($event['status'] === 'Live' && isset($event['home_score_data'][$currentPeriod], $event['away_score_data'][$currentPeriod]) && $event['home_score_data'][$currentPeriod] >= 0 && $event['away_score_data'][$currentPeriod] >= 0)
+                        <span data-tennis-current-set data-score-status="{{ $event['status'] }}" aria-label="{{ __('Current set score') }}" class="match-score whitespace-nowrap text-xs font-semibold leading-4">{{ $event['home_score_data'][$currentPeriod] }} - {{ $event['away_score_data'][$currentPeriod] }}</span>
+                    @endif
+                    @if ($setScores !== [])
+                        <small data-tennis-set-history aria-label="{{ __('Previous sets') }}" class="text-[10px] font-normal leading-3.5 text-[#374151] dark:text-[#cbd5e1]">{{ implode(' ', $setScores) }}</small>
+                    @endif
+                </span>
                 <span class="flex min-w-0 items-center gap-1.5 text-left">@if ($event['status'] === 'Live' && ($event['serving_side'] ?? null) === 'away')<span class="shrink-0 text-[10px] text-amber-500" title="{{ __('Serving') }}">●</span>@endif<span class="break-words">{{ $event['team2'] }}</span>@if ($event['away_team_logo'] ?? null)<img src="{{ $event['away_team_logo'] }}" alt="" class="size-5 shrink-0 object-contain" onerror="this.remove()">@endif</span>
-                @if (count($setScores) > 1)<small class="col-span-3 text-center text-[10px] font-normal text-[#5a7d99]">{{ implode(' · ', $setScores) }}</small>@endif
             </button>
             <div class="flex items-center justify-center gap-3">
                 <button type="button" class="cursor-pointer text-red-500 disabled:cursor-not-allowed disabled:opacity-30"

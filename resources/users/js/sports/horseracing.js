@@ -1,3 +1,4 @@
+import { renderOddsHistory } from '../oddsHistory';
 import { watchRacingFeed } from '../racingFeed.js';
 
 let oddsTooltip = null;
@@ -158,12 +159,14 @@ if (dashboard) {
             if (data.locked) body = '<p>Login with an active subscription to view odds.</p>';
             else body = (data.runners ?? []).map((runner) => {
                 const initial = Number(runner.initialBackOdds ?? 0); const current = Number(runner.currentBackOdds ?? 0);
-                const history = horseMonitoringHistory(runner);
-                const values = history.map((point) => Number(point.odds));
-                const minimum = Math.min(...values); const maximum = Math.max(...values); const range = maximum - minimum || 1;
-                const points = values.map((value, index) => `${10 + index * 380 / Math.max(1, values.length - 1)},${90 - (value - minimum) / range * 70}`).join(' ');
+                // The local price-history chart is replaced by the provider image, as on Football.
+                // const history = horseMonitoringHistory(runner);
+                // const values = history.map((point) => Number(point.odds));
+                // const minimum = Math.min(...values); const maximum = Math.max(...values); const range = maximum - minimum || 1;
+                // const points = values.map((value, index) => `${10 + index * 380 / Math.max(1, values.length - 1)},${90 - (value - minimum) / range * 70}`).join(' ');
                 const origin = initial > 1 ? `<p class="mt-1 text-xs text-[#5a7d99]">${runner.opening_odds_source === 'first_observed' ? 'First price observed during monitoring' : 'Liquidity-supported opening'}</p>` : '';
-                return `<section class="mb-4 rounded-xl border border-[#d4e0ec] p-4"><h3 class="font-bold">${escape(runner.runner)}</h3><p class="mt-1 text-sm">Opening ${number(initial)} → Current ${number(current)}</p>${origin}${values.length ? `<svg viewBox="0 0 400 110" class="mt-3 h-32 w-full" role="img" aria-label="Back odds history"><polyline fill="none" stroke="#1a6b9c" stroke-width="3" points="${points}" />${values.length === 1 ? '<circle cx="10" cy="90" r="3" fill="#1a6b9c" />' : ''}</svg>` : '<p class="mt-3 text-sm">Waiting for meaningful market activity.</p>'}</section>`;
+                const chart = runner.chart_url ? `<img src="${escape(runner.chart_url)}" alt="Market Chart" loading="lazy" decoding="async" class="mt-3 h-32 w-full object-contain">` : '<p class="mt-3 text-sm">Market chart unavailable.</p>';
+                return `<section class="mb-4 rounded-xl border border-[#d4e0ec] p-4"><h3 class="font-bold">${escape(runner.runner)}</h3><p class="mt-1 text-sm">Opening ${number(initial)} → Current ${number(current)}</p>${origin}${renderOddsHistory(runner)}${chart}</section>`;
             }).join('') || '<p>Market data is not available yet.</p>';
         } else if (activeModal.action === 'prediction') {
             const data = parse(row.dataset.horseracingPrediction); title = 'Race Predictions';
@@ -176,7 +179,7 @@ if (dashboard) {
             else body += `<div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr>${['Selection', 'Opening', 'Back', 'Size', 'Lay', 'Size'].map((label) => `<th class="px-2 py-2">${label}</th>`).join('')}</tr></thead><tbody>${(data.runners ?? []).map((runner) => {
                 const initial = Number(runner.initialBackOdds ?? 0); const current = Number(runner.currentBackOdds ?? runner.backOdds ?? 0);
                 const arrow = initial > 0 && current > 0 ? current > initial ? ' ↑' : current < initial ? ' ↓' : '' : '';
-                return `<tr class="border-t border-[#e3ecf5]"><td class="px-2 py-3">${escape(runner.runner)}${String(runner.runnerId) === String(data.indicators?.favorite_id) ? " ⭐" : ""}</td>${[initial, current, runner.backSize, runner.layOdds, runner.laySize].map((value, index) => `<td ${index === 1 && current > 0 ? `tabindex="0" data-horseracing-odds-tooltip="${number(initial)} → ${number(current)}"` : ''} class="whitespace-nowrap px-2 py-3 font-semibold ${index === 1 ? 'bg-[#a6d8ff] text-[#0b2a40]' : index === 3 ? 'bg-[#fac9d1] text-[#4a1520]' : ''}">${(index === 2 || index === 4) && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value).toFixed(2) : number(value)}${index === 1 ? arrow : ''}</td>`).join('')}</tr>`;
+                return `<tr class="border-t border-[#e3ecf5]"><td class="px-2 py-3">${escape(runner.runner)}${String(runner.runnerId) === String(data.indicators?.favorite_id) ? " ⭐" : ""}${renderOddsHistory(runner)}</td>${[initial, current, runner.backSize, runner.layOdds, runner.laySize].map((value, index) => `<td ${index === 1 && current > 0 ? `tabindex="0" data-horseracing-odds-tooltip="${number(initial)} → ${number(current)}"` : ''} class="whitespace-nowrap px-2 py-3 font-semibold ${index === 1 ? 'bg-[#a6d8ff] text-[#0b2a40]' : index === 3 ? 'bg-[#fac9d1] text-[#4a1520]' : ''}">${(index === 2 || index === 4) && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value).toFixed(2) : number(value)}${index === 1 ? arrow : ''}</td>`).join('')}</tr>`;
             }).join('')}</tbody></table></div><a class="mt-4 inline-block rounded-xl bg-[#0b2a40] px-4 py-2 text-sm font-bold text-white" href="${escape(row.dataset.horseracingMatchUrl)}">Race markets &amp; charts →</a>`;
         }
         hideOddsTooltip();
@@ -237,26 +240,26 @@ function analyzeHorseChange(previous, current) {
     const arrow = direction === 'flat' || absolute < 0.1 ? '' : direction === 'up' ? (absolute >= 5 ? '↑↑' : '↑') : (absolute >= 5 ? '↓↓' : '↓');
     return {direction, magnitude, pct, arrow};
 }
-function horseMonitoringHistory(runner) {
-    const opening = Number(runner.initialBackOdds);
-    const startsAt = Number(runner.initialBackOddsTimestamp);
-    if (!(Number.isFinite(opening) && opening > 1 && startsAt > 0)) return [];
-    const history = (runner.backOddsHistory ?? []).filter(point => Number.isFinite(Number(point.odds)) && Number(point.odds) > 1 && Number(point.timestamp) >= startsAt);
-    return history.length > 12 ? [history[0], ...history.slice(-11)] : history;
-}
+// function horseMonitoringHistory(runner) {
+//     const opening = Number(runner.initialBackOdds);
+//     const startsAt = Number(runner.initialBackOddsTimestamp);
+//     if (!(Number.isFinite(opening) && opening > 1 && startsAt > 0)) return [];
+//     const history = (runner.backOddsHistory ?? []).filter(point => Number.isFinite(Number(point.odds)) && Number(point.odds) > 1 && Number(point.timestamp) >= startsAt);
+//     return history.length > 12 ? [history[0], ...history.slice(-11)] : history;
+// }
 function horseFavouriteRanks(runners, requireOpening = true) {
     const monitored = requireOpening ? runners.filter(r => Number(r.initialBackOdds) > 1) : runners;
     const prices = [...new Set(monitored.map(r => Math.round(Number(r.currentBackOdds) * 100)).filter(p => p > 0))].sort((a,b)=>a-b).slice(0,3);
     return Object.fromEntries(runners.map(r => [String(r.runnerId), !requireOpening || Number(r.initialBackOdds) > 1 ? prices.indexOf(Math.round(Number(r.currentBackOdds) * 100)) + 1 : 0]));
 }
-function horseSparkline(history) {
-    const values = (history ?? []).filter(p => Number(p.timestamp) >= Date.now()/1000 - 30 && Number(p.odds) > 0).slice(-8).map(p => Number(p.odds));
-    if (values.length < 2 || Math.max(...values) === Math.min(...values)) return '<svg class="sparkline" viewBox="0 0 100 20" aria-label="No recent odds movement"><path class="sparkline-path flat" d="M0 10 L100 10"/></svg>';
-    const min = Math.min(...values); const range = Math.max(...values) - min;
-    const direction = values.at(-1) < values[0] ? 'down' : values.at(-1) > values[0] ? 'up' : 'flat';
-    const path = values.map((value,i) => `${i ? 'L' : 'M'}${(i/(values.length-1)*100).toFixed(2)} ${(18-(value-min)/range*16).toFixed(2)}`).join(' ');
-    return `<svg class="sparkline" viewBox="0 0 100 20" preserveAspectRatio="none" aria-label="Recent back odds trend"><path class="sparkline-path ${direction}" d="${path}"/></svg>`;
-}
+// function horseSparkline(history) {
+//     const values = (history ?? []).filter(p => Number(p.timestamp) >= Date.now()/1000 - 30 && Number(p.odds) > 0).slice(-8).map(p => Number(p.odds));
+//     if (values.length < 2 || Math.max(...values) === Math.min(...values)) return '<svg class="sparkline" viewBox="0 0 100 20" aria-label="No recent odds movement"><path class="sparkline-path flat" d="M0 10 L100 10"/></svg>';
+//     const min = Math.min(...values); const range = Math.max(...values) - min;
+//     const direction = values.at(-1) < values[0] ? 'down' : values.at(-1) > values[0] ? 'up' : 'flat';
+//     const path = values.map((value,i) => `${i ? 'L' : 'M'}${(i/(values.length-1)*100).toFixed(2)} ${(18-(value-min)/range*16).toFixed(2)}`).join(' ');
+//     return `<svg class="sparkline" viewBox="0 0 100 20" preserveAspectRatio="none" aria-label="Recent back odds trend"><path class="sparkline-path ${direction}" d="${path}"/></svg>`;
+// }
 const horseDetail = document.querySelector('[data-horse-detail]');
 if (horseDetail) {
     const monitoringOpening = true;
@@ -314,11 +317,11 @@ if (horseDetail) {
                 const sizeChanged = previous !== undefined && previous[`${side}Size`] !== size;
                 const fresh = previous !== undefined && previous[side] !== current && detail.race.market_status !== 'SUSPENDED';
                 const flash = fresh ? `flash-${tickChange.direction}` : sizeChanged ? 'flash-size' : '';
-                const history = change.direction !== 'flat' && Math.abs(change.pct) > 0.1 ? `<div class="odds-history"><span class="old-value">${price(comparison)}</span>→<span class="new-value">${price(current)}</span></div>` : '';
+                const history = side === 'back' ? renderOddsHistory(runner) : change.direction !== 'flat' && Math.abs(change.pct) > 0.1 ? `<div class="odds-history"><span class="old-value">${price(comparison)}</span>→<span class="new-value">${price(current)}</span></div>` : '';
                 const percent = change.arrow ? `<span class="change-pct ${change.direction}">${change.pct>0?'+':''}${change.pct.toFixed(1)}%</span>` : '';
                 const bolt = fresh && Math.abs(tickChange.pct)>=8 ? '<span class="sharp-change">⚡</span>' : '';
                 const tooltip = side === 'back' ? `${monitoringOpening ? 'Opening' : 'Initial'} ${price(runner.initialBackOdds)} → Current ${price(current)}` : `Previous ${price(comparison)} → Current ${price(current)}`;
-                return `<div class="odd-box ${side}-box ${flash}" data-label="${side === 'back' ? 'Back' : 'Lay'}" tabindex="0" data-horseracing-odds-tooltip="${tooltip}">${bolt}<div class="odd-value">${price(current)}${change.arrow ? `<span class="change-arrow ${change.direction} ${Math.abs(change.pct)>=5?'double':''}">${change.arrow}</span>` : ''}</div><div class="text-[11px] font-semibold" data-available-size="${side}">Size ${size.toLocaleString(undefined,{maximumFractionDigits:2})}</div>${history}${percent}${index===0?`<div class="sparkline-container">${horseSparkline(runner.movementHistory)}</div>`:''}</div>`;
+                return `<div class="odd-box ${side}-box ${flash}" data-label="${side === 'back' ? 'Back' : 'Lay'}" tabindex="0" data-horseracing-odds-tooltip="${tooltip}">${bolt}<div class="odd-value">${price(current)}${change.arrow ? `<span class="change-arrow ${change.direction} ${Math.abs(change.pct)>=5?'double':''}">${change.arrow}</span>` : ''}</div><div class="text-[11px] font-semibold" data-available-size="${side}">Size ${size.toLocaleString(undefined,{maximumFractionDigits:2})}</div>${history}${percent}${index===0 && runner.chart_url?`<div class="mt-2 w-full"><img src="${escapeHorse(runner.chart_url)}" alt="Market Chart" loading="lazy" decoding="async" class="h-20 w-full object-contain"></div>`:''}</div>`;
             }).join('');
             lastPrices.set(key,{back:Number(runner.currentBackOdds),lay:Number(runner.layOdds),backSize:Number(runner.backSize ?? 0),laySize:Number(runner.laySize ?? 0)});
             const pressure = ['back','lay'].includes(runner.pressure_type) ? runner.pressure_type : 'neutral';

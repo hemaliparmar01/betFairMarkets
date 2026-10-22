@@ -58,6 +58,7 @@ Route::get('/', [FootballController::class, 'football'])->name('football.home');
 Route::post('favorites/toggle', [FavoriteController::class, 'toggle'])->middleware('auth:customers')->name('favorites.toggle');
 Route::prefix('football')->name('football.')->group(function () {
     Route::get('/matches/{matchId}', [FootballController::class, 'matchDetail'])->name('matches.show');
+    Route::get('/matches/{matchId}/statistics', [FootballController::class, 'statistics'])->whereNumber('matchId')->name('matches.statistics');
     Route::get('/market-activity', [FootballController::class, 'marketActivity'])->name('market-activity');
     Route::get('/pinnacle-odds', [FootballController::class, 'marketActivity'])->name('pinnacle-odds');
     Route::post('filter-football', [FootballController::class, 'filterFootball'])->name('filter-football');

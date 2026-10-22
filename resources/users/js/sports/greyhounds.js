@@ -1,3 +1,4 @@
+import { renderOddsHistory } from '../oddsHistory';
 import { watchRacingFeed } from '../racingFeed.js';
 
 let oddsTooltip = null;
@@ -161,11 +162,13 @@ if (dashboard) {
             else if (data.locked) body = '<p>Login with an active subscription to view odds.</p>';
             else body = (data.runners ?? []).map((runner) => {
                 const initial = Number(runner.initialBackOdds ?? 0); const current = Number(runner.currentBackOdds ?? 0);
-                const history = (runner.backOddsHistory ?? []).filter(point => Number(runner.initialBackOdds) > 1 && Number(point.timestamp) >= Number(runner.initialBackOddsTimestamp) && Number(point.odds) > 1);
-                const values = history.map((point) => Number(point.odds));
-                const minimum = Math.min(...values); const maximum = Math.max(...values); const range = maximum - minimum || 1;
-                const points = values.map((value, index) => `${10 + index * 380 / Math.max(1, values.length - 1)},${90 - (value - minimum) / range * 70}`).join(' ');
-                return `<section class="mb-4 rounded-xl border border-[#d4e0ec] p-4"><h3 class="font-bold">${escape(runner.runner)}</h3><p class="mt-1 text-sm">Opening ${number(initial)} → Current ${number(current)}</p>${values.length ? `<svg viewBox="0 0 400 110" class="mt-3 h-32 w-full" role="img" aria-label="Back odds history"><polyline fill="none" stroke="#1a6b9c" stroke-width="3" points="${points}" /></svg>` : '<p class="mt-3 text-sm">Waiting for meaningful market activity.</p>'}</section>`;
+                // The local price-history chart is replaced by the provider image, as on Football.
+                // const history = (runner.backOddsHistory ?? []).filter(point => Number(runner.initialBackOdds) > 1 && Number(point.timestamp) >= Number(runner.initialBackOddsTimestamp) && Number(point.odds) > 1);
+                // const values = history.map((point) => Number(point.odds));
+                // const minimum = Math.min(...values); const maximum = Math.max(...values); const range = maximum - minimum || 1;
+                // const points = values.map((value, index) => `${10 + index * 380 / Math.max(1, values.length - 1)},${90 - (value - minimum) / range * 70}`).join(' ');
+                const chart = runner.chart_url ? `<img src="${escape(runner.chart_url)}" alt="Market Chart" loading="lazy" decoding="async" class="mt-3 h-32 w-full object-contain">` : '<p class="mt-3 text-sm">Market chart unavailable.</p>';
+                return `<section class="mb-4 rounded-xl border border-[#d4e0ec] p-4"><h3 class="font-bold">${escape(runner.runner)}</h3><p class="mt-1 text-sm">Opening ${number(initial)} → Current ${number(current)}</p>${renderOddsHistory(runner)}${chart}</section>`;
             }).join('') || '<p>Market data is not available yet.</p>';
         } else if (activeModal.action === 'prediction') {
             const data = parse(row.dataset.greyhoundsPrediction); title = 'Race Predictions';
@@ -179,7 +182,7 @@ if (dashboard) {
             else body += `<div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr>${['Selection', 'Opening', 'Back', 'Size', 'Lay', 'Size'].map((label) => `<th class="px-2 py-2">${label}</th>`).join('')}</tr></thead><tbody>${(data.runners ?? []).map((runner) => {
                 const initial = Number(runner.initialBackOdds ?? 0); const current = Number(runner.currentBackOdds ?? runner.backOdds ?? 0);
                 const arrow = initial > 0 && current > 0 ? current > initial ? ' ↑' : current < initial ? ' ↓' : '' : '';
-                return `<tr class="border-t border-[#e3ecf5]"><td class="px-2 py-3">${escape(runner.runner)}${String(runner.runnerId) === String(data.indicators?.favorite_id) ? " ⭐" : ""}</td>${[initial, current, runner.backSize, runner.layOdds, runner.laySize].map((value, index) => `<td ${index === 1 && current > 0 ? `tabindex="0" data-greyhounds-odds-tooltip="${number(initial)} → ${number(current)}"` : ''} class="whitespace-nowrap px-2 py-3 font-semibold ${index === 1 ? 'bg-[#a6d8ff] text-[#0b2a40]' : index === 3 ? 'bg-[#fac9d1] text-[#4a1520]' : ''}">${(index === 2 || index === 4) && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value).toFixed(2) : number(value)}${index === 1 ? arrow : ''}</td>`).join('')}</tr>`;
+                return `<tr class="border-t border-[#e3ecf5]"><td class="px-2 py-3">${escape(runner.runner)}${String(runner.runnerId) === String(data.indicators?.favorite_id) ? " ⭐" : ""}${renderOddsHistory(runner)}</td>${[initial, current, runner.backSize, runner.layOdds, runner.laySize].map((value, index) => `<td ${index === 1 && current > 0 ? `tabindex="0" data-greyhounds-odds-tooltip="${number(initial)} → ${number(current)}"` : ''} class="whitespace-nowrap px-2 py-3 font-semibold ${index === 1 ? 'bg-[#a6d8ff] text-[#0b2a40]' : index === 3 ? 'bg-[#fac9d1] text-[#4a1520]' : ''}">${(index === 2 || index === 4) && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value).toFixed(2) : number(value)}${index === 1 ? arrow : ''}</td>`).join('')}</tr>`;
             }).join('')}</tbody></table></div><a class="mt-4 inline-block rounded-xl bg-[#0b2a40] px-4 py-2 text-sm font-bold text-white" href="${escape(row.dataset.greyhoundsMatchUrl)}">Race markets &amp; charts →</a>`;
         }
         hideOddsTooltip();

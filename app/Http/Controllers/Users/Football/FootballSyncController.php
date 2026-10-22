@@ -6,6 +6,7 @@ use App\Events\FootballSportsScoreUpdated;
 use App\Http\Controllers\Controller;
 use App\Models\FootballMarket;
 use App\Models\FootballMatch;
+use App\Services\FootballV6Stats;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
@@ -34,119 +35,246 @@ class FootballSyncController extends Controller
         if (! preg_match('/^match:(\d+)(?::(incidents|stats))?$/', $channel, $channelMatch)) {
             return false;
         }
-        $cacheKey = 'Football:timeline:'.$channelMatch[1];
-        $isIncidents = ($channelMatch[2] ?? '') === 'incidents';
-        $receivedAt = $requestedAt ?? microtime(true);
 
-        return Cache::store('redis')->lock($cacheKey.':write', 15)->block(2, static function () use ($cacheKey, $payload, $frameType, $isIncidents, $receivedAt, $requestedAt): bool {
-            $timeline = Cache::store('redis')->get($cacheKey, []);
-            $timeline = is_array($timeline) ? $timeline : [];
-            $before = $timeline;
-            $preserveNewerEvents = ($timeline['incidents_updated_at'] ?? 0) > $receivedAt;
-            if ($isIncidents && (! $preserveNewerEvents || ($frameType === 'snapshot' && ! ($timeline['initialized'] ?? false)))) {
-                $incidents = $payload['incidents'] ?? $payload['events'] ?? (array_is_list($payload) ? $payload : (isset($payload['incidentType']) || isset($payload['isDeleted'], $payload['id']) ? [$payload] : null));
-                if (! is_array($incidents)) {
-                    return false;
-                }
-                $events = $frameType === 'snapshot' && ! $preserveNewerEvents ? [] : ($timeline['events'] ?? []);
-                foreach ($incidents as $incident) {
-                    if (! is_array($incident)) {
-                        continue;
-                    }
-                    if (($incident['isDeleted'] ?? false) === true && isset($incident['id'])) {
-                        unset($events[(string) $incident['id']]);
-                        $timeline['removed'][(string) $incident['id']] = $receivedAt;
-
-                        continue;
-                    }
-                    $kind = $incident['incidentType'] ?? null;
-                    $class = $incident['incClass'] ?? $incident['incidentClass'] ?? '';
-                    $home = filter_var($incident['isHome'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-                    if (! array_key_exists('isHome', $incident) || $home === null || ! is_numeric($incident['time'] ?? null)
-                        || ! in_array($kind, ['goal', 'card'], true)
-                        || ($kind === 'card' && ! in_array($class, ['yellow', 'red', 'yellowRed'], true))) {
-                        continue;
-                    }
-                    $incidentMinute = (int) $incident['time'];
-                    $incidentSeconds = is_numeric($incident['timeSeconds'] ?? null) ? (int) $incident['timeSeconds'] : null;
-                    $timeKnown = $incidentMinute >= 0 || $incidentSeconds > 0;
-                    $minute = $incidentMinute >= 0 ? $incidentMinute : ($incidentSeconds > 0 ? (int) floor($incidentSeconds / 60) : 0);
-                    $added = max(0, (int) ($incident['addedTime'] ?? 0));
-                    $player = trim((string) ($incident['player']['name'] ?? ''));
-                    if ($player === '') {
-                        $player = trim(($incident['player']['firstName'] ?? '').' '.($incident['player']['lastName'] ?? ''));
-                    }
-                    $id = (string) ($incident['id'] ?? sha1(json_encode([$kind, $class, $minute, $added, $home, $incident['player']['id'] ?? $player])));
-                    if (($preserveNewerEvents && isset($events[$id])) || ($timeline['removed'][$id] ?? 0) > $receivedAt) {
-                        continue;
-                    }
-                    unset($timeline['removed'][$id]);
-                    $events[$id] = [
-                        'id' => $id,
-                        'kind' => $kind === 'goal' ? 'goal' : ($class === 'yellow' ? 'yellow' : 'red'),
-                        'incident_class' => $class,
-                        'minute' => $minute,
-                        'time_known' => $timeKnown,
-                        'added_time' => $added,
-                        'seconds' => $incidentSeconds !== null && $incidentSeconds >= 0 ? $incidentSeconds : ($minute + $added) * 60,
-                        'is_home' => $home,
-                        'player' => $player,
-                        'player_surname' => ! empty($incident['player']['lastName']) ? (string) $incident['player']['lastName'] : null,
-                        'home_score' => $incident['homeScore'] ?? null,
-                        'away_score' => $incident['awayScore'] ?? null,
-                    ];
-                }
-                $timeline['events'] = $events;
-                $timeline['initialized'] = ($timeline['initialized'] ?? false) || $frameType === 'snapshot';
-                if ($frameType === 'snapshot') {
-                    $timeline['finalized'] = ($timeline['finalized'] ?? false)
-                        || ($requestedAt !== null && ($timeline['clock']['finished'] ?? false))
-                        || array_any($incidents, static fn (mixed $incident): bool => is_array($incident)
-                            && ($incident['incidentType'] ?? null) === 'period'
-                            && in_array(strtoupper((string) ($incident['text'] ?? '')), ['FT', 'AET', 'AP'], true)
-                            && ($incident['isLive'] ?? null) === false);
-                }
-                $timeline['incidents_updated_at'] = max($receivedAt, $timeline['incidents_updated_at'] ?? 0);
-            } elseif (! $isIncidents && ($timeline['clock_updated_at'] ?? 0) <= $receivedAt) {
-                $read = static fn (string $path): mixed => array_key_exists($path, $payload) ? $payload[$path] : data_get($payload, $path);
-                $clock = array_filter([
-                    'status_code' => $read('status.code'),
-                    'status_type' => $read('status.type'),
-                    'status_description' => $read('status.description'),
-                    'period_start' => $read('time.currentPeriodStartTimestamp'),
-                    'initial' => $read('time.initial'),
-                    'max' => $read('time.max'),
-                    'last_period_timestamp' => $read('time.lastPeriodTimestamp'),
-                ], static fn (mixed $value): bool => $value !== null);
-                foreach (['period_start', 'last_period_timestamp'] as $field) {
-                    if (isset($clock[$field]) && (! is_numeric($clock[$field]) || (int) $clock[$field] <= 0)) {
-                        unset($clock[$field]);
-                    }
-                }
-                foreach (['initial', 'max'] as $field) {
-                    if (isset($clock[$field]) && (! is_numeric($clock[$field]) || (int) $clock[$field] < ($field === 'initial' ? 0 : 1))) {
-                        unset($clock[$field]);
-                    }
-                }
-                if (in_array((int) ($clock['status_code'] ?? 0), [6, 7], true)) {
-                    $clock['initial'] ??= (int) $clock['status_code'] === 7 ? 2700 : 0;
-                    $clock['max'] ??= (int) $clock['status_code'] === 7 ? 5400 : 2700;
-                }
-                if ($clock === []) {
-                    return false;
-                }
-                $clock['finished'] = ($timeline['clock']['finished'] ?? false)
-                    || in_array(strtoupper((string) ($clock['status_code'] ?? '')), ['FT', '100'], true)
-                    || ($clock['status_type'] ?? null) === 'finished';
-                $timeline['clock'] = array_replace($timeline['clock'] ?? [], $clock);
-                $timeline['clock_updated_at'] = $receivedAt;
-            }
-            if ($timeline === $before) {
+        return withRedisLock('Football:matches', function () use ($channel, $channelMatch, $payload, $frameType, $requestedAt): bool {
+            $matches = getInRedis('Football:matches') ?? [];
+            $key = array_find_key($matches, static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === $channelMatch[1]);
+            if ($key === null || ! $this->applyTimelineFrame($matches[$key], $channel, $payload, $frameType, $requestedAt)) {
                 return false;
             }
-            Cache::store('redis')->put($cacheKey, $timeline, 31 * 86400);
+            storeInRedis('Football:matches', $matches, 10);
 
             return true;
+        });
+    }
+
+    /** @param array<string, mixed> $match */
+    public function applyTimelineFrame(array &$match, string $channel, array $payload, string $frameType = 'update', ?float $requestedAt = null): bool
+    {
+        if (! preg_match('/^match:(\d+)(?::(incidents|stats))?$/', $channel, $channelMatch)
+            || (string) ($match['sportsApiPro_match_id'] ?? '') !== $channelMatch[1]) {
+            return false;
+        }
+        $isIncidents = ($channelMatch[2] ?? '') === 'incidents';
+        $receivedAt = $requestedAt ?? microtime(true);
+        $timeline = $match['timeline'] ?? [];
+        $timeline = is_array($timeline) ? $timeline : [];
+        if (($match['result_status'] ?? '') === 'Finished' && ($timeline['finalized'] ?? false) && $requestedAt === null) {
+            return false;
+        }
+        $before = $timeline;
+        $preserveNewerEvents = ($timeline['incidents_updated_at'] ?? 0) > $receivedAt;
+        if ($isIncidents && (! $preserveNewerEvents || ($frameType === 'snapshot' && ! ($timeline['initialized'] ?? false)))) {
+            $incidents = $payload['incidents'] ?? $payload['events'] ?? (array_is_list($payload) ? $payload : (isset($payload['incidentType']) || isset($payload['isDeleted'], $payload['id']) ? [$payload] : null));
+            if (! is_array($incidents)) {
+                return false;
+            }
+            $events = $frameType === 'snapshot' && ! $preserveNewerEvents ? [] : ($timeline['events'] ?? []);
+            foreach ($incidents as $incident) {
+                if (! is_array($incident)) {
+                    continue;
+                }
+                if (($incident['isDeleted'] ?? false) === true && isset($incident['id'])) {
+                    unset($events[(string) $incident['id']]);
+                    $timeline['removed'][(string) $incident['id']] = $receivedAt;
+
+                    continue;
+                }
+                $kind = $incident['incidentType'] ?? null;
+                $class = $incident['incClass'] ?? $incident['incidentClass'] ?? '';
+                $home = filter_var($incident['isHome'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                if (! array_key_exists('isHome', $incident) || $home === null || ! is_numeric($incident['time'] ?? null)
+                    || ! in_array($kind, ['goal', 'card'], true)
+                    || ($kind === 'card' && ! in_array($class, ['yellow', 'red', 'yellowRed'], true))) {
+                    continue;
+                }
+                $incidentMinute = (int) $incident['time'];
+                $incidentSeconds = is_numeric($incident['timeSeconds'] ?? null) ? (int) $incident['timeSeconds'] : null;
+                $timeKnown = $incidentMinute >= 0 || $incidentSeconds > 0;
+                $minute = $incidentMinute >= 0 ? $incidentMinute : ($incidentSeconds > 0 ? (int) floor($incidentSeconds / 60) : 0);
+                $added = max(0, (int) ($incident['addedTime'] ?? 0));
+                $player = trim((string) ($incident['player']['name'] ?? ''));
+                if ($player === '') {
+                    $player = trim(($incident['player']['firstName'] ?? '').' '.($incident['player']['lastName'] ?? ''));
+                }
+                $id = (string) ($incident['id'] ?? sha1(json_encode([$kind, $class, $minute, $added, $home, $incident['player']['id'] ?? $player])));
+                if (($preserveNewerEvents && isset($events[$id])) || ($timeline['removed'][$id] ?? 0) > $receivedAt) {
+                    continue;
+                }
+                unset($timeline['removed'][$id]);
+                $events[$id] = [
+                    'id' => $id,
+                    'kind' => $kind === 'goal' ? 'goal' : ($class === 'yellow' ? 'yellow' : 'red'),
+                    'incident_class' => $class,
+                    'minute' => $minute,
+                    'time_known' => $timeKnown,
+                    'added_time' => $added,
+                    'seconds' => $incidentSeconds !== null && $incidentSeconds >= 0 ? $incidentSeconds : ($minute + $added) * 60,
+                    'is_home' => $home,
+                    'player' => $player,
+                    'player_surname' => ! empty($incident['player']['lastName']) ? (string) $incident['player']['lastName'] : null,
+                    'home_score' => $incident['homeScore'] ?? null,
+                    'away_score' => $incident['awayScore'] ?? null,
+                ];
+            }
+            $timeline['events'] = $events;
+            $timeline['initialized'] = ($timeline['initialized'] ?? false) || $frameType === 'snapshot';
+            if ($frameType === 'snapshot') {
+                $timeline['finalized'] = ($timeline['finalized'] ?? false)
+                    || ($requestedAt !== null && (($timeline['clock']['finished'] ?? false) || ($match['result_status'] ?? '') === 'Finished'))
+                    || array_any($incidents, static fn (mixed $incident): bool => is_array($incident)
+                        && ($incident['incidentType'] ?? null) === 'period'
+                        && in_array(strtoupper((string) ($incident['text'] ?? '')), ['FT', 'AET', 'AP'], true)
+                        && ($incident['isLive'] ?? null) === false);
+            }
+            $timeline['incidents_updated_at'] = max($receivedAt, $timeline['incidents_updated_at'] ?? 0);
+        } elseif (! $isIncidents && ($timeline['clock_updated_at'] ?? 0) <= $receivedAt) {
+            $read = static fn (string $path): mixed => array_key_exists($path, $payload) ? $payload[$path] : data_get($payload, $path);
+            $clock = array_filter([
+                'status_code' => $read('status.code'),
+                'status_type' => $read('status.type'),
+                'status_description' => $read('status.description'),
+                'period_start' => $read('time.currentPeriodStartTimestamp'),
+                'initial' => $read('time.initial'),
+                'max' => $read('time.max'),
+                'last_period_timestamp' => $read('time.lastPeriodTimestamp'),
+            ], static fn (mixed $value): bool => $value !== null);
+            foreach (['period_start', 'last_period_timestamp'] as $field) {
+                if (isset($clock[$field]) && (! is_numeric($clock[$field]) || (int) $clock[$field] <= 0)) {
+                    unset($clock[$field]);
+                }
+            }
+            foreach (['initial', 'max'] as $field) {
+                if (isset($clock[$field]) && (! is_numeric($clock[$field]) || (int) $clock[$field] < ($field === 'initial' ? 0 : 1))) {
+                    unset($clock[$field]);
+                }
+            }
+            if (in_array((int) ($clock['status_code'] ?? 0), [6, 7], true)) {
+                $clock['initial'] ??= (int) $clock['status_code'] === 7 ? 2700 : 0;
+                $clock['max'] ??= (int) $clock['status_code'] === 7 ? 5400 : 2700;
+            }
+            if ($clock === []) {
+                return false;
+            }
+            $clock['finished'] = ($timeline['clock']['finished'] ?? false)
+                || in_array(strtoupper((string) ($clock['status_code'] ?? '')), ['FT', '100'], true)
+                || ($clock['status_type'] ?? null) === 'finished';
+            $timeline['clock'] = array_replace($timeline['clock'] ?? [], $clock);
+            $timeline['clock_updated_at'] = $receivedAt;
+        }
+        if ($timeline === $before) {
+            return false;
+        }
+        $match['timeline'] = $timeline;
+        if ($isIncidents) {
+            $this->syncTimelineCards($match);
+        }
+
+        return true;
+    }
+
+    /** @param array<string, mixed> $match */
+    public function syncTimelineCards(array &$match): void
+    {
+        $timeline = $match['timeline'] ?? [];
+        foreach (['yellow_cards', 'red_cards'] as $stat) {
+            if (! isset($match['card_stats'][$stat]) && in_array($match['live_stats_sources'][$stat] ?? '', ['v2', 'v6'], true)
+                && is_array($match['live_stats'][$stat] ?? null)) {
+                $match['card_stats'][$stat] = $match['live_stats'][$stat];
+            }
+        }
+        if (! is_array($timeline['events'] ?? null) && empty($match['card_stats'])) {
+            return;
+        }
+        $counts = [
+            'home' => ['yellow' => 0, 'direct_red' => 0, 'second_yellow' => 0, 'total_red' => 0],
+            'away' => ['yellow' => 0, 'direct_red' => 0, 'second_yellow' => 0, 'total_red' => 0],
+        ];
+        foreach ($timeline['events'] ?? [] as $incident) {
+            if (! in_array($incident['kind'] ?? '', ['yellow', 'red'], true)) {
+                continue;
+            }
+            $side = $incident['is_home'] ? 'home' : 'away';
+            if ($incident['kind'] === 'yellow') {
+                $counts[$side]['yellow']++;
+            } else {
+                $counts[$side][($incident['incident_class'] ?? '') === 'yellowRed' ? 'second_yellow' : 'direct_red']++;
+                $counts[$side]['total_red']++;
+            }
+        }
+        $unplacedCards = ['home' => ['yellow' => 0, 'red' => 0], 'away' => ['yellow' => 0, 'red' => 0]];
+        foreach (['home', 'away'] as $side) {
+            $yellow = max($counts[$side]['yellow'], (int) ($match['card_stats']['yellow_cards'][$side] ?? 0));
+            $red = max($counts[$side]['total_red'], (int) ($match['card_stats']['red_cards'][$side] ?? 0));
+            $unplacedCards[$side]['yellow'] = $yellow - $counts[$side]['yellow'];
+            $unplacedCards[$side]['red'] = $red - $counts[$side]['total_red'];
+            $counts[$side]['yellow'] = $yellow;
+            $counts[$side]['total_red'] = $red;
+        }
+        $match['timeline']['unplaced_card_counts'] = $unplacedCards;
+        $match['card_counts'] = $counts;
+        $match['cards'] = [
+            'home' => $counts['home']['total_red'] > 0 ? 'red' : ($counts['home']['yellow'] > 0 ? 'yellow' : null),
+            'away' => $counts['away']['total_red'] > 0 ? 'red' : ($counts['away']['yellow'] > 0 ? 'yellow' : null),
+        ];
+        if (is_array($timeline['events'] ?? null)) {
+            $match['incidents_initialized'] = true;
+        }
+        $match['cards_updated_at'] = $timeline['incidents_updated_at'] ?? microtime(true);
+        $match['card_counts_updated_at'] = $match['cards_updated_at'];
+        $match['live_stats']['yellow_cards'] = ['home' => $counts['home']['yellow'], 'away' => $counts['away']['yellow']];
+        $match['live_stats']['red_cards'] = ['home' => $counts['home']['total_red'], 'away' => $counts['away']['total_red']];
+        $match['live_stats_sources']['yellow_cards'] = 'reconciled';
+        $match['live_stats_sources']['red_cards'] = 'reconciled';
+    }
+
+    /** @return array<string, mixed> */
+    public function getMatchTimeline(int|string $matchId): array
+    {
+        $match = array_find(getInRedis('Football:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === (string) $matchId);
+
+        return $match['timeline'] ?? [];
+    }
+
+    public function migrateTimelineCache(): int
+    {
+        return withRedisLock('Football:matches', function (): int {
+            $matches = getInRedis('Football:matches') ?? [];
+            $keys = [];
+            foreach ($matches as $key => $match) {
+                if (! isset($match['timeline']['events']) && ! empty($match['sportsApiPro_match_id'])) {
+                    $keys[$key] = 'Football:timeline:'.$match['sportsApiPro_match_id'];
+                }
+            }
+            if ($keys === []) {
+                return 0;
+            }
+            $legacyTimelines = Cache::store('redis')->many(array_values($keys));
+            $migratedKeys = [];
+            $changed = false;
+            foreach ($keys as $key => $legacyKey) {
+                $before = $matches[$key];
+                $current = $matches[$key]['timeline'] ?? [];
+                $legacy = $legacyTimelines[$legacyKey] ?? null;
+                if (is_array($legacy) && $legacy !== []) {
+                    $matches[$key]['timeline'] = array_replace($current, $legacy);
+                    if (($current['clock_updated_at'] ?? 0) > ($legacy['clock_updated_at'] ?? 0)) {
+                        $matches[$key]['timeline']['clock'] = $current['clock'];
+                        $matches[$key]['timeline']['clock_updated_at'] = $current['clock_updated_at'];
+                    }
+                    $migratedKeys[] = $legacyKey;
+                } else {
+                    $matches[$key]['timeline'] = $current;
+                }
+                $this->syncTimelineCards($matches[$key]);
+                $changed = $matches[$key] !== $before || $changed;
+            }
+            if ($changed) {
+                storeInRedis('Football:matches', $matches, 10);
+            }
+            Cache::store('redis')->deleteMultiple($migratedKeys);
+
+            return count($migratedKeys);
         });
     }
 
@@ -169,16 +297,19 @@ class FootballSyncController extends Controller
         return $goals['home'] === $score['home'] && $goals['away'] === $score['away'];
     }
 
-    /** @param array{home: int, away: int}|null $expectedScore */
-    public function queueTimelineBackfill(int|string $matchId, bool $finished = false, ?array $expectedScore = null): void
+    /**
+     * @param  array{home: int, away: int}|null  $expectedScore
+     * @param  array<string, mixed>|null  $timeline
+     */
+    public function queueTimelineBackfill(int|string $matchId, bool $finished = false, ?array $expectedScore = null, ?array $timeline = null): void
     {
         if (! ctype_digit((string) $matchId) || (int) $matchId <= 0) {
             return;
         }
-        $cacheKey = 'Football:timeline:'.$matchId;
+        $cacheKey = 'Football:timeline-backfill:'.$matchId;
         $pending = null;
         try {
-            $timeline = Cache::store('redis')->get($cacheKey, []);
+            $timeline ??= $this->getMatchTimeline($matchId);
             if (($timeline['initialized'] ?? false) && (! $finished || ($timeline['finalized'] ?? false)) && $this->timelineGoalsMatchScore($timeline, $expectedScore)) {
                 return;
             }
@@ -202,12 +333,12 @@ class FootballSyncController extends Controller
                             $expectedScore = ['home' => (int) $match['home_score'], 'away' => (int) $match['away_score']];
                         }
                     }
-                    $timeline = Cache::store('redis')->get($cacheKey, []);
+                    $timeline = $controller->getMatchTimeline($matchId);
                     if (! $lock->isOwnedByCurrentProcess() || (($timeline['initialized'] ?? false) && (! $finished || ($timeline['finalized'] ?? false)) && $controller->timelineGoalsMatchScore($timeline, $expectedScore))) {
                         return;
                     }
                     foreach ($repairGoals ? [':incidents'] : ($finished ? ['', ':incidents'] : ['', ':incidents', ':odds']) as $suffix) {
-                        $current = Cache::store('redis')->get($cacheKey, []);
+                        $current = $controller->getMatchTimeline($matchId);
                         if (($suffix === '' && ! $finished && ! empty($current['clock'])) || ($suffix === ':incidents' && ($current['initialized'] ?? false) && (! $finished || ($current['finalized'] ?? false)) && $controller->timelineGoalsMatchScore($current, $expectedScore))) {
                             continue;
                         }
@@ -218,7 +349,7 @@ class FootballSyncController extends Controller
                             }
                         }
                         $requestedAt = microtime(true);
-                        $response = ApiCall('https://api.sportsapipro.com/v2/football/match/'.$matchId.($suffix === ':odds' ? '/odds/all' : ($suffix === '' ? '' : '/incidents')),
+                        $response = ApiCall('https://api.sportsapipro.com/v2/football/match/'.$matchId.($suffix === ':odds' ? '/odds' : ($suffix === '' ? '' : '/incidents')),
                             ['x-api-key' => GetSportApiProKey()], ['connect_timeout' => 3, 'timeout' => 15], $apiDiagnostics);
                         if (! is_array($response) || ($response['success'] ?? true) === false) {
                             Log::warning('Football timeline backfill response unavailable', ['match_id' => $matchId, 'api' => $apiDiagnostics]);
@@ -233,22 +364,12 @@ class FootballSyncController extends Controller
 
                                 continue;
                             }
-                            $stored = $controller->mergeTimelineFrame('match:'.$matchId.$suffix, $payload, 'snapshot', $requestedAt);
-                            if ($finished && $suffix !== '' && $stored) {
-                                Cache::store('redis')->lock($cacheKey.':write', 15)->block(2, static function () use ($cacheKey): void {
-                                    $timeline = Cache::store('redis')->get($cacheKey, []);
-                                    $timeline['finalized'] = true;
-                                    Cache::store('redis')->put($cacheKey, $timeline, 31 * 86400);
-                                });
-                            }
+                            $controller->mergeTimelineFrame('match:'.$matchId.$suffix, $payload, 'snapshot', $requestedAt);
                         }
                     }
-                    $timeline = Cache::store('redis')->get($cacheKey, []);
+                    $timeline = $controller->getMatchTimeline($matchId);
                     if (! ($timeline['initialized'] ?? false) || ($finished && ! ($timeline['finalized'] ?? false)) || ! $controller->timelineGoalsMatchScore($timeline, $expectedScore)) {
                         Cache::store('redis')->put($cacheKey.':retry', true, $repairGoals ? 60 : 300);
-                        if (! $finished && ! $repairGoals) {
-                            $controller->queueCardStatsFallback($matchId);
-                        }
                     }
                     Event::dispatch(new FootballSportsScoreUpdated);
                 } catch (Throwable $e) {
@@ -326,6 +447,7 @@ class FootballSyncController extends Controller
 
     public function syncSportsApiProLiveData()
     {
+        $this->migrateTimelineCache();
         $url = 'https://api.sportsapipro.com/v2/football/live/all';
         $key = 'x-api-key: '.$this->getsportsAPIProKeys;
         $liveData = ApiCall($url, $key, ['connect_timeout' => 3, 'timeout' => 15], $apiDiagnostics);
@@ -457,12 +579,12 @@ class FootballSyncController extends Controller
     {
         $matchId = (string) $match['sportsApiPro_match_id'];
         $cacheKey = 'Football:bet365:'.$matchId;
+        $unavailableKey = 'Football:bet365:unavailable:'.$oddsMatchId;
         $cooldownKey = $cacheKey.(($match['result_status'] ?? '') === 'Live' ? ':final-cooldown' : ':cooldown');
         $pending = null;
         try {
-            if (! in_array($match['result_status'] ?? '', ['Live', 'Prematch'], true)
-                || (($match['result_status'] ?? '') === 'Live' && ($match['bet365_prematch']['finalized'] ?? false))
-                || Cache::store('redis')->has($cooldownKey)) {
+            if ($oddsMatchId <= 0 || ! $this->canFetchBet365Odds($match)
+                || Cache::store('redis')->has($cooldownKey) || Cache::store('redis')->has($unavailableKey)) {
                 return;
             }
             $pending = Cache::store('redis')->lock($cacheKey.':pending', 3600);
@@ -470,17 +592,17 @@ class FootballSyncController extends Controller
                 return;
             }
             $owner = $pending->owner();
-            dispatch(static function () use ($matchId, $oddsMatchId, $cacheKey, $cooldownKey, $owner): void {
+            dispatch(static function () use ($matchId, $oddsMatchId, $cacheKey, $cooldownKey, $unavailableKey, $owner): void {
                 $lock = Cache::store('redis')->restoreLock($cacheKey.':pending', $owner);
                 $status = null;
                 $apiDiagnostics = null;
                 try {
-                    if (! $lock->isOwnedByCurrentProcess()) {
+                    if (! $lock->isOwnedByCurrentProcess() || Cache::store('redis')->has($unavailableKey)) {
                         return;
                     }
-                    $match = array_find(getInRedis('Football:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === $matchId);
-                    if ($match === null || ! in_array($match['result_status'] ?? '', ['Live', 'Prematch'], true)
-                        || (($match['result_status'] ?? '') === 'Live' && ($match['bet365_prematch']['finalized'] ?? false))) {
+                    $controller = app(self::class);
+                    $match = array_find(getInRedis('Football:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === $matchId && $controller->canFetchBet365Odds($match));
+                    if ($match === null) {
                         return;
                     }
                     $requestedAt = microtime(true);
@@ -489,7 +611,6 @@ class FootballSyncController extends Controller
                         $status = (int) $response['status'];
                         $response = json_decode($response['body'], true);
                     }
-                    $controller = app(self::class);
                     $payload = is_array($response) ? ($response['data'] ?? $response) : [];
                     if ((int) ($payload['matchId'] ?? 0) !== $oddsMatchId) {
                         throw new \RuntimeException('SportsAPI Pro V4 odds unavailable or returned a different match ID'.($status !== null ? ' (HTTP '.$status.')' : '').'.');
@@ -512,7 +633,7 @@ class FootballSyncController extends Controller
                             foreach (['home_odds', 'draw_odds', 'away_odds'] as $selection) {
                                 $previous = (int) ($match['bet365_prematch']['match_id'] ?? 0) === $oddsMatchId
                                     ? ($match['bet365_prematch']['opening_odds'][$selection] ?? []) : [];
-                                $openings[$selection] = array_merge(meaningfulOpeningOdds(['backOdds' => $favorite[$selection] ?? null], $previous, $requestedAt), ['monitoring_baseline_version' => 1]);
+                                $openings[$selection] = updateOddsMonitoring(['backOdds' => $favorite[$selection] ?? null], $previous, $requestedAt);
                             }
                             $matches[$key]['bet365_prematch'] = array_merge($favorite, [
                                 'bookmaker_id' => 126, 'match_id' => $oddsMatchId, 'fetched_at' => $requestedAt,
@@ -533,7 +654,11 @@ class FootballSyncController extends Controller
                         Event::dispatch(new FootballSportsScoreUpdated);
                     }
                 } catch (Throwable $e) {
-                    Cache::store('redis')->put($cooldownKey, true, 300);
+                    $retryAfter = in_array($status, [404, 410], true) ? 3600 : 300;
+                    if (in_array($status, [404, 410], true)) {
+                        Cache::store('redis')->put($unavailableKey, true, $retryAfter);
+                    }
+                    Cache::store('redis')->put($cooldownKey, true, $retryAfter);
                     Log::warning('Football bet365 odds failed', ['match_id' => $matchId, 'odds_match_id' => $oddsMatchId, 'http_status' => $status, 'api' => $apiDiagnostics, 'exception' => $e::class, 'message' => $e->getMessage()]);
                 } finally {
                     $lock->release();
@@ -546,6 +671,17 @@ class FootballSyncController extends Controller
             $pending?->release();
             Log::warning('Football bet365 odds could not be queued', ['match_id' => $matchId, 'exception' => $e::class]);
         }
+    }
+
+    /** @param array<string, mixed> $match */
+    private function canFetchBet365Odds(array $match): bool
+    {
+        return in_array($match['result_status'] ?? '', ['Live', 'Prematch'], true)
+            && (int) ($match['timestamp'] ?? 0) >= time() - 86400
+            && (int) ($match['timestamp'] ?? 0) <= time() + 86400
+            && ! ($match['timeline']['clock']['finished'] ?? false)
+            && ($match['timeline']['clock']['status_type'] ?? '') !== 'finished'
+            && ! (($match['result_status'] ?? '') === 'Live' && ($match['bet365_prematch']['finalized'] ?? false));
     }
 
     /** @return array{home_odds: float, draw_odds: ?float, away_odds: float, favorite_side: string, favorite_odds: float}|null */
@@ -628,7 +764,7 @@ class FootballSyncController extends Controller
             foreach ($markets as &$market) {
                 foreach ($market['choices'] as &$choice) {
                     $selection = hash('sha256', json_encode([$market['id'], $market['market_id'], $market['period'], $market['name'], $choice['id'], $choice['name']], JSON_THROW_ON_ERROR));
-                    $opening = array_merge(meaningfulOpeningOdds(['backOdds' => $choice['decimal_odds']], $openings[$selection] ?? [], $receivedAt, ! $market['suspended']), ['monitoring_baseline_version' => 1]);
+                    $opening = updateOddsMonitoring(['backOdds' => $choice['decimal_odds']], $openings[$selection] ?? [], $receivedAt, ! $market['suspended']);
                     $openings[$selection] = $opening;
                     $choice['initial_decimal_odds'] = $opening['initialBackOdds'];
                     $choice['opening_odds'] = $opening;
@@ -652,115 +788,251 @@ class FootballSyncController extends Controller
         return is_finite($decimal) && $decimal > 1 ? $decimal : null;
     }
 
-    public function queueCardStatsFallback(int|string $matchId): void
+    /** @param array<string, mixed> $match
+     * @param  array<string, mixed>  $payload
+     */
+    public function applyMatchStatistics(array &$match, array $payload, ?float $requestedAt = null): bool
     {
-        $cacheKey = 'Football:card-fallback:'.$matchId;
-        $pending = null;
-        try {
-            if (Cache::store('redis')->has($cacheKey.':cooldown')) {
-                return;
-            }
-            $pending = Cache::store('redis')->lock($cacheKey.':pending', 3600);
-            if (! $pending->get()) {
-                return;
-            }
-            $owner = $pending->owner();
-            dispatch(static function () use ($matchId, $cacheKey, $owner): void {
-                $lock = Cache::store('redis')->restoreLock($cacheKey.':pending', $owner);
-                $apiDiagnostics = null;
-                try {
-                    if (! $lock->isOwnedByCurrentProcess()) {
-                        return;
-                    }
-                    $match = array_find(getInRedis('Football:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === (string) $matchId);
-                    if (($match['result_status'] ?? '') !== 'Live' || ($match['incidents_initialized'] ?? false)
-                        || isset($match['live_stats']['yellow_cards'], $match['live_stats']['red_cards'])) {
-                        return;
-                    }
-                    $controller = app(self::class);
-                    $v6Id = $match['sportsApiPro_v6_match_id'] ?? null;
-                    if ($v6Id === null) {
-                        $fixtures = Cache::store('redis')->lock('Football:v6:catalogue-lock', 20)->block(2, static function (): array {
-                            return Cache::store('redis')->remember('Football:v6:catalogue', 300, static function (): array {
-                                $response = ApiCall('https://api.sportsapipro.com/v6/football/live', ['x-api-key' => GetSportApiProKey()], ['connect_timeout' => 3, 'timeout' => 15], $apiDiagnostics);
-                                $payload = is_array($response) ? ($response['data'] ?? $response) : [];
-                                if (! is_array($payload['matches'] ?? null)) {
-                                    Log::warning('Football V6 fallback catalogue unavailable', $apiDiagnostics ?? []);
-                                }
+        $receivedAt = $requestedAt ?? microtime(true);
+        $changeTimestamp = data_get($payload, 'changes.changeTimestamp', $payload['changes.changeTimestamp'] ?? null);
+        if (($requestedAt !== null && ($match['statistics_updated_at'] ?? 0) > $requestedAt)
+            || ($requestedAt === null && is_numeric($changeTimestamp) && $changeTimestamp < ($match['statistics_change_timestamp'] ?? 0))) {
+            return false;
+        }
 
-                                return is_array($payload['matches'] ?? null) ? $payload['matches'] : [];
-                            });
-                        });
-                        $candidates = array_filter($fixtures, static fn (array $fixture): bool => ! empty($fixture['id'])
-                            && abs((int) ($fixture['matchTime'] ?? 0) - (int) $match['timestamp']) <= 300
-                            && $controller->teamSimilarity($match['team1'], (string) ($fixture['homeTeam']['name'] ?? '')) >= 80
-                            && $controller->teamSimilarity($match['team2'], (string) ($fixture['awayTeam']['name'] ?? '')) >= 80);
-                        if (count($candidates) !== 1) {
-                            Cache::store('redis')->put($cacheKey.':cooldown', true, 3600);
-
-                            return;
-                        }
-                        $v6Id = reset($candidates)['id'];
-                    }
-                    if (! is_string($v6Id) || preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $v6Id) !== 1) {
-                        return;
-                    }
-                    $requestedAt = microtime(true);
-                    $response = ApiCall('https://api.sportsapipro.com/v6/football/match/'.$v6Id.'/team-stats', ['x-api-key' => GetSportApiProKey()], ['connect_timeout' => 3, 'timeout' => 15], $apiDiagnostics);
-                    $payload = is_array($response) ? ($response['data'] ?? $response) : [];
-                    $changed = $controller->mergeCardStatsFallback($matchId, $v6Id, $payload, $requestedAt);
-                    Cache::store('redis')->put($cacheKey.':cooldown', true, $changed ? 900 : 3600);
-                } catch (Throwable $e) {
-                    Cache::store('redis')->put($cacheKey.':cooldown', true, 3600);
-                    Log::warning('Football card stats fallback failed', ['match_id' => $matchId, 'api' => $apiDiagnostics, 'exception' => $e::class, 'message' => $e->getMessage()]);
-                } finally {
-                    $lock->release();
+        $statKeys = [
+            'attacks' => 'attacks', 'dangerousattacks' => 'dangerous_attacks',
+            'ballpossession' => 'possession', 'possession' => 'possession',
+            'totalshotsongoal' => 'total_shots', 'totalshots' => 'total_shots',
+            'shotsongoal' => 'shots_on_target', 'shotsontarget' => 'shots_on_target',
+            'shotsoffgoal' => 'shots_off_target', 'shotsofftarget' => 'shots_off_target',
+            'blockedscoringattempt' => 'blocked_shots', 'blockedshots' => 'blocked_shots',
+            'passes' => 'total_passes', 'totalpasses' => 'total_passes',
+            'accuratepasses' => 'accurate_passes', 'totaltackle' => 'tackles', 'tackles' => 'tackles',
+            'interceptionwon' => 'interceptions', 'interceptions' => 'interceptions',
+            'fouls' => 'fouls', 'cornerkicks' => 'corners', 'corners' => 'corners',
+            'yellowcards' => 'yellow_cards', 'redcards' => 'red_cards', 'offsides' => 'offsides',
+        ];
+        $liveStats = [];
+        $meta = [];
+        $periods = $match['statistics_periods'] ?? [];
+        $stack = [[$payload, 'ALL', 'Match statistics']];
+        $hasItems = false;
+        while ($stack !== []) {
+            [$data, $period, $group] = array_pop($stack);
+            $period = strtoupper((string) ($data['period'] ?? $data['periodName'] ?? $period));
+            $group = (string) ($data['groupName'] ?? $group);
+            $providerKey = (string) ($data['key'] ?? $data['name'] ?? $data['statisticName'] ?? '');
+            if ($providerKey !== '' && (array_key_exists('home', $data) || array_key_exists('homeValue', $data))
+                && (array_key_exists('away', $data) || array_key_exists('awayValue', $data))) {
+                $name = strtolower(preg_replace('/[^a-z0-9]/i', '', $providerKey));
+                $key = $statKeys[$name] ?? Str::snake(Str::camel($providerKey));
+                $homeDisplay = $data['home'] ?? $data['homeValue'] ?? null;
+                $awayDisplay = $data['away'] ?? $data['awayValue'] ?? null;
+                if ((is_scalar($homeDisplay) || $homeDisplay === null) && (is_scalar($awayDisplay) || $awayDisplay === null)) {
+                    $hasItems = true;
+                    $periods[$period][$group][$key] = [
+                        'label' => (string) ($data['name'] ?? $data['statisticName'] ?? Str::headline($providerKey)),
+                        'home' => $homeDisplay, 'away' => $awayDisplay,
+                    ];
                 }
-            })->name('Football card stats fallback '.$matchId)->onQueue('default')->catch(static function (Throwable $e) use ($cacheKey, $owner): void {
-                Cache::store('redis')->restoreLock($cacheKey.':pending', $owner)->release();
-                Cache::store('redis')->put($cacheKey.':cooldown', true, 3600);
+                if (! is_scalar($homeDisplay) && $homeDisplay !== null || ! is_scalar($awayDisplay) && $awayDisplay !== null) {
+                    continue;
+                }
+                $isPercent = preg_match('/^-?\d+(?:\.\d+)?%$/', trim((string) $homeDisplay)) === 1
+                    && preg_match('/^-?\d+(?:\.\d+)?%$/', trim((string) $awayDisplay)) === 1;
+                $home = $isPercent ? rtrim(trim((string) $homeDisplay), '%') : ($data['homeValue'] ?? $homeDisplay);
+                $away = $isPercent ? rtrim(trim((string) $awayDisplay), '%') : ($data['awayValue'] ?? $awayDisplay);
+                if ($period === 'ALL' && ! in_array($key, ['attacks', 'dangerous_attacks'], true) && is_numeric($home) && is_numeric($away)) {
+                    $liveStats[$key] = ['home' => (float) $home, 'away' => (float) $away];
+                    $meta[$key] = ['label' => $periods[$period][$group][$key]['label'], 'percent' => $isPercent];
+                }
+            }
+            foreach (array_reverse($data, true) as $value) {
+                if (is_array($value)) {
+                    $stack[] = [$value, $period, $group];
+                }
+            }
+        }
+        if (! $hasItems) {
+            return false;
+        }
+        $match['statistics_periods'] = $periods;
+        $match['statistics_updated_at'] = $receivedAt;
+        if ($requestedAt === null && is_numeric($changeTimestamp)) {
+            $match['statistics_change_timestamp'] = $changeTimestamp;
+        }
+        $match['live_stats'] = array_replace($match['live_stats'] ?? [], $liveStats);
+        $match['live_stats_meta'] = array_replace($match['live_stats_meta'] ?? [], $meta);
+        foreach (array_keys($liveStats) as $stat) {
+            $match['live_stats_sources'][$stat] = 'v2';
+        }
+        foreach (['yellow_cards', 'red_cards'] as $stat) {
+            if (isset($liveStats[$stat])) {
+                $match['card_stats'][$stat] = $liveStats[$stat];
+                $match['cards_updated_at'] = $receivedAt;
+                $match['card_stats_updated_at'] = $receivedAt;
+            }
+        }
+        if (isset($liveStats['corners'])) {
+            $match['corners'] = array_map(static fn (float $value): int => (int) $value, $liveStats['corners']);
+        }
+        $this->syncTimelineCards($match);
+
+        return true;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function loadMatchStatistics(string $matchId, bool $includePrematch = true): ?array
+    {
+        $match = array_find(getInRedis('Football:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === $matchId);
+        if ($match === null) {
+            return null;
+        }
+        $lock = Cache::store('redis')->lock('Football:statistics:'.$matchId.':fetch', 60);
+        if (! $lock->get()) {
+            return $match;
+        }
+        try {
+            $responses = [];
+            $attempts = [];
+            $sections = $includePrematch ? ['pregame-form', 'h2h', 'streaks'] : [];
+            if (($match['result_status'] ?? '') !== 'Prematch') {
+                $sections[] = 'statistics';
+            }
+            foreach ($sections as $section) {
+                $lastAttempt = $match['statistics_requests'][$section] ?? [];
+                $ttl = ($lastAttempt['available'] ?? false)
+                    ? ($section === 'statistics' ? (($match['result_status'] ?? '') === 'Finished' ? 86400 : 30) : 1800)
+                    : 120;
+                if (($lastAttempt['at'] ?? 0) > microtime(true) - $ttl
+                    || ($section === 'statistics' && ($match['statistics_updated_at'] ?? 0) > microtime(true) - 30)) {
+                    continue;
+                }
+                $requestedAt = microtime(true);
+                $diagnostics = null;
+                try {
+                    $response = ApiCall('https://api.sportsapipro.com/v2/football/match/'.$matchId.'/'.$section,
+                        ['x-api-key' => GetSportApiProKey()], ['connect_timeout' => 3, 'timeout' => 6], $diagnostics);
+                    $payload = $response['data'] ?? $response;
+                    $expectedKeys = match ($section) {
+                        'statistics' => ['statistics'],
+                        'pregame-form' => ['homeTeam', 'awayTeam'],
+                        'h2h' => ['teamDuel', 'managerDuel'],
+                        'streaks' => ['general', 'head2head'],
+                    };
+                    $available = is_array($response) && ($response['success'] ?? true) !== false
+                        && is_array($payload) && array_any($expectedKeys, static fn (string $key): bool => array_key_exists($key, $payload))
+                        && (! isset($response['matchId']) || (string) $response['matchId'] === $matchId)
+                        && (! isset($diagnostics['http_status']) || ($diagnostics['http_status'] >= 200 && $diagnostics['http_status'] < 300));
+                    if ($available) {
+                        $responses[$section] = ['data' => $payload, 'at' => $requestedAt];
+                    } else {
+                        Log::warning('Football statistics response unavailable', ['match_id' => $matchId, 'section' => $section, 'api' => $diagnostics]);
+                    }
+                } catch (Throwable $exception) {
+                    $available = false;
+                    Log::warning('Football statistics request failed', ['match_id' => $matchId, 'section' => $section, 'api' => $diagnostics, 'exception' => $exception::class]);
+                }
+                $attempts[$section] = ['at' => $requestedAt, 'available' => $available];
+            }
+            if ($attempts === []) {
+                return $match;
+            }
+
+            return withRedisLock('Football:matches', function () use ($matchId, $responses, $attempts): ?array {
+                $matches = getInRedis('Football:matches') ?? [];
+                $key = array_find_key($matches, static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === $matchId);
+                if ($key === null) {
+                    return null;
+                }
+                foreach ($responses as $section => $response) {
+                    if ($section === 'statistics') {
+                        $this->applyMatchStatistics($matches[$key], $response['data'], $response['at']);
+                    } else {
+                        $matches[$key]['prematch_statistics'][$section] = $response['data'];
+                    }
+                }
+                $matches[$key]['statistics_requests'] = array_replace($matches[$key]['statistics_requests'] ?? [], $attempts);
+                storeInRedis('Football:matches', $matches, 10);
+
+                return $matches[$key];
             });
-        } catch (Throwable $e) {
-            $pending?->release();
-            Log::warning('Football card stats fallback could not be queued', ['match_id' => $matchId, 'exception' => $e::class]);
+        } finally {
+            $lock->release();
         }
     }
 
-    public function mergeCardStatsFallback(int|string $matchId, string $v6Id, array $payload, float $requestedAt): bool
+    /** @param array<string, mixed> $payload */
+    public function mergeV6TeamStats(int|string $matchId, string $v6Id, array $payload, float $requestedAt, ?string $dictionaryVersion = null): bool
     {
-        $stats = [];
-        foreach (['103' => 'yellow_cards', '104' => 'red_cards', '102' => 'corners'] as $id => $name) {
-            $values = $payload['matchStats'][0]['stats'][$id]['values'] ?? null;
-            if (is_array($values) && is_numeric($values[0] ?? null) && is_numeric($values[1] ?? null)) {
-                $stats[$name] = ['home' => max(0, (int) $values[0]), 'away' => max(0, (int) $values[1])];
-            }
-        }
-        if ($stats === []) {
+        $fullMatch = $payload['matchStats'][0]['stats'] ?? null;
+        if (! is_array($fullMatch) || (isset($payload['matchId']) && (string) $payload['matchId'] !== $v6Id)) {
             return false;
         }
-        $changed = withRedisLock('Football:matches', static function () use ($matchId, $v6Id, $stats, $requestedAt): array {
+        $stats = [];
+        foreach (['123' => 'attacks', '124' => 'dangerous_attacks', '103' => 'yellow_cards', '104' => 'red_cards', '102' => 'corners'] as $id => $name) {
+            $values = $fullMatch[$id]['values'] ?? [];
+            $pair = ['home' => null, 'away' => null];
+            foreach (['home' => 0, 'away' => 1] as $side => $index) {
+                if (is_numeric($values[$index] ?? null) && is_finite((float) $values[$index]) && (float) $values[$index] >= 0) {
+                    $pair[$side] = (int) $values[$index];
+                }
+            }
+            if (in_array($name, ['attacks', 'dangerous_attacks'], true) || ($pair['home'] !== null && $pair['away'] !== null)) {
+                $stats[$name] = $pair;
+            }
+        }
+        $changed = withRedisLock('Football:matches', static function () use ($matchId, $v6Id, $stats, $requestedAt, $dictionaryVersion): array {
             $matches = getInRedis('Football:matches') ?? [];
-            foreach ($matches as $key => $match) {
-                if ((string) ($match['sportsApiPro_match_id'] ?? '') !== (string) $matchId || ($match['result_status'] ?? '') !== 'Live'
-                    || ($match['incidents_initialized'] ?? false) || ($match['cards_updated_at'] ?? 0) > $requestedAt) {
+            $persist = [];
+            $updated = false;
+            $liveStats = app(FootballV6Stats::class);
+            foreach ($matches as $key => &$match) {
+                if ((string) ($match['sportsApiPro_match_id'] ?? '') !== (string) $matchId || ! $liveStats->isLive($match)
+                    || ($match['v6_stats']['updated_at'] ?? 0) > $requestedAt) {
                     continue;
                 }
-                $matches[$key]['sportsApiPro_v6_match_id'] = $v6Id;
-                $matches[$key]['live_stats'] = array_replace($stats, $match['live_stats'] ?? []);
-                foreach (array_keys(array_diff_key($stats, $match['live_stats'] ?? [])) as $stat) {
-                    $matches[$key]['live_stats_sources'][$stat] = 'v6';
+                $before = $match['live_stats'] ?? [];
+                $newMapping = ($match['sportsApiPro_v6_match_id'] ?? null) !== $v6Id;
+                $match['sportsApiPro_v6_match_id'] = $v6Id;
+                foreach (['attacks' => 'Attacks', 'dangerous_attacks' => 'Dangerous Attacks'] as $stat => $label) {
+                    $match['live_stats'][$stat] = $stats[$stat];
+                    $match['live_stats_sources'][$stat] = 'v6';
+                    $match['live_stats_meta'][$stat] = ['label' => $label, 'percent' => false, 'source' => 'v6'];
                 }
-                $matches[$key]['card_stats_fallback_at'] = $requestedAt;
-                $matches[$key]['card_stats_updated_at'] = $requestedAt;
-                if (! isset($match['corners']) && isset($stats['corners'])) {
-                    $matches[$key]['corners'] = $stats['corners'];
+                if (! ($match['incidents_initialized'] ?? false) && ($match['cards_updated_at'] ?? 0) <= $requestedAt) {
+                    foreach (['yellow_cards', 'red_cards', 'corners'] as $stat) {
+                        if (isset($stats[$stat]) && ! isset($match['live_stats'][$stat])) {
+                            $match['live_stats'][$stat] = $stats[$stat];
+                            $match['live_stats_sources'][$stat] = 'v6';
+                            $match['card_stats_fallback_at'] = $requestedAt;
+                            $match['card_stats_updated_at'] = $requestedAt;
+                        }
+                    }
+                    if (! isset($match['corners']) && isset($stats['corners'])) {
+                        $match['corners'] = $stats['corners'];
+                    }
+                    if (isset($match['live_stats']['yellow_cards'], $match['live_stats']['red_cards'])) {
+                        app(self::class)->syncTimelineCards($match);
+                    }
                 }
+                $match['v6_stats'] = [
+                    'updated_at' => $requestedAt, 'last_attempt_at' => (int) $requestedAt,
+                    'next_poll_at' => (int) $requestedAt + 60, 'dictionary_version' => $dictionaryVersion,
+                ];
+                $updated = true;
+                if ($newMapping || $before !== $match['live_stats']) {
+                    $persist[$key] = $match;
+                    unset($persist[$key]['markets']);
+                }
+            }
+            unset($match);
+            if ($updated) {
                 storeInRedis('Football:matches', $matches, 30);
-
-                return [$key => $matches[$key]];
             }
 
-            return [];
+            return $persist;
         });
         if ($changed !== []) {
             $this->storeMatchesInDatabase($changed);
@@ -768,6 +1040,12 @@ class FootballSyncController extends Controller
         }
 
         return $changed !== [];
+    }
+
+    /** @param array<string, mixed> $payload */
+    public function mergeCardStatsFallback(int|string $matchId, string $v6Id, array $payload, float $requestedAt): bool
+    {
+        return $this->mergeV6TeamStats($matchId, $v6Id, $payload, $requestedAt);
     }
 
     /** @param list<array<string, mixed>> $alerts */
@@ -823,7 +1101,8 @@ class FootballSyncController extends Controller
 
                     continue;
                 }
-                $opening = meaningfulOpeningOdds(['backOdds' => $from], $state, $at);
+                $opening = hasMeaningfulOpeningOdds($state) ? $state : updateOddsMonitoring(['backOdds' => $from], [], $at);
+                $opening = updateOddsMonitoring(['backOdds' => $to], $opening, $at);
                 $baseline = (float) $opening['initialBackOdds'];
                 $dropTriggered = ($state['drop_triggered'] ?? false) || round(($baseline - $to) / $baseline * 100, 8) >= 1;
                 $snapshots = array_values(array_filter($state['snapshots'] ?? [], static fn (array $snapshot): bool => $snapshot['timestamp'] >= $at - 180 && $snapshot['timestamp'] <= $at));
@@ -849,7 +1128,7 @@ class FootballSyncController extends Controller
                     }
                 }
                 $snapshots[] = ['timestamp' => $at, 'odds' => $to];
-                $matches[$key]['pinnacle_markets'][$selection] = array_merge($display, $opening, [
+                $matches[$key]['pinnacle_markets'][$selection] = array_merge($opening, $display, [
                     'monitoring_baseline_version' => 1,
                     'baseline_odds' => $baseline, 'current_odds' => $to, 'drop_triggered' => $dropTriggered,
                     'shock_detected_at' => $shockAt, 'snapshots' => array_slice($snapshots, -7),
@@ -1237,6 +1516,7 @@ class FootballSyncController extends Controller
                         'data_sync_complete' => $data_sync_complete,
                         'home_score' => $homeScore,
                         'sportsApiPro_match_id' => $payload['id'],
+                        'timeline' => $existingRecord['timeline'] ?? [],
                         'away_score' => $awayScore,
                         'minutes_status' => $minutesStatus,
                         'result_status' => $resultStatus,
@@ -1264,6 +1544,7 @@ class FootballSyncController extends Controller
                 } else {
                     $tempArray['unique_key'] = $uniqueKey;
                     $tempArray['sportsApiPro_match_id'] = $payload['id'];
+                    $tempArray['timeline'] = [];
                     $tempArray['timestamp'] = $startTimestamp;
                     $tempArray['data_sync_complete'] = false;
                     $tempArray['home_score'] = $homeScore;
@@ -1299,6 +1580,12 @@ class FootballSyncController extends Controller
 
             return $databaseMatches;
         }, 30);
+    }
+
+    /** @param array<string, array<string, mixed>> $matches */
+    public function persistOddsSnapshots(array $matches): void
+    {
+        $this->storeMatchesInDatabase($matches);
     }
 
     private function storeMatchesInDatabase(array $matches): void

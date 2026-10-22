@@ -58,7 +58,7 @@ class AmericanFootballSyncController extends Controller
 
     public function syncSportsApiProLiveData(): array
     {
-        $url = 'https://api.sportsapipro.com/v2/american-football/api/live/all';
+        $url = 'https://api.sportsapipro.com/v2/american-football/api/live';
         $key = 'x-api-key: '.$this->getsportsAPIProKeys;
         $liveData = ApiCall($url, $key, ['connect_timeout' => 3, 'timeout' => 15]) ?? [];
         $liveData = is_array($liveData['data'] ?? null) ? $liveData['data'] : ($liveData ?? []);

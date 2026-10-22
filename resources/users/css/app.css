@@ -20,6 +20,21 @@ body.dark-mode {
     color: #e8edf2;
 }
 
+
+.match-score[data-score-status="Live" i] {
+    color: #d63e3e;
+}
+
+.match-score[data-score-status="Finished" i] {
+    color: #000;
+}
+
+.dark-mode .match-score[data-score-status="Finished" i],
+.match-score-on-dark[data-score-status="Finished" i] {
+    background-color: #f8fbfe;
+    border-radius: 3px;
+}
+
 @keyframes pulse {
 
     0%,

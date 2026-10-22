@@ -22,7 +22,7 @@
                     </h1>
                 </div>
                 <div class="rounded-xl bg-white px-2 py-3 dark:bg-[#162532]">
-                    @include('users.sports.cricket.partials.score', ['scoreDisplay' => $match['score_display'], 'status' => $match['status']])
+                    @include('users.sports.cricket.partials.score', ['scoreDisplay' => $match['score_display'], 'status' => $match['status'], 'scoreOnDark' => true])
                 </div>
                 <div class="min-w-0">
                     <h1 class="flex items-center justify-center gap-2 text-base font-bold sm:text-2xl">
@@ -66,6 +66,9 @@
                                 <div class="col-span-2 min-w-0 md:col-span-1">
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Selection</span>
                                     <div class="truncate text-sm font-extrabold text-[#0b2a40] dark:text-white" title="{{ $runner['name'] }}">{{ $runner['name'] }}</div>
+                                    @if ($checkAuthAndSubscription['display_odds'])
+                                        @include('users.sports.oddsHistory', ['history' => $runner['history'] ?? [], 'incomplete' => $runner['history_incomplete'] ?? false])
+                                    @endif
                                 </div>
 
                                 <div>
@@ -81,7 +84,7 @@
 
                                 <div class="text-right md:text-left">
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Current</span>
-                                    <span @if ($checkAuthAndSubscription['display_odds'] && $runner['current_back_odds'] > 0) tabindex="0" data-cricket-odds-tooltip="{{ $runner['initial_back_odds'] > 1 ? number_format($runner['initial_back_odds'], 2) : '—' }} {{ $runner['direction'] > 0 ? '<<' : '>>' }} {{ number_format($runner['current_back_odds'], 2) }}" @endif class="inline-flex min-w-[72px] items-center justify-center gap-1 rounded-lg border border-[#b9d8ee] bg-[#e8f5ff] px-2.5 py-1.5 font-mono text-base font-extrabold tabular-nums text-[#0b2a40] dark:border-[#3d6d8d] dark:bg-[#17364b] dark:text-white">
+                                    <span class="inline-flex min-w-[72px] items-center justify-center gap-1 rounded-lg border border-[#b9d8ee] bg-[#e8f5ff] px-2.5 py-1.5 font-mono text-base font-extrabold tabular-nums text-[#0b2a40] dark:border-[#3d6d8d] dark:bg-[#17364b] dark:text-white">
                                         @if ($checkAuthAndSubscription['display_odds'])
                                             {{ number_format($runner['current_back_odds'], 2) }}
                                         @else
@@ -116,7 +119,11 @@
 
                                 <div class="col-span-2 md:col-span-1">
                                     @if ($checkAuthAndSubscription['display_odds'])
-                                        @include('users.sports.cricket.partials.marketChart', ['history' => $runner['history']])
+                                        @if ($runner['chart_url'] ?? null)
+                                            <img src="{{ $runner['chart_url'] }}" alt="Market Chart" loading="lazy" decoding="async" class="w-full rounded-lg">
+                                        @else
+                                            <p class="py-3 text-center text-xs text-slate-400">{{ __('Market chart unavailable.') }}</p>
+                                        @endif
                                     @else
                                         @include('lock_icon')
                                     @endif

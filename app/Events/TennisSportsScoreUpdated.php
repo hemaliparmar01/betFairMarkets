@@ -28,9 +28,14 @@ class TennisSportsScoreUpdated implements ShouldBeUnique, ShouldBroadcast
     /** @var list<int> */
     public array $backoff = [5, 15, 30, 60, 120];
 
+    /** @param list<array{id: string, version: int, status: string, current_set: int, home: array, away: array}> $scores */
+    public function __construct(public array $scores = []) {}
+
     public function uniqueId(): string
     {
-        return self::class.'|'.$this->broadcastQueue;
+        $scores = $this->scores ?? [];
+
+        return self::class.'|'.$this->broadcastQueue.($scores === [] ? '' : '|'.hash('sha256', json_encode($scores, JSON_THROW_ON_ERROR)));
     }
 
     public function uniqueVia(): Repository
@@ -50,6 +55,6 @@ class TennisSportsScoreUpdated implements ShouldBeUnique, ShouldBroadcast
 
     public function broadcastWith(): array
     {
-        return ['refresh' => true];
+        return ['refresh' => true, 'scores' => $this->scores ?? []];
     }
 }

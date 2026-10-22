@@ -9,6 +9,7 @@ use App\Http\Controllers\Users\Greyhounds\GreyhoundsSyncController;
 use App\Http\Controllers\Users\HorseRacing\HorseRacingSyncController;
 use App\Http\Controllers\Users\IceHockey\IceHockeySyncController;
 use App\Http\Controllers\Users\Tennis\TennisSyncController;
+use App\Services\FootballV6Stats;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -16,6 +17,10 @@ use Illuminate\Support\Facades\Schedule;
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+Schedule::call(function () {
+    app(FootballV6Stats::class)->queueDueMatches();
+})->name('football-v6-live-statistics')->everyMinute()->withoutOverlapping(2);
 
 Schedule::call(function () {
     app(FootballSyncController::class)->syncBetFairLiveData();

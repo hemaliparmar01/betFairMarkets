@@ -991,7 +991,7 @@
                 `;
                     });
 
-                    let scoreHtml = ev.score ? `<span>· ${escapeHtml(ev.score)}</span>` : '';
+                    let scoreHtml = ev.score ? `<span>· <span class="match-score match-score-on-dark" data-score-status="${escapeHtml(ev.status)}">${escapeHtml(ev.score)}</span></span>` : '';
                     let metaHtml =
                         `${escapeHtml(ev.sportIcon)} ${escapeHtml(ev.comp)} · ${ev.status === 'LIVE' ? '● LIVE' : ev.status === 'FINISHED' ? 'FT' : '▲ UPCOMING'} · ${escapeHtml(ev.time)} ${scoreHtml}`;
 

@@ -20,15 +20,15 @@
                         @if ($match['home_team_logo'] ?? null)<img src="{{ $match['home_team_logo'] }}" alt="" class="size-7 shrink-0 object-contain" onerror="this.remove()">@endif
                         <span class="min-w-0 break-words">{{ $match['team1'] }}</span>
                     </h1>
-                    @if ($match['status'] !== 'Prematch')<p class="mt-3 text-sm font-bold sm:text-xl">{{ $match['home_score_display'] }} <span class="text-xs font-normal">{{ __('sets') }}</span></p>@endif
+                    @if ($match['status'] !== 'Prematch')<p class="mt-3 text-sm font-bold sm:text-xl"><span data-score-status="{{ $match['status'] }}" class="match-score match-score-on-dark">{{ $match['home_score_display'] }}</span> <span class="text-xs font-normal">{{ __('sets') }}</span></p>@endif
                 </div>
-                <strong class="whitespace-nowrap text-lg text-[#b9def3] sm:text-2xl">{{ $match['status'] === 'Live' ? $match['score'] : 'vs' }}</strong>
+                <strong data-score-status="{{ $match['status'] }}" class="match-score match-score-on-dark whitespace-nowrap text-lg text-[#b9def3] sm:text-2xl">{{ $match['status'] === 'Live' ? $match['score'] : 'vs' }}</strong>
                 <div class="min-w-0">
                     <h1 class="flex items-center justify-center gap-2 text-base font-bold sm:text-2xl">
                         <span class="min-w-0 break-words">{{ $match['team2'] }}</span>
                         @if ($match['away_team_logo'] ?? null)<img src="{{ $match['away_team_logo'] }}" alt="" class="size-7 shrink-0 object-contain" onerror="this.remove()">@endif
                     </h1>
-                    @if ($match['status'] !== 'Prematch')<p class="mt-3 text-sm font-bold sm:text-xl">{{ $match['away_score_display'] }} <span class="text-xs font-normal">{{ __('sets') }}</span></p>@endif
+                    @if ($match['status'] !== 'Prematch')<p class="mt-3 text-sm font-bold sm:text-xl"><span data-score-status="{{ $match['status'] }}" class="match-score match-score-on-dark">{{ $match['away_score_display'] }}</span> <span class="text-xs font-normal">{{ __('sets') }}</span></p>@endif
                 </div>
             </div>
             <div class="mt-4 text-center text-xs font-bold uppercase tracking-wide text-[#b9def3]">{{ $match['status'] }} · {{ $match['minutes'] }}</div>
@@ -51,7 +51,7 @@
                         <tbody>
                             @foreach (['home' => $match['team1'], 'away' => $match['team2']] as $side => $team)
                                 @php $score = $match[$side.'_score_data'] ?? []; @endphp
-                                <tr class="border-t border-[#dbe7f2] dark:border-[#2a3f50]"><th class="whitespace-nowrap px-3 py-2 text-left">{{ $team }}@if ($match['status'] === 'Live' && ($match['serving_side'] ?? null) === $side)<span class="ml-1 text-amber-500" title="{{ __('Serving') }}">●</span>@endif</th>@foreach ($periods as $key => $label)@php $games = $score[$key] ?? null; @endphp<td class="px-3 py-2">{{ $games !== null && $games >= 0 ? $games : '—' }}@if (isset($score[$key.'TieBreak']))<sup class="ml-0.5 text-[10px]">{{ $score[$key.'TieBreak'] }}</sup>@endif</td>@endforeach<td class="px-3 py-2 font-bold">{{ $score['current'] ?? $score['display'] ?? '—' }}</td>@if ($match['status'] === 'Live')<td class="px-3 py-2 font-bold">{{ $score['point'] ?? '—' }}</td>@endif</tr>
+                                <tr class="border-t border-[#dbe7f2] dark:border-[#2a3f50]"><th class="whitespace-nowrap px-3 py-2 text-left">{{ $team }}@if ($match['status'] === 'Live' && ($match['serving_side'] ?? null) === $side)<span class="ml-1 text-amber-500" title="{{ __('Serving') }}">●</span>@endif</th>@foreach ($periods as $key => $label)@php $games = $score[$key] ?? null; @endphp<td class="px-3 py-2">{{ $games !== null && $games >= 0 ? $games : '—' }}@if (isset($score[$key.'TieBreak']))<sup class="ml-0.5 text-[10px]">{{ $score[$key.'TieBreak'] }}</sup>@endif</td>@endforeach<td data-score-status="{{ $match['status'] }}" class="match-score px-3 py-2 font-bold">{{ $score['current'] ?? $score['display'] ?? '—' }}</td>@if ($match['status'] === 'Live')<td class="px-3 py-2 font-bold">{{ $score['point'] ?? '—' }}</td>@endif</tr>
                             @endforeach
                         </tbody>
                     </table>
@@ -101,13 +101,16 @@
                                 <div class="col-span-2 min-w-0 md:col-span-1">
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Selection</span>
                                     <div class="truncate text-sm font-extrabold text-[#0b2a40] dark:text-white" title="{{ $runner['name'] }}">{{ $runner['name'] }}</div>
+                                    @if ($checkAuthAndSubscription['display_odds'])
+                                        @include('users.sports.oddsHistory', ['history' => $runner['history'] ?? [], 'incomplete' => $runner['history_incomplete'] ?? false])
+                                    @endif
                                 </div>
 
                                 <div>
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Initial</span>
                                     <span class="font-mono text-base font-bold tabular-nums text-slate-500 dark:text-slate-300">
                                         @if ($checkAuthAndSubscription['display_odds'])
-                                            {{ $runner['initial_back_odds'] > 0 ? number_format($runner['initial_back_odds'], 2) : '—' }}
+                                            {{ $runner['initial_back_odds'] > 1 ? number_format($runner['initial_back_odds'], 2) : '—' }}
                                         @else
                                             @include('lock_icon')
                                         @endif
@@ -116,9 +119,9 @@
 
                                 <div class="text-right md:text-left">
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Current</span>
-                                    <span @if ($checkAuthAndSubscription['display_odds'] && $runner['current_back_odds'] > 0) tabindex="0" data-tennis-odds-tooltip="{{ $runner['initial_back_odds'] > 0 ? number_format($runner['initial_back_odds'], 2) : '—' }} {{ $runner['direction'] > 0 ? '<<' : '>>' }} {{ $runner['current_back_odds'] > 0 ? number_format($runner['current_back_odds'], 2) : '—' }}" @endif class="inline-flex min-w-[72px] items-center justify-center gap-1 rounded-lg border border-[#b9d8ee] bg-[#e8f5ff] px-2.5 py-1.5 font-mono text-base font-extrabold tabular-nums text-[#0b2a40] dark:border-[#3d6d8d] dark:bg-[#17364b] dark:text-white">
+                                    <span class="inline-flex min-w-[72px] items-center justify-center gap-1 rounded-lg border border-[#b9d8ee] bg-[#e8f5ff] px-2.5 py-1.5 font-mono text-base font-extrabold tabular-nums text-[#0b2a40] dark:border-[#3d6d8d] dark:bg-[#17364b] dark:text-white">
                                         @if ($checkAuthAndSubscription['display_odds'])
-                                            {{ $runner['current_back_odds'] > 0 ? number_format($runner['current_back_odds'], 2) : '—' }}
+                                            {{ number_format($runner['current_back_odds'], 2) }}
                                         @else
                                             @include('lock_icon')
                                         @endif
@@ -151,7 +154,11 @@
 
                                 <div class="col-span-2 md:col-span-1">
                                     @if ($checkAuthAndSubscription['display_odds'])
-                                        @include('users.sports.tennis.partials.marketChart', ['history' => $runner['history']])
+                                        @if ($runner['chart_url'] ?? null)
+                                            <img src="{{ $runner['chart_url'] }}" alt="Market Chart" loading="lazy" decoding="async" class="w-full rounded-lg">
+                                        @else
+                                            <p class="py-3 text-center text-xs text-slate-400">{{ __('Market chart unavailable.') }}</p>
+                                        @endif
                                     @else
                                         @include('lock_icon')
                                     @endif

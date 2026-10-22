@@ -26,7 +26,7 @@
             @php
                 $goalHighlightActive = ($event['goal_highlight_until'] ?? 0) > time();
                 $liveStats = $event['live_stats'] ?? [];
-                $preferIncidents = ($event['card_counts_updated_at'] ?? 0) > ($event['card_stats_updated_at'] ?? 0);
+                $preferIncidents = ($event['card_counts_from_timeline'] ?? false) || ($event['card_counts_updated_at'] ?? 0) > ($event['card_stats_updated_at'] ?? 0);
                 if (!isset($liveStats['corners']) && isset($event['corners']['home'], $event['corners']['away'])) {
                     $liveStats['corners'] = $event['corners'];
                 }
@@ -66,47 +66,12 @@
                                 : 0,
                     ];
                 }
-                $topStats = [
-                    'attacks' => ['label' => 'Attacks', 'percent' => false],
-                    'dangerous_attacks' => ['label' => 'Dangerous Attacks', 'percent' => false],
-                    'possession' => ['label' => 'Possession', 'percent' => true],
-                    'total_shots' => ['label' => 'Shots', 'percent' => false],
-                    'shots_on_target' => ['label' => 'On Target', 'percent' => false],
-                ];
-                $statSections = [
-                    'Shots' => [
-                        'total_shots' => ['Total Shots', false],
-                        'shots_on_target' => ['Shots on Target', false],
-                        'shots_off_target' => ['Shots off Target', false],
-                        'blocked_shots' => ['Blocked Shots', false],
-                    ],
-                    'Attacks' => [
-                        'attacks' => ['Attacks', false],
-                        'dangerous_attacks' => ['Dangerous Attacks', false],
-                        'offsides' => ['Offsides', false],
-                    ],
-                    'Passes' => [
-                        'total_passes' => ['Total Passes', false],
-                        'accurate_passes' => ['Accurate Passes', false],
-                        'pass_accuracy' => ['Pass Accuracy', true],
-                    ],
-                    'Defense' => [
-                        'fouls' => ['Fouls', false],
-                        'tackles' => ['Tackles', false],
-                        'interceptions' => ['Interceptions', false],
-                    ],
-                    'Corners & Cards' => [
-                        'corners' => ['Corners', false],
-                        'yellow_cards' => ['Yellow Cards', false],
-                        'red_cards' => ['Red Cards', false],
-                    ],
-                ];
             @endphp
             <div data-match-url="{{ route('football.matches.show', $event['sportsApiPro_match_id']) }}"
                 data-sportApi-match-id="{{ $event['sportsApiPro_match_id'] }}"
                 data-betfair-match-id="{{ $event['betfair_match_id'] }}"
                 @if ($goalHighlightActive) data-goal-highlight-until="{{ $event['goal_highlight_until'] }}" @endif
-                class="event-row grid min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)_118px_360px] items-center [background:#fafdff] [border-radius:12px] [padding:5px_12px_5px_16px] [border:1px_solid_#e6eff8] [gap:4px_12px] [transition:0.06s] [min-height:44px] dark:[background:#1a2a38] dark:[border-color:#2a3f50] dark:[&:hover]:[background:#223848] [&:hover]:[background:#f2f8ff] [&:hover]:[border-color:#c6d8ea] max-[1024px]:grid-cols-[118px_minmax(0,1fr)] max-[1024px]:gap-2 max-[480px]:grid-cols-1 max-[480px]:p-2.5 {{ $goalHighlightActive ? '!bg-[#ffe4ec] !border-[#f7a8bd] dark:!bg-[#4a2633]' : '' }}">
+                class="event-row grid min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)_148px_360px] items-center [background:#fafdff] [border-radius:12px] [padding:5px_12px_5px_16px] [border:1px_solid_#e6eff8] [gap:4px_12px] [transition:0.06s] [min-height:44px] dark:[background:#1a2a38] dark:[border-color:#2a3f50] dark:[&:hover]:[background:#223848] [&:hover]:[background:#f2f8ff] [&:hover]:[border-color:#c6d8ea] max-[1024px]:grid-cols-[148px_minmax(0,1fr)] max-[1024px]:gap-2 max-[480px]:grid-cols-1 max-[480px]:p-2.5 {{ $goalHighlightActive ? '!bg-[#ffe4ec] !border-[#f7a8bd] dark:!bg-[#4a2633]' : '' }}">
                 <div
                     class="event-left relative flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden max-[1024px]:col-span-2 max-[480px]:col-span-1">
                     <button type="button"
@@ -170,7 +135,7 @@
                             <span class="min-w-0 truncate">{{ $event['team1'] }}</span>
                         </span>
                         <span
-                            class="score-badge live-score block w-[44px] min-w-[44px] max-w-[44px] justify-self-center whitespace-nowrap px-1 text-center text-[16px] font-bold tabular-nums [font-variant-numeric:tabular-nums] [transition:color_0.3s] dark:text-[#e8edf2] dark:[&.live-score]:text-[#ff6b6b] dark:[&.finished-score]:text-[#e8edf2] [&.live-score]:text-[#d63e3e] [&.finished-score]:text-[#0b2a40] [&.upcoming-score]:text-[#8aaccc] dark:[&.upcoming-score]:text-[#5a7d99] max-[480px]:text-[14px]">{{ $event['score'] ?? '—' }}</span>
+                            data-score-status="{{ $event['status'] }}" class="score-badge match-score block w-[44px] min-w-[44px] max-w-[44px] justify-self-center whitespace-nowrap px-1 text-center text-[16px] font-bold tabular-nums [font-variant-numeric:tabular-nums] [transition:color_0.3s] max-[480px]:text-[14px]">{{ $event['score'] ?? '—' }}</span>
                         <span
                             class="team-name away flex w-full min-w-0 items-center justify-start gap-1 pl-1 text-left font-normal text-[#1f4b66] [transition:color_0.3s] dark:text-[#b0c8dd]"
                             title="{{ $event['team2'] }}">
@@ -203,11 +168,11 @@
                     </div>
                 </div>
                 <div
-                    class="event-actions flex w-[118px] items-center justify-end [gap:2px] max-[1024px]:w-[118px] max-[1024px]:justify-start max-[480px]:w-full max-[480px]:justify-center">
+                    class="event-actions flex w-[148px] items-center justify-end [gap:2px] max-[1024px]:w-[148px] max-[1024px]:justify-start max-[480px]:w-full max-[480px]:justify-center">
                     <button type="button"
                         class="live-stat-icon bg-transparent border-0 [color:#d63e3e] [font-size:15px] [padding:4px_4px] cursor-pointer [border-radius:8px] [width:28px] text-center [transition:0.2s] disabled:cursor-not-allowed disabled:opacity-30 dark:[color:#6a8aa8] dark:[&:hover]:[background:#2a4050] dark:[&:hover]:[color:#e8edf2] [&:hover]:[background:#dce8f5] [&:hover]:[color:#b52a2a]"
                         @if ($checkAuthAndSubscription['display_odds'])
-                            data-action="livestats" data-match-id="{{ $event['sportsApiPro_match_id'] }}"
+                            data-statistics-url="{{ route('football.matches.statistics', $event['sportsApiPro_match_id']) }}" data-action="livestats" data-match-id="{{ $event['sportsApiPro_match_id'] }}"
                             aria-expanded="false" aria-controls="live-stats-{{ $event['sportsApiPro_match_id'] }}"
                             title="Live Statistics"
                         @else
@@ -217,12 +182,25 @@
                         <i class="fas fa-wave-square"></i>
                     </button>
                     <button type="button"
+                        class="action-icon w-7 cursor-pointer rounded-lg border-0 bg-transparent px-1 py-1 text-center text-[15px] text-[#427292] transition hover:bg-[#dce8f5] hover:text-[#0b2a40] disabled:cursor-not-allowed disabled:opacity-30 dark:text-[#6a8aa8] dark:hover:bg-[#2a4050] dark:hover:text-[#e8edf2]"
+                        aria-label="{{ __('Quick Stats') }}"
+                        @if ($checkAuthAndSubscription['display_odds'])
+                            data-statistics-url="{{ route('football.matches.statistics', $event['sportsApiPro_match_id']) }}" data-action="quickstats" data-match-id="{{ $event['sportsApiPro_match_id'] }}"
+                            aria-expanded="false" aria-controls="quick-stats-{{ $event['sportsApiPro_match_id'] }}"
+                            title="Quick Stats"
+                        @else
+                            disabled title="Quick Stats (requires subscription)"
+                        @endif
+                        @disabled($event['status'] !== 'Live')>
+                        <i class="fas fa-chart-pie" aria-hidden="true"></i>
+                    </button>
+                    <button type="button"
                         class="action-icon bg-transparent border-0 [color:#427292] [font-size:15px] [padding:4px_4px] cursor-pointer [border-radius:8px] [width:28px] text-center [transition:0.2s] dark:[color:#6a8aa8] dark:[&:hover]:[background:#2a4050] dark:[&:hover]:[color:#e8edf2] [&:hover]:[background:#dce8f5] [&:hover]:[color:#0b2a40] [&.disabled]:[opacity:0.3] [&.disabled]:[pointer-events:none]"
-                        data-action="chart" title="Chart"><i class="fas fa-chart-simple"></i></button>
+                        data-action="chart" data-chart-url="{{ route('football.matches.show', $event['sportsApiPro_match_id']) }}" title="{{ __('Markets & odds charts') }}" aria-label="{{ __('Markets & odds charts') }}"><i class="fas fa-chart-simple"></i></button>
                     <button type="button"
                         class="action-icon bg-transparent border-0 [color:#427292] [font-size:15px] [padding:4px_4px] cursor-pointer [border-radius:8px] [width:28px] text-center [transition:0.2s] dark:[color:#6a8aa8] disabled:cursor-not-allowed disabled:opacity-30 dark:[&:hover]:[background:#2a4050] dark:[&:hover]:[color:#e8edf2] [&:hover]:[background:#dce8f5] [&:hover]:[color:#0b2a40] [&.disabled]:[opacity:0.3] [&.disabled]:[pointer-events:none]"
                         @if ($checkAuthAndSubscription['display_odds'])
-                            data-action="stats" title="Statistics"
+                            data-action="stats" data-match-id="{{ $event['sportsApiPro_match_id'] }}" data-statistics-url="{{ route('football.matches.statistics', $event['sportsApiPro_match_id']) }}" aria-expanded="false" aria-controls="statistics-{{ $event['sportsApiPro_match_id'] }}" title="Statistics"
                         @else
                             disabled title="Statistics (requires subscription)"
                         @endif
@@ -255,7 +233,7 @@
                                     <div class="relative grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 bg-[#08b9ca] px-5 py-2">
                                         <span class="min-w-0 break-words text-right">{{ $event['team1'] }}</span>
                                         <span class="rounded bg-[#343434] px-1.5 py-1">
-                                            <strong data-timeline-detail-score class="block whitespace-nowrap text-[#65cf8a]">{{ $event['score'] }}</strong>
+                                            <strong data-timeline-detail-score data-score-status="{{ $event['status'] }}" class="match-score match-score-on-dark block whitespace-nowrap">{{ $event['score'] }}</strong>
                                             <span data-timeline-detail-minute>{{ $timeline['minute_label'] }}</span>
                                         </span>
                                         <span class="min-w-0 break-words text-left">{{ $event['team2'] }}</span>
@@ -305,7 +283,6 @@
                                         @foreach ($timeline['untimed_events'] as $side => $incidents)
                                             @if ($incidents !== [])
                                                 <div class="flex min-w-0 items-start gap-1" data-timeline-untimed-side="{{ $side }}">
-                                                    <span class="w-7 shrink-0 leading-[14px]" title="{{ $side === 'home' ? $event['team1'] : $event['team2'] }}">{{ $side === 'home' ? __('Home') : __('Away') }}</span>
                                                     <div class="flex min-w-0 flex-wrap gap-0.5">
                                                         @foreach ($incidents as $incident)
                                                             @include('users.sports.football.partials.timelineEvent', ['incident' => $incident, 'positioned' => false])
@@ -369,7 +346,11 @@
                     </div>
                 @endif
             </div>
+            @if ($checkAuthAndSubscription['display_odds'])
+                @include('users.sports.football.partials.statistics', ['event' => $event])
+            @endif
             @if ($checkAuthAndSubscription['display_odds'] && $event['status'] === 'Live')
+                @include('users.sports.football.partials.quickStats', ['event' => $event, 'liveStats' => $liveStats])
                 <div id="live-stats-{{ $event['sportsApiPro_match_id'] }}"
                     data-live-stats-panel="{{ $event['sportsApiPro_match_id'] }}" role="dialog" aria-modal="true"
                     aria-label="Live statistics for {{ $event['team1'] }} vs {{ $event['team2'] }}"
@@ -388,7 +369,7 @@
                                 <span
                                     class="max-w-[36%] text-sm font-semibold sm:text-base">{{ $event['team1'] }}</span>
                                 <span
-                                    class="text-2xl font-extrabold tracking-wider sm:text-4xl">{{ $event['score'] }}</span>
+                                    data-score-status="{{ $event['status'] }}" class="match-score match-score-on-dark text-2xl font-extrabold tracking-wider sm:text-4xl">{{ $event['score'] }}</span>
                                 <span
                                     class="max-w-[36%] text-sm font-semibold sm:text-base">{{ $event['team2'] }}</span>
                             </div>
@@ -401,88 +382,9 @@
                             </div>
                         </div>
 
-                        @if ($liveStats === [])
-                            <div class="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">Live
-                                statistics are waiting for provider data.</div>
-                        @else
-                            <div
-                                class="border-b border-slate-200 bg-slate-50 px-4 py-5 dark:border-slate-700 dark:bg-[#1b2d3b] sm:px-7">
-                                <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-                                    @foreach ($topStats as $statKey => $statMeta)
-                                        @if (isset($liveStats[$statKey]['home'], $liveStats[$statKey]['away']))
-                                            <div
-                                                class="rounded-xl border border-slate-200 bg-white p-3 text-center dark:border-slate-700 dark:bg-[#203746]">
-                                                <div
-                                                    class="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                                                    {{ $statMeta['label'] }}</div>
-                                                <div
-                                                    class="flex items-center justify-center gap-2 text-sm font-extrabold text-[#245f84] dark:text-[#8ec8e9]">
-                                                    <span>{{ $liveStats[$statKey]['home'] + 0 }}{{ $statMeta['percent'] ? '%' : '' }}</span>
-                                                    <span class="text-[10px] font-medium text-slate-400">—</span>
-                                                    <span>{{ $liveStats[$statKey]['away'] + 0 }}{{ $statMeta['percent'] ? '%' : '' }}</span>
-                                                </div>
-                                            </div>
-                                        @endif
-                                    @endforeach
-                                </div>
-                            </div>
-
-                            <div class="grid gap-6 p-4 sm:p-7 lg:grid-cols-2">
-                                @foreach ($statSections as $sectionTitle => $sectionStats)
-                                    @php
-                                        $availableSectionStats = array_filter(
-                                            $sectionStats,
-                                            static fn($stat, $key) => isset(
-                                                $liveStats[$key]['home'],
-                                                $liveStats[$key]['away'],
-                                            ),
-                                            ARRAY_FILTER_USE_BOTH,
-                                        );
-                                    @endphp
-                                    @if ($availableSectionStats !== [])
-                                        <section>
-                                            <h3
-                                                class="mb-4 flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-[#245f84] before:h-4 before:w-1 before:rounded-full before:bg-red-500 before:content-[''] dark:text-[#8ec8e9]">
-                                                {{ $sectionTitle }}</h3>
-                                            <div class="space-y-4">
-                                                @foreach ($availableSectionStats as $statKey => [$label, $isPercent])
-                                                    @php
-                                                        $homeValue = $liveStats[$statKey]['home'];
-                                                        $awayValue = $liveStats[$statKey]['away'];
-                                                        $totalValue = $homeValue + $awayValue;
-                                                        $homeWidth =
-                                                            $totalValue > 0
-                                                                ? round(($homeValue / $totalValue) * 100, 2)
-                                                                : 50;
-                                                        $awayWidth = 100 - $homeWidth;
-                                                    @endphp
-                                                    <div>
-                                                        <div
-                                                            class="mb-1 flex items-center justify-between gap-3 text-xs">
-                                                            <span
-                                                                class="min-w-9 font-bold text-[#245f84] dark:text-[#8ec8e9]">{{ $homeValue + 0 }}{{ $isPercent ? '%' : '' }}</span>
-                                                            <span
-                                                                class="text-center font-semibold text-slate-500 dark:text-slate-300">{{ $label }}</span>
-                                                            <span
-                                                                class="min-w-9 text-right font-bold text-[#245f84] dark:text-[#8ec8e9]">{{ $awayValue + 0 }}{{ $isPercent ? '%' : '' }}</span>
-                                                        </div>
-                                                        <div
-                                                            class="flex h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-                                                            <span
-                                                                class="h-full bg-red-500 transition-[width] duration-500"
-                                                                style="width: {{ $homeWidth }}%"></span>
-                                                            <span
-                                                                class="h-full bg-[#1f3a52] transition-[width] duration-500 dark:bg-[#8aaccc]"
-                                                                style="width: {{ $awayWidth }}%"></span>
-                                                        </div>
-                                                    </div>
-                                                @endforeach
-                                            </div>
-                                        </section>
-                                    @endif
-                                @endforeach
-                            </div>
-                        @endif
+                        <div class="p-4 sm:p-7">
+                            @include('users.sports.football.partials.statisticsTable', ['event' => $event])
+                        </div>
                     </div>
                 </div>
             @endif

@@ -1,3 +1,4 @@
+import { renderOddsHistory } from '../oddsHistory';
 let oddsTooltip = null;
 const hideOddsTooltip = () => { oddsTooltip?.remove(); oddsTooltip = null; };
 const showOddsTooltip = (event) => {
@@ -41,11 +42,88 @@ if (dashboard) {
     let refreshTimer = null;
     let activeModal = null;
     let highlightTimer = null;
+    let pointHighlightTimer = null;
+    const pointStates = new Map();
     const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
     const number = (value) => Number(value) > 0 ? Number(value).toFixed(2) : '—';
     const parse = (value) => { try { return JSON.parse(value ?? '{}'); } catch { return {}; } };
     const loader = () => dashboard.querySelector('[data-tennis-lazy-loader]');
     const content = () => dashboard.querySelector(markets ? '[data-tennis-market-rows]' : '.fixtures-container');
+    const pointValue = (value) => value == null ? null : String(value).toUpperCase().replace(/^AD$/, 'A');
+    const pointWinners = (previous, current) => {
+        if (['home', 'away'].some((side) => pointValue(previous[side]?.point) === null || pointValue(current[side]?.point) === null)) return [];
+        if (pointValue(current.home.point) === '0' && pointValue(current.away.point) === '0') return [];
+        const period = `period${current.current_set ?? 1}`;
+        const newGame = previous.current_set !== current.current_set || previous.home?.[period] !== current.home?.[period] || previous.away?.[period] !== current.away?.[period];
+        if (newGame) {
+            return ['home', 'away'].filter((side) => pointValue(current[side].point) !== '0');
+        }
+        const winners = new Set();
+        for (const side of ['home', 'away']) {
+            const other = side === 'home' ? 'away' : 'home';
+            const before = pointValue(previous[side].point); const after = pointValue(current[side].point);
+            if (before !== after && (after === 'A' || Number(after) > Number(before))) winners.add(side);
+            if (before === 'A' && after === '40') winners.add(other);
+        }
+        return [...winners];
+    };
+    function paintPoints(row, state) {
+        row.dataset.matchStatus = state.status;
+        row.querySelectorAll('.match-score[data-score-status]').forEach((score) => { score.dataset.scoreStatus = state.status; });
+        const points = row.querySelector('[data-tennis-points]');
+        if (!points) return;
+        const visible = state.status === 'Live' && state.home?.point != null && state.away?.point != null;
+        points.classList.toggle('hidden', !visible);
+        for (const side of ['home', 'away']) {
+            const number = points.querySelector(`[data-tennis-point="${side}"]`);
+            number.textContent = state[side]?.point ?? '—';
+            number.classList.toggle('highlight-purple', visible && state.highlights[side] > Date.now());
+        }
+        const stats = parse(row.dataset.tennisStats);
+        row.dataset.tennisStats = JSON.stringify({ ...stats, home: state.home, away: state.away, current_set: state.current_set });
+        row.dataset.tennisScoreVersion = String(state.version);
+    }
+    function expirePointHighlights() {
+        window.clearTimeout(pointHighlightTimer);
+        let nextExpiry = Infinity;
+        dashboard.querySelectorAll('[data-tennis-points]').forEach((points) => {
+            const row = points.closest('[data-match-id]');
+            const state = pointStates.get(row.dataset.matchId);
+            if (!state) return;
+            for (const side of ['home', 'away']) {
+                const remaining = state.highlights[side] - Date.now();
+                points.querySelector(`[data-tennis-point="${side}"]`).classList.toggle('highlight-purple', state.status === 'Live' && remaining > 0);
+                if (remaining > 0) nextExpiry = Math.min(nextExpiry, remaining);
+            }
+        });
+        pointHighlightTimer = Number.isFinite(nextExpiry) ? window.setTimeout(expirePointHighlights, nextExpiry) : null;
+    }
+    function rememberPoints(row, score, liveUpdate = false) {
+        const previous = pointStates.get(row.dataset.matchId);
+        const version = Number(score.version ?? 0);
+        if (previous && previous.version > 0 && version <= previous.version) { paintPoints(row, previous); return; }
+        const highlights = { ...(previous?.highlights ?? { home: 0, away: 0 }) };
+        if (previous && liveUpdate) {
+            for (const side of ['home', 'away']) {
+                if (pointValue(previous[side]?.point) !== pointValue(score[side]?.point)) highlights[side] = 0;
+            }
+            const winners = score.status === 'Live' ? pointWinners(previous, score) : [];
+            for (const winner of winners) highlights[winner] = Date.now() + 5000;
+        }
+        const state = { ...score, version, highlights };
+        pointStates.set(row.dataset.matchId, state);
+        paintPoints(row, state);
+    }
+    function syncPointRows() {
+        const visibleIds = new Set();
+        dashboard.querySelectorAll('[data-tennis-stats][data-match-id]').forEach((row) => {
+            const data = parse(row.dataset.tennisStats);
+            visibleIds.add(row.dataset.matchId);
+            rememberPoints(row, { version: Number(row.dataset.tennisScoreVersion ?? 0), status: row.dataset.tennisStatus, current_set: data.current_set, home: data.home ?? {}, away: data.away ?? {} }, true);
+        });
+        for (const id of pointStates.keys()) { if (!visibleIds.has(id)) pointStates.delete(id); }
+        expirePointHighlights();
+    }
     const showError = (message) => {
         let notice = dashboard.querySelector('[data-tennis-error]');
         if (!notice) { notice = document.createElement('p'); notice.dataset.tennisError = ''; notice.className = 'p-3 text-center text-sm text-red-600'; dashboard.prepend(notice); }
@@ -103,6 +181,7 @@ if (dashboard) {
             loader().dataset.nextPage = result.has_more ? String(loadedPages + 1) : '';
             loader().classList.toggle('hidden', !result.has_more);
             dashboard.querySelector('[data-tennis-error]')?.remove();
+            syncPointRows();
             if (activeModal) renderModal();
             expireHighlights();
         } catch (error) { showError(error.message); }
@@ -133,13 +212,14 @@ if (dashboard) {
         const modal = dashboard.querySelector('#tennisModal');
         const panel = modal.querySelector('[data-tennis-modal-panel]');
         const scrollTop = panel.scrollTop;
+        const scoreStatus = escape(row.dataset.matchStatus ?? row.dataset.tennisStatus ?? '');
         let title = ''; let body = '';
         if (activeModal.action === 'stats') {
             const data = parse(row.dataset.tennisStats); title = 'Live Match Statistics';
             if (data.surface) body += `<p class="mb-3 text-sm text-[#5a7d99]">${escape(data.surface)}</p>`;
             body += `<div class="grid gap-3 sm:grid-cols-2">${[['home', data.team1], ['away', data.team2]].map(([side, team]) => {
                 const score = data[side] ?? {};
-                return `<section class="rounded-xl border border-[#d4e0ec] p-4"><h3 class="mb-2 font-bold">${escape(team)}${data.serving === side ? ' <span class="text-amber-500">● Serving</span>' : ''}</h3><p class="mb-2 text-xl font-bold">${escape(score.current ?? score.display ?? '—')} <small class="text-xs font-normal">sets</small></p>${score.point != null ? `<p class="mb-2 text-sm">Current point: <b>${escape(score.point)}</b></p>` : ''}${[1, 2, 3, 4, 5].filter((set) => score[`period${set}`] != null).map((set) => `<p class="py-1">${escape(data.periods?.[`period${set}`] ?? `Set ${set}`)}: <b>${escape(score[`period${set}`])}</b>${score[`period${set}TieBreak`] != null ? ` <small>(TB ${escape(score[`period${set}TieBreak`])})</small>` : ''}</p>`).join('')}</section>`;
+                return `<section class="rounded-xl border border-[#d4e0ec] p-4"><h3 class="mb-2 font-bold">${escape(team)}${data.serving === side ? ' <span class="text-amber-500">● Serving</span>' : ''}</h3><p class="mb-2 text-xl font-bold"><span class="match-score" data-score-status="${scoreStatus}">${escape(score.current ?? score.display ?? '—')}</span> <small class="text-xs font-normal">sets</small></p>${score.point != null ? `<p class="mb-2 text-sm">Current point: <b>${escape(score.point)}</b></p>` : ''}${[1, 2, 3, 4, 5].filter((set) => score[`period${set}`] != null).map((set) => `<p class="py-1">${escape(data.periods?.[`period${set}`] ?? `Set ${set}`)}: <b>${escape(score[`period${set}`])}</b>${score[`period${set}TieBreak`] != null ? ` <small>(TB ${escape(score[`period${set}TieBreak`])})</small>` : ''}</p>`).join('')}</section>`;
             }).join('')}</div>`;
             const statistics = Array.isArray(data.statistics) ? data.statistics : [data.statistics];
             body += statistics.map((period) => `<h3 class="mt-5 text-xs font-bold uppercase text-[#5a7d99]">${escape(period?.period === 'ALL' ? 'Match' : period?.period ?? '')}</h3>${(period?.groups ?? []).map((group) => `<h4 class="mt-3 font-bold">${escape(group.groupName)}</h4>${(group.statisticsItems ?? []).map((item) => `<div class="grid grid-cols-[1fr_2fr_1fr] border-b border-[#e3ecf5] py-2 text-center text-sm"><span>${escape(item.home ?? item.homeValue ?? '—')}</span><span>${escape(item.name)}</span><span>${escape(item.away ?? item.awayValue ?? '—')}</span></div>`).join('')}`).join('')}`).join('');
@@ -160,12 +240,12 @@ if (dashboard) {
             body = `<p class="mb-4 text-sm">${data.locked ? 'Voting closes when the match starts.' : data.vote ? 'Your prediction has been recorded.' : 'Who will win this match?'}</p><div class="grid gap-3">${Object.entries(data.choices ?? {}).map(([value, label]) => `<button type="button" data-action="vote" data-value="${escape(value)}" ${data.locked || data.vote ? 'disabled' : ''} class="rounded-xl border border-[#b9d7f3] p-3 text-left disabled:cursor-default ${data.vote === value ? 'bg-[#d5edff] text-[#1a6b9c]' : ''}"><b>${escape(label)}</b><span class="float-right">${Number(data.counts?.[value] ?? 0)} votes · ${total ? Math.round(Number(data.counts?.[value] ?? 0) / total * 100) : 0}%</span></button>`).join('')}</div>`;
         } else {
             const data = parse(row.dataset.tennisMarket); title = data.title ?? 'Market Details';
-            body = `<p class="mb-2 font-bold">${escape(data.team1)} vs ${escape(data.team2)}</p><p class="mb-4 text-sm">${escape(data.score)} · ${escape(data.status)} · ${escape(data.minutes)}</p>`;
+            body = `<p class="mb-2 font-bold">${escape(data.team1)} vs ${escape(data.team2)}</p><p class="mb-4 text-sm"><span class="match-score" data-score-status="${escape(data.status)}">${escape(data.score)}</span> · ${escape(data.status)} · ${escape(data.minutes)}</p>`;
             if (data.locked) body += '<p>Login with an active subscription to view odds.</p>';
             else body += `<div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr>${['Selection', 'Initial', 'Back', 'Size', 'Lay', 'Size'].map((label) => `<th class="px-2 py-2">${label}</th>`).join('')}</tr></thead><tbody>${(data.runners ?? []).map((runner) => {
                 const initial = Number(runner.initialBackOdds ?? 0); const current = Number(runner.currentBackOdds ?? runner.backOdds ?? 0);
                 const arrow = initial > 0 && current > 0 ? current > initial ? ' ↑' : current < initial ? ' ↓' : '' : '';
-                return `<tr class="border-t border-[#e3ecf5]"><td class="px-2 py-3">${escape(runner.runner)}</td>${[initial, current, runner.backSize, runner.layOdds, runner.laySize].map((value, index) => `<td ${index === 1 && current > 0 ? `tabindex="0" data-tennis-odds-tooltip="${number(initial)} ${current > initial ? '&lt;&lt;' : '&gt;&gt;'} ${number(current)}"` : ''} class="whitespace-nowrap px-2 py-3 font-semibold">${number(value)}${index === 1 ? arrow : ''}</td>`).join('')}</tr>`;
+                return `<tr class="border-t border-[#e3ecf5]"><td class="px-2 py-3">${escape(runner.runner)}${renderOddsHistory(runner)}</td>${[initial, current, runner.backSize, runner.layOdds, runner.laySize].map((value, index) => `<td ${index === 1 && current > 0 ? `tabindex="0" data-tennis-odds-tooltip="${number(initial)} ${current > initial ? '&lt;&lt;' : '&gt;&gt;'} ${number(current)}"` : ''} class="whitespace-nowrap px-2 py-3 font-semibold">${number(value)}${index === 1 ? arrow : ''}</td>`).join('')}</tr>`;
             }).join('')}</tbody></table></div><a class="mt-4 inline-block rounded-xl bg-[#0b2a40] px-4 py-2 text-sm font-bold text-white" href="${escape(row.dataset.tennisMatchUrl)}">Match markets &amp; charts →</a>`;
         }
         hideOddsTooltip();
@@ -204,7 +284,18 @@ if (dashboard) {
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeModal(); });
     new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) load({ append: true }); }, { rootMargin: '100px' }).observe(loader());
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleRefresh(); });
-    const subscribe = () => window.Echo?.channel('sports.tennis.live').listen('.score.updated', scheduleRefresh);
+    const receiveScoreUpdate = (event) => {
+        const rows = new Map([...dashboard.querySelectorAll('[data-tennis-points]')].map((points) => { const row = points.closest('[data-match-id]'); return [row.dataset.matchId, row]; }));
+        for (const score of event.scores ?? []) {
+            const row = rows.get(String(score.id));
+            if (row) rememberPoints(row, score, true);
+        }
+        expirePointHighlights();
+        if (activeModal?.action === 'stats') renderModal();
+        scheduleRefresh();
+    };
+    const subscribe = () => window.Echo?.channel('sports.tennis.live').listen('.score.updated', receiveScoreUpdate);
     if (window.Echo) subscribe(); else window.addEventListener('load', subscribe, { once: true });
     expireHighlights();
+    syncPointRows();
 }

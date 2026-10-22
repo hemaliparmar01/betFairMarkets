@@ -110,7 +110,8 @@ trait HorseRacingTrait
 
     public function getHorseRacingMatchDetail(string $matchId): ?array
     {
-        $match = array_find(getInRedis('HorseRacing:matches') ?? [], static fn (array $race): bool => (string) $race['betfair_match_id'] === $matchId);
+        // $match = array_find(getInRedis('HorseRacing:matches') ?? [], static fn (array $race): bool => (string) $race['betfair_match_id'] === $matchId);
+        $match = collect(getInRedis('HorseRacing:matches') ?? [])->first(static fn (array $race): bool => (string) ($race['betfair_match_id'] ?? '') === $matchId);
         if ($match === null) {
             $stored = HorseRacingMatch::query()->with('markets')->where('betfair_match_id', $matchId)->first();
             if ($stored === null) {
@@ -122,7 +123,7 @@ trait HorseRacingTrait
                 $match['markets'][$runner->market_id.'_'.$runner->market_type][] = $runner->payload;
             }
         }
-        $match = prepareMatchOddsMonitoring($match);
+        // $match = prepareMatchOddsMonitoring($match);
         $match['id'] = $matchId;
         $match['status'] = $match['result_status'];
         $match['minutes'] = $this->calculateMinutes($match);

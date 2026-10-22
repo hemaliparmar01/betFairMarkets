@@ -4,7 +4,7 @@ const getSelectedFilters = () => {
 
     return {
         type: activePill?.dataset.filter ?? null,
-        market_name: marketDropdown?.value ?? null,
+        market_name: marketDropdown?.value || 'MATCH_ODDS',
     };
 };
 
@@ -64,6 +64,9 @@ let footballPage = 1;
 let footballHasMore = footballLazyLoader?.dataset.hasMore === 'true';
 let footballLoading = false;
 let footballPendingRequest = null;
+let footballPendingRealtime = false;
+let footballRealtimeTimer = null;
+const footballPendingPredictions = [];
 
 const updateFootballLazyLoader = (hasMore, nextPage = null) => {
     footballHasMore = Boolean(hasMore);
@@ -127,11 +130,145 @@ const scheduleGoalHighlights = () => {
 
 let openLiveStatsMatchId = null;
 let openPredictionMatchId = null;
+let openQuickStatsMatchId = null;
+
+let openStatisticsMatchId = null;
+const statisticsRequests = new Map();
+
+const closeStatisticsPanel = (restoreFocus = true) => {
+    if (openStatisticsMatchId === null) return;
+    const matchId = CSS.escape(openStatisticsMatchId);
+    document.querySelector(`[data-statistics-panel="${matchId}"]`)?.classList.add('hidden');
+    const button = document.querySelector(`[data-action="stats"][data-match-id="${matchId}"]`);
+    button?.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) button?.focus({ preventScroll: true });
+    openStatisticsMatchId = null;
+    if (openQuickStatsMatchId === null && openLiveStatsMatchId === null && openPredictionMatchId === null) {
+        document.body.classList.remove('overflow-hidden');
+    }
+};
+
+const restoreStatisticsPanel = () => {
+    if (openStatisticsMatchId === null) return;
+    const matchId = CSS.escape(openStatisticsMatchId);
+    const panel = document.querySelector(`[data-statistics-panel="${matchId}"]`);
+    const button = document.querySelector(`[data-action="stats"][data-match-id="${matchId}"]`);
+    if (!panel || !button || button.disabled) {
+        closeStatisticsPanel(false);
+        return;
+    }
+    panel.classList.remove('hidden');
+    panel.querySelector('[data-statistics-loading]').hidden = !statisticsRequests.has(openStatisticsMatchId);
+    button.setAttribute('aria-expanded', 'true');
+    document.body.classList.add('overflow-hidden');
+};
+
+const loadFootballStatistics = async (button, scope = 'all') => {
+    const matchId = button.dataset.matchId;
+    if (statisticsRequests.has(matchId)) {
+        await statisticsRequests.get(matchId);
+        if (scope === 'live') return;
+    }
+    const panel = () => document.querySelector(`[data-statistics-panel="${CSS.escape(matchId)}"]`);
+    const error = panel()?.querySelector('[data-statistics-error]');
+    if (error) error.hidden = true;
+    const url = new URL(button.dataset.statisticsUrl, window.location.origin);
+    url.searchParams.set('scope', scope);
+    const promise = (async () => {
+        try {
+            const response = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+            if (!response.ok) throw new Error('Statistics could not be loaded. Please try again.');
+            const result = await response.json();
+            const body = panel()?.querySelector('[data-statistics-body]');
+            if (body && scope === 'all') body.innerHTML = result.html;
+            await callFixtureData(getSelectedFilters(), { preserveLoaded: true, realtime: true });
+        } catch (requestError) {
+            const currentError = panel()?.querySelector('[data-statistics-error]');
+            if (currentError) {
+                currentError.textContent = requestError.message;
+                currentError.hidden = false;
+            }
+        } finally {
+            statisticsRequests.delete(matchId);
+            const loading = panel()?.querySelector('[data-statistics-loading]');
+            if (loading) loading.hidden = true;
+        }
+    })();
+    statisticsRequests.set(matchId, promise);
+    const loading = panel()?.querySelector('[data-statistics-loading]');
+    if (loading) loading.hidden = false;
+    await promise;
+};
+
+const closeQuickStatsPanel = (restoreFocus = true) => {
+    if (openQuickStatsMatchId === null) {
+        return;
+    }
+
+    const matchId = CSS.escape(openQuickStatsMatchId);
+    document.querySelector(`[data-quick-stats-panel="${matchId}"]`)?.classList.add('hidden');
+    const button = document.querySelector(`[data-action="quickstats"][data-match-id="${matchId}"]`);
+    button?.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) button?.focus({ preventScroll: true });
+    openQuickStatsMatchId = null;
+    if (openLiveStatsMatchId === null && openPredictionMatchId === null && openStatisticsMatchId === null) {
+        document.body.classList.remove('overflow-hidden');
+    }
+};
+
+const restoreQuickStatsPanel = () => {
+    if (openQuickStatsMatchId === null) {
+        return;
+    }
+
+    const matchId = CSS.escape(openQuickStatsMatchId);
+    const panel = document.querySelector(`[data-quick-stats-panel="${matchId}"]`);
+    const button = document.querySelector(`[data-action="quickstats"][data-match-id="${matchId}"]`);
+    if (!panel || !button || button.disabled) {
+        closeQuickStatsPanel(false);
+        return;
+    }
+
+    panel.classList.remove('hidden');
+    button.setAttribute('aria-expanded', 'true');
+    document.body.classList.add('overflow-hidden');
+    if (!panel.contains(document.activeElement)) {
+        panel.querySelector('[data-close-quick-stats]')?.focus({ preventScroll: true });
+    }
+};
+
+const preserveQuickStatsPanel = (incoming) => {
+    if (openQuickStatsMatchId === null) return;
+    const selector = `[data-quick-stats-panel="${CSS.escape(openQuickStatsMatchId)}"]`;
+    const panel = document.querySelector(selector);
+    const updated = incoming.querySelector(selector);
+    if (!panel || !updated) return;
+
+    panel.querySelectorAll('[data-quick-stat]').forEach((metric) => {
+        const next = updated.querySelector(`[data-quick-stat="${metric.dataset.quickStat}"]`);
+        if (!next) return;
+        metric.dataset.homeFill = next.dataset.homeFill;
+        if (metric.innerHTML !== next.innerHTML) metric.innerHTML = next.innerHTML;
+    });
+    panel.querySelectorAll('[data-quick-count]').forEach((count) => {
+        const next = updated.querySelector(`[data-quick-count="${count.dataset.quickCount}"]`);
+        if (next) count.textContent = next.textContent;
+    });
+    const score = panel.querySelector('[data-score-status]');
+    const nextScore = updated.querySelector('[data-score-status]');
+    if (score && nextScore) {
+        score.textContent = nextScore.textContent;
+        score.dataset.scoreStatus = nextScore.dataset.scoreStatus;
+    }
+    const unavailable = panel.querySelector('[data-quick-unavailable]');
+    if (unavailable) unavailable.hidden = updated.querySelector('[data-quick-unavailable]')?.hidden ?? true;
+    updated.replaceWith(panel);
+};
 
 const closeLiveStatsPanel = () => {
     document.querySelectorAll('[data-live-stats-panel]').forEach((item) => item.classList.add('hidden'));
     document.querySelectorAll('[data-action="livestats"]').forEach((item) => item.setAttribute('aria-expanded', 'false'));
-    if (openPredictionMatchId === null) {
+    if (openPredictionMatchId === null && openQuickStatsMatchId === null && openStatisticsMatchId === null) {
         document.body.classList.remove('overflow-hidden');
     }
     openLiveStatsMatchId = null;
@@ -140,7 +277,7 @@ const closeLiveStatsPanel = () => {
 const closePredictionPanel = () => {
     document.querySelectorAll('[data-prediction-panel]').forEach((item) => item.classList.add('hidden'));
     document.querySelectorAll('[data-action="prediction"]').forEach((item) => item.setAttribute('aria-expanded', 'false'));
-    if (openLiveStatsMatchId === null) {
+    if (openLiveStatsMatchId === null && openQuickStatsMatchId === null && openStatisticsMatchId === null) {
         document.body.classList.remove('overflow-hidden');
     }
     openPredictionMatchId = null;
@@ -190,6 +327,56 @@ document.addEventListener('click', (event) => {
         return;
     }
 
+    const chartButton = event.target.closest('[data-action="chart"][data-chart-url]');
+    if (chartButton && !chartButton.disabled) {
+        window.location.href = chartButton.dataset.chartUrl;
+        return;
+    }
+
+    const statisticsPanel = event.target.closest('[data-statistics-panel]');
+    if (event.target.closest('[data-close-statistics]') || (statisticsPanel && event.target === statisticsPanel)) {
+        closeStatisticsPanel();
+        return;
+    }
+    const statisticsButton = event.target.closest('[data-action="stats"][data-statistics-url]');
+    if (statisticsButton && !statisticsButton.disabled) {
+        const shouldOpen = openStatisticsMatchId !== statisticsButton.dataset.matchId;
+        closeQuickStatsPanel(false);
+        closeLiveStatsPanel();
+        closePredictionPanel();
+        closeStatisticsPanel(false);
+        if (shouldOpen) {
+            openStatisticsMatchId = statisticsButton.dataset.matchId;
+            restoreStatisticsPanel();
+            document.querySelector(`[data-statistics-panel="${CSS.escape(openStatisticsMatchId)}"] [data-close-statistics]`)?.focus({ preventScroll: true });
+            loadFootballStatistics(statisticsButton);
+        }
+        return;
+    }
+
+    const quickStatsPanel = event.target.closest('[data-quick-stats-panel]');
+    if (event.target.closest('[data-close-quick-stats]') || (quickStatsPanel && event.target === quickStatsPanel)) {
+        closeQuickStatsPanel();
+        return;
+    }
+
+    const quickStatsButton = event.target.closest('[data-action="quickstats"]');
+    if (quickStatsButton) {
+        if (quickStatsButton.disabled) return;
+        const panel = document.querySelector(`[data-quick-stats-panel="${CSS.escape(quickStatsButton.dataset.matchId)}"]`);
+        if (!panel) return;
+        const shouldOpen = panel.classList.contains('hidden');
+        closeQuickStatsPanel(false);
+        closeLiveStatsPanel();
+        closePredictionPanel();
+        closeStatisticsPanel(false);
+        if (shouldOpen) {
+            openQuickStatsMatchId = quickStatsButton.dataset.matchId;
+            restoreQuickStatsPanel();
+        }
+        return;
+    }
+
     const timeline = event.target.closest('[data-football-timeline]');
     if (timeline) {
         const selected = event.target.closest('[data-timeline-event]');
@@ -234,6 +421,9 @@ document.addEventListener('click', (event) => {
         }
 
         const shouldOpen = panel.classList.contains('hidden');
+        closeQuickStatsPanel(false);
+        closeLiveStatsPanel();
+        closeStatisticsPanel(false);
         closePredictionPanel();
         if (shouldOpen) {
             panel.classList.remove('hidden');
@@ -267,6 +457,9 @@ document.addEventListener('click', (event) => {
     }
 
     const shouldOpen = panel.classList.contains('hidden');
+    closeQuickStatsPanel(false);
+    closePredictionPanel();
+    closeStatisticsPanel(false);
     document.querySelectorAll('[data-live-stats-panel]').forEach((item) => item.classList.add('hidden'));
     document.querySelectorAll('[data-action="livestats"]').forEach((item) => item.setAttribute('aria-expanded', 'false'));
 
@@ -275,18 +468,45 @@ document.addEventListener('click', (event) => {
         button.setAttribute('aria-expanded', 'true');
         document.body.classList.add('overflow-hidden');
         openLiveStatsMatchId = matchId;
+        loadFootballStatistics(button, 'live');
     } else {
         closeLiveStatsPanel();
     }
 });
 
 document.addEventListener('keydown', (event) => {
+    if (event.key === 'Tab' && openQuickStatsMatchId !== null) {
+        event.preventDefault();
+        document.querySelector(`[data-quick-stats-panel="${CSS.escape(openQuickStatsMatchId)}"] [data-close-quick-stats]`)?.focus({ preventScroll: true });
+    }
     if (event.key === 'Escape') {
-        if (openPredictionMatchId !== null) {
+        if (openQuickStatsMatchId !== null) {
+            closeQuickStatsPanel();
+        } else if (openPredictionMatchId !== null) {
             closePredictionPanel();
         } else if (openLiveStatsMatchId !== null) {
             closeLiveStatsPanel();
+        } else if (openStatisticsMatchId !== null) {
+            closeStatisticsPanel();
         }
+    }
+});
+
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Tab' || openQuickStatsMatchId !== null) return;
+    const panel = openStatisticsMatchId !== null
+        ? document.querySelector(`[data-statistics-panel="${CSS.escape(openStatisticsMatchId)}"]`)
+        : openLiveStatsMatchId !== null
+            ? document.querySelector(`[data-live-stats-panel="${CSS.escape(openLiveStatsMatchId)}"]`)
+            : null;
+    if (!panel) return;
+    const focusable = [...panel.querySelectorAll('button:not(:disabled), summary, a[href], [tabindex="0"]')].filter((item) => item.getClientRects().length);
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) {
+        event.preventDefault(); last?.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) {
+        event.preventDefault(); first?.focus();
     }
 });
 
@@ -321,19 +541,28 @@ const callFixtureData = async (value, options = {}) => {
     }
 
     if (footballLoading) {
-        if (options.reset === true) {
+        if (value.prediction) {
+            return new Promise((resolve) => {
+                footballPendingPredictions.push({ prediction: value.prediction, options, resolve });
+            });
+        } else if (options.reset === true) {
             footballPendingRequest = { value, options };
+        } else if (options.realtime === true) {
+            footballPendingRealtime = true;
         }
         return;
     }
 
+    clearTimeout(footballRealtimeTimer);
+    footballRealtimeTimer = null;
+    footballPendingRealtime = false;
     footballLoading = true;
     if (append && footballLazyLoader) {
         footballLazyLoader.querySelector('[data-lazy-loader-text]').textContent = 'Loading matches…';
     }
 
     try {
-        const url = new URL('/football/filter-football',window.location.origin);
+        const url = new URL(options.realtime === true ? '/football/websocket-football' : '/football/filter-football', window.location.origin);
         const response = await fetch(url, {
             method: 'POST',
             headers: {
@@ -355,10 +584,17 @@ const callFixtureData = async (value, options = {}) => {
         }
 
         if (!response.ok) {
-            throw new Error(`HTTP error: ${response.status}`);
+            const failure = await response.json().catch(() => ({}));
+            throw new Error(failure.message || `HTTP error: ${response.status}`);
         }
 
+        document.querySelector('[data-football-request-error]')?.remove();
         const data = await response.json();
+        const selected = getSelectedFilters();
+        if (footballPendingRequest || selected.type !== value.type || selected.market_name !== value.market_name) {
+            return;
+        }
+
         if (append) {
             appendFootballMatches(data.html);
             footballPage += 1;
@@ -366,29 +602,72 @@ const callFixtureData = async (value, options = {}) => {
             const template = document.createElement('template');
             template.innerHTML = data.html.trim();
             const responseContainer = template.content.querySelector('.fixtures-container');
-            document.querySelector('.fixtures-container').innerHTML = responseContainer?.innerHTML ?? data.html;
+            const incoming = responseContainer ?? template.content;
+            preserveQuickStatsPanel(incoming);
+            document.querySelector('.fixtures-container').replaceChildren(...incoming.childNodes);
             footballPage = preserveLoaded ? Math.max(1, footballPage) : 1;
         }
         updateFootballLazyLoader(data.has_more, append ? data.next_page : (preserveLoaded ? footballPage + 1 : data.next_page));
         scheduleGoalHighlights();
         restoreLiveStatsPanel();
         restorePredictionPanel();
+        restoreQuickStatsPanel();
+        restoreStatisticsPanel();
         refreshFootballTimelineClocks();
         restoreFootballTimeline();
 
     } catch (error) {
         console.error('Request failed:', error);
+        if (options.realtime !== true) {
+            let notice = document.querySelector('[data-football-request-error]');
+            if (!notice) {
+                notice = document.createElement('p');
+                notice.dataset.footballRequestError = '';
+                notice.className = 'my-3 text-sm text-red-600 dark:text-red-400';
+                notice.setAttribute('role', 'alert');
+                fixtures?.before(notice);
+            }
+            notice.textContent = error.message;
+        }
         updateFootballLazyLoader(footballHasMore);
     } finally {
         footballLoading = false;
-        fixtures?.classList.remove('fixtures-loading');
-        fixtures?.removeAttribute('aria-busy');
+        if (!footballPendingRequest) {
+            fixtures?.classList.remove('fixtures-loading');
+            fixtures?.removeAttribute('aria-busy');
+        }
         if (footballPendingRequest) {
             const pending = footballPendingRequest;
             footballPendingRequest = null;
             callFixtureData(pending.value, pending.options);
+        } else if (footballPendingPredictions.length) {
+            const pending = footballPendingPredictions.shift();
+            callFixtureData({ ...getSelectedFilters(), prediction: pending.prediction }, pending.options).then(pending.resolve);
+        } else if (footballPendingRealtime) {
+            scheduleFootballRealtimeRefresh();
         }
     }
+};
+
+const scheduleFootballRealtimeRefresh = () => {
+    if (document.visibilityState !== 'visible') {
+        footballPendingRealtime = false;
+        return;
+    }
+
+    if (footballLoading) {
+        footballPendingRealtime = true;
+        return;
+    }
+
+    if (footballRealtimeTimer !== null) {
+        return;
+    }
+
+    footballRealtimeTimer = setTimeout(() => {
+        footballRealtimeTimer = null;
+        callFixtureData(getSelectedFilters(), { preserveLoaded: true, realtime: true });
+    }, 100);
 };
 
 if (footballLazyLoader) {
@@ -436,46 +715,7 @@ window.addEventListener('pageshow', (event) => {
 });
 
 window.Echo.channel('sports.football.live')
-    .listen('.score.updated', async (event) => {
-        console.log('Event received:', new Date().toISOString(), event);
-        try {
-            const url = new URL('/football/websocket-football',window.location.origin);
-
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
-                },
-                body: JSON.stringify({
-                    ...getSelectedFilters(),
-                    page: 1,
-                    per_page: footballPage * FOOTBALL_PAGE_SIZE,
-                }),
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP error: ${response.status}`);
-            }
-
-            const data = await response.json();
-
-            const template = document.createElement('template');
-            template.innerHTML = data.html.trim();
-            const responseContainer = template.content.querySelector('.fixtures-container');
-            document.querySelector('.fixtures-container').innerHTML = responseContainer?.innerHTML ?? data.html;
-            updateFootballLazyLoader(data.has_more, footballPage + 1);
-            scheduleGoalHighlights();
-            restoreLiveStatsPanel();
-            restorePredictionPanel();
-            refreshFootballTimelineClocks();
-            restoreFootballTimeline();
-
-        } catch (error) {
-            console.error('Request failed:', error);
-        }
-    });
+    .listen('.score.updated', scheduleFootballRealtimeRefresh);
 
 scheduleGoalHighlights();
 
