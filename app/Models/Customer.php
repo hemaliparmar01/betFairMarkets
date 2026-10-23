@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -45,6 +46,7 @@ class Customer extends Authenticatable
             'register_sms_count' => 'integer',
             'login_sms_count' => 'integer',
             'trial_ends_at' => 'datetime',
+            'subscription_starts_at' => 'datetime',
             'subscription_ends_at' => 'datetime',
             'admin_free_days' => 'integer',
             'last_login_at' => 'datetime',
@@ -72,9 +74,29 @@ class Customer extends Authenticatable
         return $this->hasMany(PredictionVote::class);
     }
 
+    public function subscriptions(): HasMany
+    {
+        return $this->hasMany(CustomerSubscriptions::class);
+    }
+
+    public function displaySubscription(): HasOne
+    {
+        return $this->hasOne(CustomerSubscriptions::class)->latestOfMany();
+    }
+
+    public function hasLifetimeAccess(): bool
+    {
+        return $this->admin_free_days === -1;
+    }
+
     public function hasActiveSubscription(): bool
     {
-        return $this->subscription_ends_at?->isFuture() ?? false;
+        if ($this->hasLifetimeAccess()) {
+            return true;
+        }
+
+        return ($this->subscription_ends_at?->isFuture() ?? false)
+            && ($this->subscription_starts_at === null || $this->subscription_starts_at->lte(now()));
     }
 
     public function hasActiveTrial(): bool

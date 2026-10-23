@@ -614,25 +614,6 @@ if (! function_exists('checkAuthAndSubscription')) {
         }
 
         $customer = auth()->guard('customers')->user();
-        $adminFreeDays = (int) $customer->admin_free_days;
-
-        if ($adminFreeDays != null) {
-            if ($adminFreeDays == -1) {
-                return ['is_authenticated' => true, 'has_active_subscription' => true, 'display_odds' => true];
-            }
-            if ($adminFreeDays > 0) {
-                $currentExpireDate = $customer->subscription_ends_at ?? $customer->trial_ends_at;
-
-                if ($currentExpireDate) {
-                    $timezone = get_current_user_timezone();
-                    $extendedExpireDate = Carbon::parse($currentExpireDate)->timezone($timezone)->addDays($adminFreeDays);
-                    $currentDate = Carbon::now($timezone);
-                    if ($currentDate->lte($extendedExpireDate)) {
-                        return ['is_authenticated' => true, 'has_active_subscription' => true, 'display_odds' => true];
-                    }
-                }
-            }
-        }
         if ($customer->hasActiveSubscription()) {
             return ['is_authenticated' => true, 'has_active_subscription' => true, 'display_odds' => true];
         }

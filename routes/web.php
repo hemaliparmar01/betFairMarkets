@@ -23,11 +23,16 @@ use App\Http\Controllers\Users\IceHockey\IceHockeySyncController;
 use App\Http\Controllers\Users\NotificationController;
 use App\Http\Controllers\Users\StaticPageController;
 use App\Http\Controllers\Users\SubscriptionController;
+use App\Http\Controllers\Users\SubscriptionPaymentController;
 use App\Http\Controllers\Users\Tennis\TennisController;
 use App\Http\Controllers\Users\Tennis\TennisSyncController;
+use App\Services\CustomerAuthService;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Http\Request;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
+use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 Route::get('popup', function () {
     return view('popup');
@@ -35,6 +40,14 @@ Route::get('popup', function () {
 
 Route::middleware('guest:customers')->group(function () {
     Route::get('login', [AuthController::class, 'login'])->name('login');
+    Route::post('login/mobile/send-code', [AuthController::class, 'sendLoginCode'])->middleware('throttle:5,1')->name('login.mobile.send-code');
+    Route::get('login/mobile/verification', [AuthController::class, 'loginCode'])->name('login.mobile.verification');
+    Route::post('login/mobile/verify-code', [AuthController::class, 'verifyLoginCode'])->middleware('throttle:10,1')->name('login.mobile.verify-code');
+    Route::post('login/mobile/resend-code', [AuthController::class, 'resendLoginCode'])->middleware('throttle:5,1')->name('login.mobile.resend-code');
+    Route::get('forgot-password', [AuthController::class, 'forgotPassword'])->name('customers.password.request');
+    Route::post('forgot-password', [AuthController::class, 'sendPasswordReset'])->middleware('throttle:5,1')->name('customers.password.email');
+    Route::get('reset-password/{token}', [AuthController::class, 'resetPassword'])->name('customers.password.reset');
+    Route::post('reset-password', [AuthController::class, 'updatePassword'])->middleware('throttle:10,1')->name('customers.password.update');
     Route::get('register', [AuthController::class, 'register'])->name('register');
     Route::get('verify-email', [AuthController::class, 'verification'])->name('customers.verification');
     Route::post('verify-email', [AuthController::class, 'verifyEmail'])->middleware('throttle:20,10')->name('customers.verification.verify');
@@ -169,6 +182,7 @@ Route::get('delete-cache-key/{forgot_cache_key}', function (Request $request) {
 });
 
 Route::get('contact-us', [ContactController::class, 'contact'])->name('contact-us');
+Route::post('contact-us', [ContactController::class, 'store'])->name('contact-us.store');
 Route::get('notifications', [NotificationController::class, 'notifications'])->name('notifications');
 Route::get('subscriptions', [SubscriptionController::class, 'subscriptions'])->name('subscriptions');
 Route::get('subscriptions-details', [SubscriptionController::class, 'getSubscriptions'])->name('checkout-single');
@@ -182,3 +196,15 @@ Route::get('manifesto', [StaticPageController::class, 'manifesto'])->name('manif
 Route::get('filter-guide', [StaticPageController::class, 'filterGuide'])->name('filter-guide');
 Route::get('market-activity-guide', [StaticPageController::class, 'marketActivityGuide'])->name('market-activity-guide');
 Route::get('pinnacle-odds-drops-guide', [StaticPageController::class, 'pinnacleOddsDropsGuide'])->name('pinnacle-odds-drops-guide');
+
+require __DIR__.'/admin.php';
+
+Route::middleware('auth:customers')->group(function (): void {
+    Route::post('subscriptions/{plan}/checkout', [SubscriptionPaymentController::class, 'checkout'])->middleware('throttle:10,1')->name('subscriptions.checkout');
+    Route::get('subscriptions/payment/return', [SubscriptionPaymentController::class, 'returned'])->name('subscriptions.return');
+    Route::post('subscriptions/{subscription}/cancel', [SubscriptionPaymentController::class, 'cancel'])->middleware('throttle:10,1')->name('subscriptions.cancel');
+});
+Route::post('subscriptions/payments/webhooks/{gateway}', [SubscriptionPaymentController::class, 'webhook'])->name('subscriptions.webhook');
+
+Route::post('subscriptions/payment/return', [SubscriptionPaymentController::class, 'returnedPost'])
+    ->withoutMiddleware([PreventRequestForgery::class, StartSession::class, ShareErrorsFromSession::class, CustomerAuthService::class]);

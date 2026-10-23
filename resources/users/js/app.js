@@ -28,12 +28,12 @@ window.addEventListener('pageshow', (event) => {
 });
 
 const themeToggle = document.getElementById('themeToggle');
-const themeIcon = themeToggle.querySelector('i');
+const themeIcon = themeToggle?.querySelector('i');
 if (localStorage.getItem('bf-markets-theme') === 'dark') {
     document.body.classList.add('dark-mode');
-    themeIcon.className = 'fas fa-sun';
+    if (themeIcon) themeIcon.className = 'fas fa-sun';
 }
-themeToggle.addEventListener('click', function() {
+themeToggle?.addEventListener('click', function() {
     document.body.classList.toggle('dark-mode');
     const isDark = document.body.classList.contains('dark-mode');
     themeIcon.className = isDark ? 'fas fa-sun' : 'fas fa-moon';

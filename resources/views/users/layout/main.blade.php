@@ -15,7 +15,7 @@
 </head>
 <body class="min-w-0 max-[480px]:!px-2 max-[480px]:!pt-2 @if (request()->routeIs('cricket.*', 'icehockey.*', 'americanfootball.*', 'baseball.*', 'basketball.*', 'tennis.*', 'greyhounds.*', 'horseracing.*')) [&_a]:cursor-pointer [&_button:enabled]:cursor-pointer [&_select]:cursor-pointer [&_summary]:cursor-pointer @endif">
     <div class="app mx-auto w-full rounded-3xl bg-white px-6 pb-6 pt-[18px] shadow-[0_16px_48px_rgba(0,20,40,0.06)] max-[800px]:p-3.5 dark:[background:#1a2a38] dark:[border-color:#2a3f50] [max-width:1480px] [margin:0_auto] [background:white] [border-radius:32px] [box-shadow:0_16px_48px_rgba(0,_20,_40,_0.06)] [padding:20px_28px_32px] [transition:background_0.3s] max-[800px]:[padding:14px] [width:100%] [max-width:100%] [border-radius:24px] [padding:18px_24px_24px] max-[768px]:[padding:14px_14px_20px] max-[768px]:[border-radius:16px]">
-        @unless (request()->routeIs('login', 'register', 'customers.verification*'))
+        @unless (request()->routeIs('login', 'register', 'customers.verification*', 'login.mobile.*', 'customers.password.*'))
             @include('users.layout.header')
         @endunless
         <main class="min-w-0 max-w-full [overflow-wrap:anywhere] [&_img]:max-w-full [&_img]:h-auto [&_input]:max-w-full [&_textarea]:max-w-full">@yield('content')</main>
@@ -26,55 +26,6 @@
     <script>
         document.getElementById('scroll-to-top')?.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
     </script>
-    @if (request()->routeIs('login', 'register'))
-        <script>
-            (() => {
-                const forms = document.querySelectorAll('form[data-customer-auth]');
-                const metadata = {};
-                const collectMetadata = async () => {
-                    try {
-                        const storedDevice = localStorage.getItem('bfmarkets-device');
-                        metadata.device_id = storedDevice && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(storedDevice) ? storedDevice : crypto.randomUUID();
-                        localStorage.setItem('bfmarkets-device', metadata.device_id);
-                    } catch (_) {}
-
-                    metadata.screen_resolution = `${screen.width}x${screen.height}`;
-                    let renderer = '';
-                    try {
-                        const gl = document.createElement('canvas').getContext('webgl');
-                        const extension = gl?.getExtension('WEBGL_debug_renderer_info');
-                        if (extension) {
-                            metadata.webgl_vendor = String(gl.getParameter(extension.UNMASKED_VENDOR_WEBGL)).slice(0, 255);
-                            renderer = String(gl.getParameter(extension.UNMASKED_RENDERER_WEBGL));
-                        }
-                    } catch (_) {}
-
-                    if (! crypto.subtle) return;
-                    const hash = async (value) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))), (byte) => byte.toString(16).padStart(2, '0')).join('');
-                    if (renderer) metadata.webgl_hash = await hash(renderer);
-                    metadata.fingerprint_hash = await hash(JSON.stringify([navigator.userAgent, navigator.language, metadata.screen_resolution, Intl.DateTimeFormat().resolvedOptions().timeZone, renderer]));
-                };
-
-                const ready = collectMetadata().catch(() => {});
-                forms.forEach((form) => {
-                    form.addEventListener('submit', async (event) => {
-                        event.preventDefault();
-                        if (form.dataset.submitting === 'true') return;
-                        form.dataset.submitting = 'true';
-                        await Promise.race([ready, new Promise((resolve) => setTimeout(resolve, 300))]);
-                        Object.entries(metadata).forEach(([name, value]) => {
-                            const input = document.createElement('input');
-                            input.type = 'hidden';
-                            input.name = name;
-                            input.value = value;
-                            form.appendChild(input);
-                        });
-                        HTMLFormElement.prototype.submit.call(form);
-                    });
-                });
-            })();
-        </script>
-    @endif
     @stack('js')
 </body>
 </html>

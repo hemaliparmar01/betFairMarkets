@@ -1,6 +1,34 @@
 <?php
 
 return [
+    'paypal' => [
+        'base_url' => env('PAYPAL_BASE_URL', env('PAYPAL_MODE', 'sandbox') === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com'),
+        'client_id' => env('PAYPAL_CLIENT_ID'),
+        'secret' => env('PAYPAL_SECRET'),
+        'webhook_id' => env('PAYPAL_WEBHOOK_ID'),
+    ],
+    'bog' => [
+        'base_url' => env('BOG_BASE_URL', 'https://api.bog.ge'),
+        'auth_url' => env('BOG_AUTH_URL', 'https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token'),
+        'client_id' => env('BOG_CLIENT_ID'),
+        'secret' => env('BOG_CLIENT_SECRET'),
+        'public_key' => env('BOG_CALLBACK_PUBLIC_KEY'),
+        'recurring_enabled' => env('BOG_RECURRING_ENABLED', false),
+    ],
+    'flitt' => [
+        'base_url' => env('FLITT_BASE_URL', 'https://pay.flitt.com'),
+        'merchant_id' => env('FLITT_MERCHANT_ID'),
+        'key' => env('FLITT_PAYMENT_KEY'),
+        'currency' => env('FLITT_CURRENCY', 'EUR'),
+        'recurring_enabled' => env('FLITT_RECURRING_ENABLED', false),
+        'cycles' => (int) env('FLITT_SUBSCRIPTION_CYCLES', 120),
+    ],
+
+    'infobip' => [
+        'base_url' => env('INFOBIP_BASE_URL'),
+        'key' => env('INFOBIP_API_KEY'),
+        'sender' => env('INFOBIP_SENDER', 'BFMarkets'),
+    ],
 
     'pinnodds' => [
         'key' => env('PINACLE_ODDS_KEY'),

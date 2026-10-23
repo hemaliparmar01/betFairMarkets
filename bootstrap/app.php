@@ -14,6 +14,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->preventRequestForgery(except: ['subscriptions/payments/webhooks/*', 'subscriptions/payment/return']);
         $middleware->web(append: [CustomerAuthService::class]);
         $middleware->redirectGuestsTo(fn (Request $request): string => route('login'));
         $middleware->redirectUsersTo(fn (Request $request): string => route('football.home'));

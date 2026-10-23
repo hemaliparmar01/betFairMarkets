@@ -26,7 +26,6 @@ use App\Http\Controllers\Users\Cricket\CricketSyncController;
 use App\Http\Controllers\Users\Football\FootballSyncController;
 use App\Http\Controllers\Users\IceHockey\IceHockeySyncController;
 use App\Http\Controllers\Users\Tennis\TennisSyncController;
-use App\Services\LiveMatchExpiry;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
@@ -595,7 +594,7 @@ class ListenSportsApiPro extends Command
         }
 
         foreach ($matches as &$match) {
-            if (in_array($match['result_status'] ?? null, ['Finished', LiveMatchExpiry::AWAITING_REPLAY], true)) {
+            if ((($match['result_status'] ?? null) === 'Finished')) {
                 continue;
             }
 
@@ -717,13 +716,13 @@ class ListenSportsApiPro extends Command
                 $match['added_time']['second_half'] = (int) $secondHalfAddedTime;
             }
 
-            if ($statusCode == 6 && ! in_array($match['result_status'] ?? null, ['Finished', LiveMatchExpiry::AWAITING_REPLAY], true)) {
+            if ($statusCode == 6 && ($match['result_status'] ?? null) !== 'Finished') {
                 $match['minutes_status'] = '1st half';
                 $match['result_status'] = 'Live';
-            } elseif ($statusCode == 7 && ! in_array($match['result_status'] ?? null, ['Finished', LiveMatchExpiry::AWAITING_REPLAY], true)) {
+            } elseif ($statusCode == 7 && ($match['result_status'] ?? null) !== 'Finished') {
                 $match['minutes_status'] = '2nd half';
                 $match['result_status'] = 'Live';
-            } elseif ($statusCode == 31 && ! in_array($match['result_status'] ?? null, ['Finished', LiveMatchExpiry::AWAITING_REPLAY], true)) {
+            } elseif ($statusCode == 31 && ($match['result_status'] ?? null) !== 'Finished') {
                 $match['minutes_status'] = 'Half Time';
                 $match['result_status'] = 'Live';
             } elseif ($statusCode == 100 || $statusType === 'finished') {

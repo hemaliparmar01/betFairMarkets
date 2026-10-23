@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Customer;
+use App\Models\CustomerLoginSession;
 use App\Repositories\CustomerRepository;
 use Closure;
 use DateTimeZone;
@@ -13,6 +14,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
@@ -92,6 +94,183 @@ class CustomerAuthService
 
     }
 
+    public function pendingLoginSession(Request $request): ?CustomerLoginSession
+    {
+        $pending = $request->session()->get('customer_pending_login');
+        if (! is_array($pending) || ($pending['expires_at'] ?? 0) <= now()->timestamp) {
+            return null;
+        }
+
+        return CustomerLoginSession::query()->where('customer_id', $pending['customer_id'])
+            ->where('session_id', $pending['previous_session_id'])->whereNull('logged_out_at')->first();
+    }
+
+    /** @return array{countryOptions: array<int, array<string, string>>, defaultCountry: string, defaultDialCode: string, defaultCountryCode: string, defaultTimezone: string} */
+    public function formCountries(): array
+    {
+        $countries = $this->countries()->map(static fn (array $country): array => [
+            'code' => $country['code'], 'name' => $country['name'], 'dial_code' => '+'.$country['calling_code'],
+            'flag' => 'https://flagcdn.com/w40/'.strtolower($country['code']).'.png', 'timezone' => $country['timezone'],
+        ]);
+        $default = $countries->firstWhere('code', 'GE');
+
+        return [
+            'countryOptions' => $countries->all(), 'defaultCountry' => $default['name'],
+            'defaultDialCode' => $default['dial_code'], 'defaultCountryCode' => $default['code'],
+            'defaultTimezone' => $default['timezone'],
+        ];
+    }
+
+    /** @param array<string, mixed> $data */
+    public function sendLoginCode(Request $request, array $data): void
+    {
+        $customer = Customer::query()->where('country_code', $data['country_code'])->where('mobile', $data['mobile'])->first();
+        if ($customer === null || $customer->is_blocked || $customer->is_suspended) {
+            throw ValidationException::withMessages(['mobile' => 'A login code cannot be sent for these account details.']);
+        }
+        $request->session()->forget('customer_pending_login');
+        if (! $customer->is_verified) {
+            $request->session()->put('customer_verification', ['customer_id' => $customer->id, 'expires_at' => now()->timestamp + 86400]);
+            $this->sendVerification($request);
+
+            return;
+        }
+
+        $key = 'customer-login-code:'.$customer->id;
+        if (RateLimiter::tooManyAttempts($key, 5)) {
+            throw ValidationException::withMessages(['mobile' => 'Too many login codes requested. Please try again later.']);
+        }
+        $code = (string) random_int(100000, 999999);
+        $nonce = Str::random(32);
+        $payload = json_encode(['hash' => Hash::make($code.$nonce), 'expires_at' => now()->timestamp + 600, 'sent_at' => now()->timestamp, 'attempts' => 0], JSON_THROW_ON_ERROR);
+        DB::transaction(function () use ($customer, $payload): void {
+            $stored = $this->customers->find((int) $customer->id, true);
+            if ($stored === null || $stored->is_blocked || $stored->is_suspended || ! $stored->is_verified) {
+                throw ValidationException::withMessages(['mobile' => 'Your account is unavailable.']);
+            }
+            $previous = json_decode($stored->login_otp ?? '', true);
+            if (is_array($previous) && ($previous['sent_at'] ?? 0) > now()->timestamp - 60) {
+                throw ValidationException::withMessages(['mobile' => 'Please wait 60 seconds before requesting another code.']);
+            }
+            $this->customers->update((int) $customer->id, ['login_otp' => $payload]);
+        });
+        RateLimiter::hit($key, 3600);
+        try {
+            $channel = $this->deliverCode($customer, $code, 'login', ($data['otp_channel'] ?? '') === 'email');
+        } catch (\Throwable $exception) {
+            Customer::query()->whereKey($customer->id)->where('login_otp', $payload)->update(['login_otp' => null]);
+            report($exception);
+            throw ValidationException::withMessages(['mobile' => 'We could not send your login code. Please try again.']);
+        }
+        $this->customers->update((int) $customer->id, ['login_channel_via' => $channel]);
+        $request->session()->put('customer_login_otp', [
+            'customer_id' => $customer->id, 'nonce' => $nonce, 'expires_at' => now()->timestamp + 600,
+            'credential_hash' => hash('sha256', $customer->password),
+            'data' => $data, 'channel' => $channel,
+        ]);
+        $request->session()->flash('status', 'Your login code has been sent via '.$channel.'.');
+    }
+
+    public function loginCodeCustomer(Request $request): ?Customer
+    {
+        $pending = $request->session()->get('customer_login_otp');
+        if (! is_array($pending) || ($pending['expires_at'] ?? 0) <= now()->timestamp) {
+            $request->session()->forget('customer_login_otp');
+
+            return null;
+        }
+        $customer = $this->customers->find((int) $pending['customer_id']);
+
+        return $customer !== null && $customer->is_verified && ! $customer->is_blocked && ! $customer->is_suspended ? $customer : null;
+    }
+
+    public function resendLoginCode(Request $request): void
+    {
+        if ($this->loginCodeCustomer($request) === null) {
+            throw ValidationException::withMessages(['code' => 'Your login code session expired. Please start again.']);
+        }
+        $this->sendLoginCode($request, $request->session()->get('customer_login_otp')['data']);
+    }
+
+    public function verifyLoginCode(Request $request, string $code): bool
+    {
+        $customer = $this->loginCodeCustomer($request);
+        if ($customer === null) {
+            throw ValidationException::withMessages(['code' => 'Your login code session expired. Please start again.']);
+        }
+        $pending = $request->session()->get('customer_login_otp');
+        $valid = DB::transaction(function () use ($customer, $pending, $code): bool {
+            $stored = $this->customers->find((int) $customer->id, true);
+            if ($stored === null || ! $stored->is_verified || $stored->is_blocked || $stored->is_suspended
+                || ! hash_equals($pending['credential_hash'], hash('sha256', $stored->password))) {
+                return false;
+            }
+            $payload = json_decode($stored->login_otp ?? '', true);
+            if (! is_array($payload) || ($payload['expires_at'] ?? 0) <= now()->timestamp || ($payload['attempts'] ?? 0) >= 5) {
+                return false;
+            }
+            if (! Hash::check($code.$pending['nonce'], $payload['hash'] ?? '')) {
+                $payload['attempts']++;
+                $this->customers->update((int) $stored->id, ['login_otp' => json_encode($payload, JSON_THROW_ON_ERROR)]);
+
+                return false;
+            }
+            $this->customers->update((int) $stored->id, ['login_otp' => null]);
+
+            return true;
+        });
+        if (! $valid) {
+            throw ValidationException::withMessages(['code' => 'The code is incorrect, expired, or has reached five attempts.']);
+        }
+        $request->session()->forget('customer_login_otp');
+        $data = $pending['data'] + ['credential_hash' => $pending['credential_hash']];
+        try {
+            $this->authenticate($request, $customer, $data, $pending['channel'], false);
+        } catch (ValidationException $exception) {
+            if (! isset($exception->errors()['session_conflict'])) {
+                throw $exception;
+            }
+            $request->session()->put('customer_pending_login', [
+                'customer_id' => $customer->id, 'previous_session_id' => $customer->fresh()->active_session_id,
+                'expires_at' => now()->timestamp + 300, 'data' => $data, 'channel' => $pending['channel'],
+            ]);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private function deliverCode(Customer $customer, string $code, string $purpose, bool $preferEmail = false): string
+    {
+        $counter = $purpose === 'login' ? 'login_sms_count' : 'register_sms_count';
+        if (! $preferEmail && $customer->{$counter} < 3 && filled(config('services.infobip.key')) && filled(config('services.infobip.base_url'))) {
+            try {
+                $response = Http::withHeaders(['Authorization' => 'App '.config('services.infobip.key')])
+                    ->acceptJson()->connectTimeout(3)->timeout(8)
+                    ->post(rtrim(config('services.infobip.base_url'), '/').'/sms/2/text/advanced', [
+                        'messages' => [[
+                            'from' => config('services.infobip.sender'),
+                            'destinations' => [['to' => ltrim($customer->mobile_code, '+').$customer->mobile]],
+                            'text' => "Your BF Markets verification code is {$code}. It expires in 10 minutes.",
+                        ]],
+                    ]);
+                if ($response->successful() && in_array((int) $response->json('messages.0.status.groupId'), [1, 3], true)) {
+                    Customer::query()->whereKey($customer->id)->increment($counter);
+
+                    return 'mobile';
+                }
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
+        Mail::raw("Your BF Markets verification code is: {$code}\n\nThis code expires in 10 minutes. If you did not request this, ignore this email.", function (Message $message) use ($customer, $purpose): void {
+            $message->to($customer->email)->subject($purpose === 'login' ? 'Your BF Markets login code' : 'Verify your BF Markets account');
+        });
+
+        return 'email';
+    }
+
     /** @param array<string, mixed> $data */
     public function register(Request $request, array $data): void
     {
@@ -133,14 +312,14 @@ class CustomerAuthService
         });
 
         $request->session()->regenerate();
-        $request->session()->put('customer_verification', ['customer_id' => $customerId, 'expires_at' => time() + 86400]);
+        $request->session()->put('customer_verification', ['customer_id' => $customerId, 'expires_at' => now()->timestamp + 86400]);
         $this->sendVerification($request);
     }
 
     public function verificationCustomer(Request $request): ?Customer
     {
         $pending = $request->session()->get('customer_verification');
-        if (! is_array($pending) || ($pending['expires_at'] ?? 0) < time()) {
+        if (! is_array($pending) || ($pending['expires_at'] ?? 0) < now()->timestamp) {
             $request->session()->forget('customer_verification');
 
             return null;
@@ -164,14 +343,14 @@ class CustomerAuthService
         }
 
         $code = (string) random_int(100000, 999999);
-        $payload = json_encode(['hash' => $code, 'expires_at' => time() + 600, 'sent_at' => time(), 'attempts' => 0], JSON_THROW_ON_ERROR);
+        $payload = json_encode(['hash' => Hash::make($code), 'expires_at' => now()->timestamp + 600, 'sent_at' => now()->timestamp, 'attempts' => 0], JSON_THROW_ON_ERROR);
         DB::transaction(function () use ($customer, $payload): void {
             $stored = $this->customers->find((int) $customer->id, true);
             if ($stored === null || $stored->is_verified || $stored->is_blocked || $stored->is_suspended) {
                 throw ValidationException::withMessages(['code' => 'Your account is unavailable or already verified.']);
             }
             $previous = json_decode($stored->code ?? '', true);
-            if (is_array($previous) && ($previous['sent_at'] ?? 0) > time() - 60) {
+            if (is_array($previous) && ($previous['sent_at'] ?? 0) > now()->timestamp - 60) {
                 throw ValidationException::withMessages(['code' => 'Please wait 60 seconds before requesting another code.']);
             }
             $this->customers->update((int) $customer->id, ['code' => $payload]);
@@ -179,9 +358,8 @@ class CustomerAuthService
         RateLimiter::hit($key, 3600);
 
         try {
-            Mail::raw("Your BF Markets email verification code is: {$code}\n\nThis code expires in 10 minutes. If you did not request this, ignore this email.", function (Message $message) use ($customer): void {
-                $message->to($customer->email)->subject('Verify your BF Markets email');
-            });
+            $channel = $this->deliverCode($customer, $code, 'register');
+            $this->customers->update((int) $customer->id, ['verification_via' => $channel]);
         } catch (\Throwable $exception) {
             Customer::query()->where('id', $customer->id)->where('code', $payload)->update(['code' => null]);
             report($exception);
@@ -202,16 +380,16 @@ class CustomerAuthService
                 return false;
             }
             $payload = json_decode($stored->code ?? '', true);
-            if (! is_array($payload) || ($payload['expires_at'] ?? 0) <= time() || ($payload['attempts'] ?? 0) >= 5 || ! isset($payload['hash'])) {
+            if (! is_array($payload) || ($payload['expires_at'] ?? 0) <= now()->timestamp || ($payload['attempts'] ?? 0) >= 5 || ! isset($payload['hash'])) {
                 return false;
             }
-            if ($code !== $payload['hash']) {
+            if (! (strlen($payload['hash']) === 6 ? hash_equals($payload['hash'], $code) : Hash::check($code, $payload['hash']))) {
                 $payload['attempts']++;
                 $this->customers->update((int) $customer->id, ['code' => json_encode($payload, JSON_THROW_ON_ERROR)]);
 
                 return false;
             }
-            $this->customers->update((int) $customer->id, ['code' => null, 'is_verified' => true, 'verification_via' => 'email']);
+            $this->customers->update((int) $customer->id, ['code' => null, 'is_verified' => true, 'verification_via' => $stored->verification_via ?? 'email']);
 
             return true;
         });
@@ -234,6 +412,7 @@ class CustomerAuthService
             'countries' => $this->countries(),
             'timezones' => DateTimeZone::listIdentifiers(),
             'timezone' => $this->customers->timezone((int) $customer->getAuthIdentifier()) ?? 'UTC',
+            'customerSubscriptions' => $section === 'subscription' ? $customer->subscriptions()->with('subscriptionPlan')->latest('id')->get() : collect(),
             'favorites' => $section === 'favorites' ? $this->customers->favorites((int) $customer->getAuthIdentifier()) : null,
         ];
     }
@@ -307,10 +486,10 @@ class CustomerAuthService
         $customer = $guard->getLastAttempted();
         if (! $customer->is_verified) {
             $request->session()->regenerate();
-            $request->session()->put('customer_verification', ['customer_id' => (int) $customer->getAuthIdentifier(), 'expires_at' => time() + 86400]);
+            $request->session()->put('customer_verification', ['customer_id' => (int) $customer->getAuthIdentifier(), 'expires_at' => now()->timestamp + 86400]);
             $stored = $this->customers->find((int) $customer->getAuthIdentifier());
             $payload = json_decode($stored->code ?? '', true);
-            if (! is_array($payload) || ($payload['expires_at'] ?? 0) <= time() || ($payload['attempts'] ?? 0) >= 5) {
+            if (! is_array($payload) || ($payload['expires_at'] ?? 0) <= now()->timestamp || ($payload['attempts'] ?? 0) >= 5) {
                 $this->sendVerification($request);
             }
             RateLimiter::clear($key);
@@ -329,7 +508,7 @@ class CustomerAuthService
             $request->session()->put('customer_pending_login', [
                 'customer_id' => (int) $customer->getAuthIdentifier(),
                 'previous_session_id' => $this->customers->find((int) $customer->getAuthIdentifier())->active_session_id,
-                'expires_at' => time() + 300,
+                'expires_at' => now()->timestamp + 300,
                 'data' => array_diff_key($data, ['password' => true, 'identity' => true]),
             ]);
 
@@ -346,7 +525,7 @@ class CustomerAuthService
     public function confirmLogin(Request $request): void
     {
         $pending = $request->session()->pull('customer_pending_login');
-        if (! is_array($pending) || ($pending['expires_at'] ?? 0) < time()) {
+        if (! is_array($pending) || ($pending['expires_at'] ?? 0) < now()->timestamp) {
             throw ValidationException::withMessages(['identity' => 'The login confirmation expired. Please enter your login details again.']);
         }
 
@@ -355,7 +534,7 @@ class CustomerAuthService
             throw ValidationException::withMessages(['identity' => 'Your account is unavailable.']);
         }
 
-        $this->authenticate($request, $customer, $pending['data'], 'password', (bool) ($pending['data']['remember'] ?? false), $pending['previous_session_id']);
+        $this->authenticate($request, $customer, $pending['data'], $pending['channel'] ?? 'password', (bool) ($pending['data']['remember'] ?? false), $pending['previous_session_id']);
     }
 
     /** @param array<string, mixed> $data */
@@ -433,6 +612,10 @@ class CustomerAuthService
 
     public function handle(Request $request, Closure $next): Response
     {
+        if ($request->is('admin', 'admin/*', 'subscriptions/payments/webhooks/*')) {
+            return $next($request);
+        }
+
         Auth::shouldUse('customers');
         $guard = Auth::guard('customers');
         $customer = $guard->user();
@@ -440,7 +623,7 @@ class CustomerAuthService
             if (! $customer->is_verified && ! $customer->is_blocked && ! $customer->is_suspended) {
                 $customerId = (int) $customer->getAuthIdentifier();
                 $this->logout($request);
-                $request->session()->put('customer_verification', ['customer_id' => $customerId, 'expires_at' => time() + 86400]);
+                $request->session()->put('customer_verification', ['customer_id' => $customerId, 'expires_at' => now()->timestamp + 86400]);
 
                 return $request->expectsJson()
                     ? response()->json(['message' => 'Please verify your email before logging in.'], 401)

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Users;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CustomerAuthRequest;
 use App\Services\CustomerAuthService;
+use App\Services\CustomerPasswordService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\RedirectResponse;
@@ -17,14 +18,14 @@ class AuthController extends Controller
 {
     public function __construct(private CustomerAuthService $auth) {}
 
-    public function login(): View
+    public function login(Request $request): View
     {
-        return view('users.login', ['countries' => $this->auth->countries()]);
+        return view('users.login', $this->auth->formCountries() + ['conflictingSession' => $this->auth->pendingLoginSession($request)]);
     }
 
     public function register(): View
     {
-        return view('users.register', ['countries' => $this->auth->countries()]);
+        return view('users.register', $this->auth->formCountries());
     }
 
     public function store(CustomerAuthRequest $request): RedirectResponse
@@ -97,7 +98,7 @@ class AuthController extends Controller
             return redirect()->route('login');
         }
 
-        return view('users.register', ['isVerification' => true, 'customer' => $customer]);
+        return view('users.verification', ['isLoginOtp' => false, 'customer' => $customer]);
     }
 
     public function verifyEmail(CustomerAuthRequest $request): RedirectResponse
@@ -112,6 +113,63 @@ class AuthController extends Controller
         $this->auth->sendVerification($request);
 
         return redirect()->route('customers.verification')->with('status', $request->session()->has('verification_delivery_error') ? 'Please retry sending your code.' : 'A new verification code has been sent.');
+    }
+
+    public function sendLoginCode(CustomerAuthRequest $request): RedirectResponse
+    {
+        $this->auth->sendLoginCode($request, $request->validated());
+
+        return redirect()->route($request->session()->has('customer_login_otp') ? 'login.mobile.verification' : 'customers.verification');
+    }
+
+    public function loginCode(Request $request): View|RedirectResponse
+    {
+        $customer = $this->auth->loginCodeCustomer($request);
+
+        return $customer === null
+            ? redirect()->route('login')
+            : view('users.verification', ['isLoginOtp' => true, 'customer' => $customer]);
+    }
+
+    public function verifyLoginCode(CustomerAuthRequest $request): RedirectResponse
+    {
+        if (! $this->auth->verifyLoginCode($request, $request->validated('code'))) {
+            return redirect()->route('login');
+        }
+
+        return redirect()->intended(route('football.home'));
+    }
+
+    public function resendLoginCode(Request $request): RedirectResponse
+    {
+        $this->auth->resendLoginCode($request);
+
+        return redirect()->route('login.mobile.verification')->with('status', 'A new login code has been sent.');
+    }
+
+    public function forgotPassword(): View
+    {
+        return view('users.forgotPassword');
+    }
+
+    public function sendPasswordReset(CustomerAuthRequest $request, CustomerPasswordService $passwords): RedirectResponse
+    {
+        $passwords->sendResetLink($request->validated('email'));
+
+        return back()->with('status', 'If the account is available, a password reset link has been sent to its email address.');
+    }
+
+    public function resetPassword(Request $request, string $token): View
+    {
+        return view('users.resetPassword', ['token' => $token, 'email' => $request->query('email', '')]);
+    }
+
+    public function updatePassword(CustomerAuthRequest $request, CustomerPasswordService $passwords): RedirectResponse
+    {
+        $passwords->reset($request->validated());
+        $request->session()->forget(['customer_login_otp', 'customer_pending_login']);
+
+        return redirect()->route('login')->with('status', 'Password reset successfully. Please log in with your new password.');
     }
 
     public function logout(Request $request): RedirectResponse

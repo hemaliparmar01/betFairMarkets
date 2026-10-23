@@ -1,195 +1,325 @@
 @extends('users.layout.main')
 
-@section('title', ($isVerification ?? false) ? 'Verify Email · BF Markets' : 'Register · BF Markets')
+@section('title', 'Create BF Markets Account | Live Betfair Access')
+@section('meta_description', 'Create your BF Markets account to access live Betfair odds, liquidity tracking, and
+    real-time market monitoring across multiple sports.')
+
+@push('head')
+    <link rel="canonical" href="{{ url()->current() }}">
+    <meta property="og:title" content="{{ __('Create BF Markets Account | Live Betfair Access') }}">
+    <meta property="og:description"
+        content="{{ __('Create your BF Markets account to access live Betfair odds, liquidity tracking, and real-time market monitoring across multiple sports.') }}">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{ url()->current() }}">
+    <meta property="og:image" content="{{ asset('images/seo/register-og.jpg') }}">
+    <meta name="twitter:card" content="summary_large_image">
+@endpush
+
+@push('head')
+    @vite(['resources/users/css/auth.css', 'resources/users/js/auth/app.js'])
+@endpush
 
 @section('content')
-    @if ($isVerification ?? false)
-        <section class="mx-auto my-10 max-w-lg rounded-3xl border border-[#d7e7f3] bg-white p-6 shadow-sm sm:p-8 dark:border-[#365165] dark:bg-[#1d3040]">
-            <span class="inline-flex size-12 items-center justify-center rounded-2xl bg-[#edf6fc] text-xl text-[#1a6b9c] dark:bg-[#162936]"><i class="fas fa-envelope" aria-hidden="true"></i></span>
-            <h1 class="mt-5 text-2xl font-extrabold text-[#0b2a40] dark:text-white">Verify your email</h1>
-            <p class="mt-3 text-sm leading-6 text-[#5a7d99] dark:text-[#a9bfd0]">Enter the 6-digit code sent to <strong class="break-all">{{ $customer->email }}</strong>. The code expires in 10 minutes.</p>
-            @if (session('verification_delivery_error'))
-                <p role="alert" class="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-200">{{ session('verification_delivery_error') }}</p>
-            @endif
-            @if (session('status'))
-                <p role="status" class="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200">{{ session('status') }}</p>
-            @endif
-            <form action="{{ route('customers.verification.verify') }}" method="post" class="mt-6">
-                @csrf
-                <label for="verification-code" class="mb-2 block text-sm font-semibold text-[#0b2a40] dark:text-white">Verification code</label>
-                <input id="verification-code" name="code" required type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" aria-describedby="verification-code-error" @if ($errors->has('code')) aria-invalid="true" @endif class="h-12 w-full rounded-xl border border-[#cfe1ee] bg-[#f8fbfe] px-4 text-sm text-[#0b2a40] outline-none focus:border-[#1a6b9c] focus:ring-4 focus:ring-[#1a6b9c]/10 dark:border-[#365165] dark:bg-[#162936] dark:text-white text-center text-xl tracking-[0.35em]" placeholder="000000" />
-                @error('code') <p id="verification-code-error" role="alert" class="mt-2 text-xs text-red-600 dark:text-red-300">{{ $message }}</p> @enderror
-                <button type="submit" class="mt-5 h-12 w-full rounded-xl bg-gradient-to-r from-[#0b2a40] to-[#1a6b9c] font-bold text-white">Verify Email</button>
-            </form>
-            <form action="{{ route('customers.verification.resend') }}" method="post" class="mt-4 text-center">
-                @csrf
-                <button type="submit" class="text-sm font-semibold text-[#1a6b9c] hover:underline dark:text-[#79bde8]">Resend Code</button>
-                <p class="mt-2 text-xs text-[#5a7d99] dark:text-[#a9bfd0]">Wait 60 seconds before requesting another code.</p>
-            </form>
-            <a href="{{ route('login') }}" class="mt-6 block text-center text-sm text-[#5a7d99] hover:underline dark:text-[#a9bfd0]">Back to login</a>
-        </section>
-    @else
+<div class="customer-auth">
+    <div class="betguru-auth-bg min-h-screen">
+        <div class="px-4 py-6 sm:px-6 lg:px-8">
+            <div class="mx-auto max-w-7xl">
+                <main data-customer-form
+                    data-selected-country="{{ old('country', $defaultCountry) }}"
+                    data-selected-dial-code="{{ old('mobile_code', $defaultDialCode) }}"
+                    data-selected-country-code="{{ old('country_code', $defaultCountryCode) }}"
+                    data-default-timezone="{{ $defaultTimezone }}"
+                    class="overflow-hidden rounded-[2rem] betguru-card">
+                    <template data-country-config>{!! json_encode($countryOptions, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!}</template>
+                    <section class="p-6 sm:p-8 lg:p-10 theme-bg-surface">
+                        <div class="">
+                            <div class="mb-8 lg:hidden">
+                                <div class="flex items-center gap-3">
+                                    <div
+                                        class="flex h-12 w-12 items-center justify-center rounded-2xl text-base font-bold text-[rgb(var(--surface))] betguru-gradient-badge">
+                                        BF
+                                    </div>
 
-    <section class="relative isolate my-6 overflow-hidden rounded-[28px] border border-[#dce9f4] bg-gradient-to-br from-[#f5faff] via-white to-[#edf6fc] px-3 py-6 sm:px-6 sm:py-10 lg:px-10 dark:border-[#2a3f50] dark:from-[#142634] dark:via-[#1a2a38] dark:to-[#173247]">
-        <div class="pointer-events-none absolute -right-20 -top-20 -z-10 size-72 rounded-full bg-[#79bde8]/20 blur-3xl"></div>
-        <div class="pointer-events-none absolute -bottom-24 -left-16 -z-10 size-72 rounded-full bg-[#1a6b9c]/10 blur-3xl"></div>
-
-        <div class="mx-auto max-w-6xl rounded-[24px] border border-[#d7e7f3] bg-white/95 p-4 shadow-[0_20px_60px_rgba(11,42,64,0.10)] sm:p-7 lg:p-10 dark:border-[#314b5d] dark:bg-[#1d3040]/95">
-            <div>
-                <span class="text-xs font-extrabold uppercase tracking-[0.22em] text-[#1a6b9c] dark:text-[#79bde8]">Customer Register</span>
-                <h1 class="mt-3 text-3xl font-extrabold tracking-tight text-[#0b2a40] sm:text-4xl dark:text-white">Start your BF Markets access</h1>
-                <p class="mt-3 max-w-3xl text-sm leading-6 text-[#5a7d99] sm:text-base dark:text-[#a9bfd0]">Access real-time sports market activity, Pinnacle odds drop signals, advanced filters, and powerful tools for monitoring sports exchange markets.</p>
-            </div>
-
-            <div class="mt-7 flex items-start gap-4 rounded-2xl border border-[#bfdaed] bg-gradient-to-r from-[#edf6fc] to-[#f7fbfe] p-4 sm:p-5 dark:border-[#36576f] dark:from-[#162d3d] dark:to-[#1f3444]">
-                <span class="flex size-11 shrink-0 items-center justify-center rounded-full bg-white text-[#1a6b9c] shadow-sm dark:bg-[#29465b] dark:text-[#8ac7eb]" aria-hidden="true"><i class="fas fa-wand-magic-sparkles"></i></span>
-                <div>
-                    <h2 class="font-bold text-[#0b2a40] dark:text-white">7-Day Free Trial</h2>
-                    <p class="mt-1 text-sm leading-6 text-[#5a7d99] dark:text-[#a9bfd0]">No payment required. No card required. Full access for 7 days.</p>
-                </div>
-            </div>
-
-            <form class="mt-7" action="{{ route('register.store') }}" method="post" data-customer-auth>
-                @csrf
-                <div class="grid gap-5 md:grid-cols-2">
-                    <div>
-                        <label for="register-name" class="mb-2 block text-sm font-semibold text-[#0b2a40] dark:text-[#e8edf2]">Name</label>
-                        <input id="register-name" name="name" value="{{ old('name') }}" required type="text" autocomplete="given-name" placeholder="Enter first name" class="h-14 w-full rounded-2xl border border-[#cfe1ee] bg-[#f8fbfe] px-4 text-sm text-[#0b2a40] outline-none transition placeholder:text-[#88a5b9] focus:border-[#1a6b9c] focus:ring-4 focus:ring-[#1a6b9c]/10 dark:border-[#365165] dark:bg-[#162936] dark:text-white dark:placeholder:text-[#718fa4]" />
-                        @error('name') <p role="alert" class="mt-2 text-xs text-red-600 dark:text-red-300">{{ $message }}</p> @enderror
-                    </div>
-                    <div>
-                        <label for="register-surname" class="mb-2 block text-sm font-semibold text-[#0b2a40] dark:text-[#e8edf2]">Surname</label>
-                        <input id="register-surname" name="surname" value="{{ old('surname') }}" required type="text" autocomplete="family-name" placeholder="Enter last name" class="h-14 w-full rounded-2xl border border-[#cfe1ee] bg-[#f8fbfe] px-4 text-sm text-[#0b2a40] outline-none transition placeholder:text-[#88a5b9] focus:border-[#1a6b9c] focus:ring-4 focus:ring-[#1a6b9c]/10 dark:border-[#365165] dark:bg-[#162936] dark:text-white dark:placeholder:text-[#718fa4]" />
-                        @error('surname') <p role="alert" class="mt-2 text-xs text-red-600 dark:text-red-300">{{ $message }}</p> @enderror
-                    </div>
-                    <div class="md:col-span-2">
-                        <label for="register-username" class="mb-2 block text-sm font-semibold text-[#0b2a40] dark:text-[#e8edf2]">Username</label>
-                        <input id="register-username" name="username" value="{{ old('username') }}" required type="text" autocomplete="username" placeholder="Choose a username" class="h-14 w-full rounded-2xl border border-[#cfe1ee] bg-[#f8fbfe] px-4 text-sm text-[#0b2a40] outline-none transition placeholder:text-[#88a5b9] focus:border-[#1a6b9c] focus:ring-4 focus:ring-[#1a6b9c]/10 dark:border-[#365165] dark:bg-[#162936] dark:text-white dark:placeholder:text-[#718fa4]" />
-                        @error('username') <p role="alert" class="mt-2 text-xs text-red-600 dark:text-red-300">{{ $message }}</p> @enderror
-                    </div>
-                    <div class="md:col-span-2">
-                        <label for="register-email" class="mb-2 block text-sm font-semibold text-[#0b2a40] dark:text-[#e8edf2]">Email Address</label>
-                        <input id="register-email" name="email" value="{{ old('email') }}" required type="email" autocomplete="email" placeholder="Enter email address" class="h-14 w-full rounded-2xl border border-[#cfe1ee] bg-[#f8fbfe] px-4 text-sm text-[#0b2a40] outline-none transition placeholder:text-[#88a5b9] focus:border-[#1a6b9c] focus:ring-4 focus:ring-[#1a6b9c]/10 dark:border-[#365165] dark:bg-[#162936] dark:text-white dark:placeholder:text-[#718fa4]" />
-                        @error('email') <p role="alert" class="mt-2 text-xs text-red-600 dark:text-red-300">{{ $message }}</p> @enderror
-                    </div>
-                    <div class="md:col-span-2">
-                        <label for="register-password" class="mb-2 block text-sm font-semibold text-[#0b2a40] dark:text-[#e8edf2]">Password</label>
-                        <div class="relative">
-                            <input id="register-password" name="password" required minlength="8" type="password" autocomplete="new-password" aria-describedby="password-hint password-strength-label" placeholder="Create password" class="h-14 w-full rounded-2xl border border-[#cfe1ee] bg-[#f8fbfe] px-4 pr-20 text-sm text-[#0b2a40] outline-none transition placeholder:text-[#88a5b9] focus:border-[#1a6b9c] focus:ring-4 focus:ring-[#1a6b9c]/10 dark:border-[#365165] dark:bg-[#162936] dark:text-white dark:placeholder:text-[#718fa4]" />
-                            <button type="button" data-password-toggle="register-password" class="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-[#1a6b9c] hover:text-[#0b2a40] dark:text-[#79bde8] dark:hover:text-white">Show</button>
-                        </div>
-                        @error('password') <p role="alert" class="mt-2 text-xs text-red-600 dark:text-red-300">{{ $message }}</p> @enderror
-                        <p id="password-hint" class="mt-2 text-xs text-[#6e8ca2] dark:text-[#8eabbf]">Use at least 8 characters with letters, numbers, and symbols.</p>
-                        <div class="mt-3 grid grid-cols-3 gap-2" aria-hidden="true">
-                            <span data-password-strength-bar class="h-1.5 rounded-full bg-[#d4e8f5]"></span>
-                            <span data-password-strength-bar class="h-1.5 rounded-full bg-[#d4e8f5]"></span>
-                            <span data-password-strength-bar class="h-1.5 rounded-full bg-[#d4e8f5]"></span>
-                        </div>
-                        <p id="password-strength-label" role="status" aria-live="polite" class="mt-2 text-xs font-semibold text-[#6e8ca2] dark:text-[#8eabbf]">Enter a password to check its strength.</p>
-                    </div>
-                    <div class="md:col-span-2">
-                        <label for="register-mobile" class="mb-2 block text-sm font-semibold text-[#0b2a40] dark:text-[#e8edf2]">Mobile Number</label>
-                        <div class="flex h-14 overflow-hidden rounded-2xl border border-[#cfe1ee] bg-[#f8fbfe] transition focus-within:border-[#1a6b9c] focus-within:ring-4 focus-within:ring-[#1a6b9c]/10 dark:border-[#365165] dark:bg-[#162936]">
-                            <div class="relative shrink-0 border-r border-[#cfe1ee] dark:border-[#365165]">
-                                <select id="register-country-code" name="country_code" class="h-full w-[190px] appearance-none border-0 bg-transparent py-0 pl-3 pr-8 text-sm font-semibold text-[#0b2a40] outline-none sm:w-[245px] sm:pl-5 dark:text-white" aria-label="Country calling code">
-                                    @foreach ($countries as $country)
-                                        <option value="{{ $country['code'] }}" data-country="{{ $country['name'] }}" data-timezone="{{ $country['timezone'] }}" @selected($country['code'] === old('country_code', 'IN'))>
-                                            {{ $country['flag'] }} {{ $country['name'] }} (+{{ $country['calling_code'] }})
-                                        </option>
-                                    @endforeach
-                                </select>
-                                <i class="fas fa-chevron-down pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#7898ad]" aria-hidden="true"></i>
+                                    <div>
+                                        <p class="text-lg font-bold theme-text-main">BF Markets</p>
+                                        <p class="text-xs theme-text-muted">{{ __('Customer Registration') }}
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
-                            <input id="register-mobile" name="mobile" value="{{ old('mobile') }}" required type="tel" inputmode="tel" autocomplete="tel" placeholder="Enter mobile number" class="min-w-0 flex-1 border-0 bg-transparent px-4 text-sm text-[#0b2a40] outline-none placeholder:text-[#88a5b9] dark:text-white dark:placeholder:text-[#718fa4]" />
+
+                            <div class="mb-8">
+                                <p class="text-sm font-semibold uppercase tracking-[0.22em] theme-text-primary">
+                                    {{ __('Customer Register') }}</p>
+                                <h2 class="mt-3 text-3xl font-bold tracking-tight theme-text-main">
+                                    {{ __('Start your BF Markets access') }}
+                                </h2>
+                                <p class="mt-3 text-sm leading-6 theme-text-muted">
+                                    {{ __('Register to access live Betfair market monitoring, liquidity insights, and advanced filters built for active users.') }}
+                                </p>
+                            </div>
+
+                            <div class="betguru-trial-banner mb-6">
+                                <div class="betguru-trial-icon">✨</div>
+
+                                <div>
+                                    <p class="betguru-trial-title">{{ __('7-Day Free Trial') }}</p>
+                                    <p class="betguru-trial-text">
+                                        {{ __('No payment required. No card required. Full access for 7 days.') }}
+                                    </p>
+                                </div>
+                            </div>
+                            <form method="POST" action="{{ route('register.store') }}" data-customer-submit class="space-y-5"
+                                novalidate>
+                                @csrf
+
+                                <input type="hidden" name="device_id">
+                                <input type="hidden" name="fingerprint_hash">
+                                <input type="hidden" name="timezone">
+                                <input type="hidden" name="screen_resolution">
+                                <input type="hidden" name="webgl_vendor">
+                                <div class="grid grid-cols-1 gap-5 md:grid-cols-2">
+                                    <div>
+                                        <label for="name" class="betguru-label">{{ __('Name') }}</label>
+                                        <input id="name" type="text" name="name" value="{{ old('name') }}"
+                                            placeholder="{{ __('Enter first name') }}" autocomplete="given-name"
+                                            class="betguru-input">
+                                        @error('name')
+                                            <p class="mt-2 text-sm theme-text-danger">{{ $message }}</p>
+                                        @enderror
+                                    </div>
+
+                                    <div>
+                                        <label for="surname" class="betguru-label">{{ __('Surname') }}</label>
+                                        <input id="surname" type="text" name="surname" value="{{ old('surname') }}"
+                                            placeholder="{{ __('Enter last name') }}" autocomplete="family-name"
+                                            class="betguru-input">
+                                        @error('surname')
+                                            <p class="mt-2 text-sm theme-text-danger">{{ $message }}</p>
+                                        @enderror
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label for="username" class="betguru-label">{{ __('Username') }}</label>
+                                    <input id="username" type="text" name="username" value="{{ old('username') }}"
+                                        placeholder="{{ __('Choose a username') }}" autocomplete="username"
+                                        class="betguru-input">
+                                    @error('username')
+                                        <p class="mt-2 text-sm theme-text-danger">{{ $message }}</p>
+                                    @enderror
+                                </div>
+
+                                <div>
+                                    <label for="email" class="betguru-label">{{ __('Email Address') }}</label>
+                                    <input id="email" type="email" name="email" value="{{ old('email') }}"
+                                        placeholder="{{ __('Enter email address') }}" autocomplete="email"
+                                        class="betguru-input">
+                                    @error('email')
+                                        <p class="mt-2 text-sm theme-text-danger">{{ $message }}</p>
+                                    @enderror
+                                </div>
+
+                                <div>
+                                    <div>
+                                        <label for="password" class="betguru-label">{{ __('Password') }}</label>
+
+                                        <div class="relative">
+                                            <input id="password" type="password" name="password" data-password-input
+                                                placeholder="{{ __('Create password') }}" autocomplete="new-password"
+                                                class="betguru-input pr-16">
+
+                                            <button type="button" data-password-toggle
+                                                class="absolute inset-y-0 right-4 text-sm font-semibold transition theme-text-muted">
+                                                <span data-password-toggle-label data-show-label="{{ __('Show') }}"
+                                                    data-hide-label="{{ __('Hide') }}">{{ __('Show') }}</span>
+                                            </button>
+                                        </div>
+
+                                        <p class="mt-2 text-xs font-medium theme-text-muted" data-password-strength-text>
+                                            {{ __('Use at least 8 characters with letters, numbers, and symbols.') }}
+                                        </p>
+
+                                        @error('password')
+                                            <p class="mt-2 text-sm theme-text-danger">{{ $message }}</p>
+                                        @enderror
+                                    </div>
+
+                                    <div class="mt-3">
+                                        <div class="grid grid-cols-3 gap-2">
+                                            <div class="h-2 rounded-full theme-bg-border" data-password-strength-segment>
+                                            </div>
+                                            <div class="h-2 rounded-full theme-bg-border" data-password-strength-segment>
+                                            </div>
+                                            <div class="h-2 rounded-full theme-bg-border" data-password-strength-segment>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label class="betguru-label">{{ __('Mobile Number') }}</label>
+
+                                    <div class="flex overflow-visible rounded-2xl border transition theme-panel-soft">
+                                        <div class="relative w-[250px] betguru-divider-input theme-bg-surface">
+                                            <input type="hidden" name="mobile_code">
+                                            <input type="hidden" name="country_code">
+
+                                            <button type="button" data-country-toggle="code" aria-expanded="false"
+                                                class="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left">
+                                                <div class="flex min-w-0 items-center gap-3" data-country-selected="code">
+                                                    <img data-country-selected-flag
+                                                        class="h-5 w-7 rounded-sm object-cover shadow-sm">
+
+                                                    <div class="min-w-0">
+                                                        <p class="text-xs theme-text-muted" data-country-selected-label></p>
+                                                    </div>
+                                                </div>
+
+                                                <svg class="h-4 w-4 shrink-0 theme-text-muted" viewBox="0 0 20 20"
+                                                    fill="currentColor" aria-hidden="true">
+                                                    <path fill-rule="evenodd"
+                                                        d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.51a.75.75 0 01-1.08 0l-4.25-4.51a.75.75 0 01.02-1.06z"
+                                                        clip-rule="evenodd" />
+                                                </svg>
+                                            </button>
+
+                                            <div data-country-dropdown="code" hidden
+                                                class="absolute left-0 top-[calc(100%+8px)] z-30 w-[360px] rounded-2xl border p-2 shadow-2xl theme-panel-surface">
+                                                <div class="mb-2">
+                                                    <input type="text" data-country-search="code"
+                                                        placeholder="{{ __('Search country or code...') }}"
+                                                        class="betguru-input">
+                                                </div>
+
+                                                <div class="max-h-72 overflow-y-auto">
+                                                    <div data-country-options="code"></div>
+                                                    <p data-country-empty="code" hidden
+                                                        class="px-3 py-3 text-sm theme-text-muted">
+                                                        {{ __('No countries found.') }}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <input type="text" name="mobile" value="{{ old('mobile') }}"
+                                            placeholder="{{ __('Enter mobile number') }}" inputmode="numeric"
+                                            autocomplete="tel-national"
+                                            class="w-full bg-transparent px-4 py-3.5 text-sm outline-none theme-text-main">
+                                    </div>
+
+                                    @error('country_code')
+                                        <p class="mt-2 text-sm theme-text-danger">{{ $message }}</p>
+                                    @enderror
+
+                                    @error('mobile')
+                                        <p class="mt-2 text-sm theme-text-danger">{{ $message }}</p>
+                                    @enderror
+                                </div>
+
+                                <div>
+                                    <label class="betguru-label">{{ __('Country') }}</label>
+
+                                    <div class="relative">
+                                        <input type="hidden" name="country">
+
+                                        <button type="button" data-country-toggle="country" aria-expanded="false"
+                                            class="flex w-full items-center justify-between rounded-2xl border px-4 py-3.5 text-left transition theme-panel-soft">
+                                            <div class="flex min-w-0 items-center gap-3" data-country-selected="country">
+                                                <img data-country-selected-flag
+                                                    class="h-5 w-7 rounded-sm object-cover shadow-sm">
+
+                                                <span class="truncate text-sm font-semibold theme-text-main" data-country-selected-label></span>
+                                            </div>
+
+                                            <span data-country-placeholder="country" class="text-sm theme-text-muted" hidden>
+                                                {{ __('Select country') }}
+                                            </span>
+
+                                            <svg class="h-4 w-4 shrink-0 theme-text-muted" viewBox="0 0 20 20"
+                                                fill="currentColor" aria-hidden="true">
+                                                <path fill-rule="evenodd"
+                                                    d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.51a.75.75 0 01-1.08 0l-4.25-4.51a.75.75 0 01.02-1.06z"
+                                                    clip-rule="evenodd" />
+                                            </svg>
+                                        </button>
+
+                                        <div data-country-dropdown="country" hidden
+                                            class="absolute left-0 top-[calc(100%+8px)] z-30 w-full rounded-2xl border p-2 shadow-2xl theme-panel-surface">
+                                            <div class="mb-2">
+                                                <input type="text" data-country-search="country"
+                                                    placeholder="{{ __('Search country...') }}" class="betguru-input">
+                                            </div>
+
+                                            <div class="max-h-72 overflow-y-auto">
+                                                <div data-country-options="country"></div>
+                                                <p data-country-empty="country" hidden
+                                                    class="px-3 py-3 text-sm theme-text-muted">
+                                                    {{ __('No countries found.') }}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    @error('country')
+                                        <p class="mt-2 text-sm theme-text-danger">{{ $message }}</p>
+                                    @enderror
+                                </div>
+
+                                <div class="rounded-2xl px-4 py-4 betguru-card-soft">
+                                    <label class="flex items-start gap-3">
+                                        <input type="checkbox" name="terms" value="1"
+                                            {{ old('terms') ? 'checked' : '' }}
+                                            class="mt-1 h-4 w-4 rounded betguru-check">
+                                        <span class="text-sm leading-6 theme-text-muted">
+                                            {{ __('I agree to the') }}
+                                            <a target="_blank" href="{{ route('terms-of-service') }}"
+                                                class="betguru-link">{{ __('Terms of Service') }}</a>
+                                            {{ __('and') }}
+                                            <a target="_blank" href="{{ route('privacy-policy') }}"
+                                                class="betguru-link">{{ __('Privacy Policy') }}</a>.
+                                        </span>
+                                    </label>
+
+                                    @error('terms')
+                                        <p class="mt-2 text-sm theme-text-danger">{{ $message }}</p>
+                                    @enderror
+                                </div>
+
+                                <button type="submit" class="betguru-btn-primary" data-submit-button>
+                                    <svg data-submit-spinner hidden class="mr-2 h-5 w-5 animate-spin"
+                                        xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-20" cx="12" cy="12" r="10"
+                                            stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-90" fill="currentColor"
+                                            d="M4 12a8 8 0 018-8v4A4 4 0 008 12H4z"></path>
+                                    </svg>
+
+                                    <span data-submit-label data-loading-label="{{ __('Creating account...') }}">{{ __('Start Free Trial') }}</span>
+                                </button>
+
+                                <div class="grid grid-cols-1 gap-3 pt-1 sm:grid-cols-3">
+                                    <div class="rounded-2xl px-4 py-3 text-center text-xs font-medium betguru-muted-box">
+                                        {{ __('Secure Registration') }}
+                                    </div>
+                                    <div class="rounded-2xl px-4 py-3 text-center text-xs font-medium betguru-muted-box">
+                                        {{ __('SMS Verification') }}
+                                    </div>
+                                    <div class="rounded-2xl px-4 py-3 text-center text-xs font-medium betguru-muted-box">
+                                        {{ __('English / Georgian') }}
+                                    </div>
+                                </div>
+
+                                <p class="text-center text-sm theme-text-muted">
+                                    {{ __('Already have an account?') }}
+                                    <a href="{{ route('login') }}" class="betguru-link">{{ __('Login') }}</a>
+                                </p>
+                            </form>
                         </div>
-                        @error('country_code') <p role="alert" class="mt-2 text-xs text-red-600 dark:text-red-300">{{ $message }}</p> @enderror
-                        @error('mobile') <p role="alert" class="mt-2 text-xs text-red-600 dark:text-red-300">{{ $message }}</p> @enderror
-                    </div>
-                    <div>
-                        <label for="register-country" class="mb-2 block text-sm font-semibold text-[#0b2a40] dark:text-[#e8edf2]">Country</label>
-                        <input id="register-country" name="country" type="text" value="India" disabled class="h-14 w-full cursor-not-allowed rounded-2xl border border-[#cfe1ee] bg-[#edf4f8] px-4 text-sm font-semibold text-[#496b83] opacity-100 outline-none dark:border-[#365165] dark:bg-[#142633] dark:text-[#a9bfd0]" />
-                    </div>
-                    <div>
-                        <label for="register-timezone" class="mb-2 block text-sm font-semibold text-[#0b2a40] dark:text-[#e8edf2]">Timezone</label>
-                        <input id="register-timezone" name="timezone" type="text" value="Asia/Kolkata" disabled class="h-14 w-full cursor-not-allowed rounded-2xl border border-[#cfe1ee] bg-[#edf4f8] px-4 text-sm font-semibold text-[#496b83] opacity-100 outline-none dark:border-[#365165] dark:bg-[#142633] dark:text-[#a9bfd0]" />
-                    </div>
-                </div>
-
-                <label class="mt-6 flex cursor-pointer items-start gap-3 rounded-2xl border border-[#d7e7f3] bg-[#f8fbfe] p-4 text-sm leading-6 text-[#5a7d99] dark:border-[#365165] dark:bg-[#162936] dark:text-[#a9bfd0]">
-                    <input type="checkbox" name="terms" value="1" required @checked(old('terms')) class="mt-1 size-4 shrink-0 rounded border-[#aec9dc] text-[#1a6b9c] focus:ring-[#1a6b9c]" />
-                    <span>I agree to the <a href="{{ route('terms-of-service') }}" class="font-bold text-[#1a6b9c] hover:underline dark:text-[#79bde8]">Terms of Service</a> and <a href="{{ route('privacy-policy') }}" class="font-bold text-[#1a6b9c] hover:underline dark:text-[#79bde8]">Privacy Policy</a>.</span>
-                </label>
-                @error('terms') <p role="alert" class="mt-2 text-xs text-red-600 dark:text-red-300">{{ $message }}</p> @enderror
-
-                <button type="submit" class="mt-6 inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#0b2a40] to-[#1a6b9c] px-6 text-sm font-bold text-white shadow-[0_12px_28px_rgba(26,107,156,0.24)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_34px_rgba(26,107,156,0.32)]">
-                    Start Free Trial
-                    <i class="fas fa-arrow-right" aria-hidden="true"></i>
-                </button>
-            </form>
-
-            <div class="mt-6 grid gap-3 text-center text-xs font-semibold text-[#496b83] sm:grid-cols-3 dark:text-[#a9bfd0]">
-                <div class="rounded-xl border border-[#d7e7f3] px-3 py-3 dark:border-[#365165]"><i class="fas fa-lock mr-1.5 text-[#1a6b9c] dark:text-[#79bde8]"></i>Secure Registration</div>
-                <div class="rounded-xl border border-[#d7e7f3] px-3 py-3 dark:border-[#365165]"><i class="fas fa-envelope mr-1.5 text-[#1a6b9c] dark:text-[#79bde8]"></i>Email Verification</div>
-                <div class="rounded-xl border border-[#d7e7f3] px-3 py-3 dark:border-[#365165]"><i class="fas fa-language mr-1.5 text-[#1a6b9c] dark:text-[#79bde8]"></i>English / Georgian</div>
+                    </section>
+                </main>
             </div>
-
-            <p class="mt-7 text-center text-sm text-[#5a7d99] dark:text-[#a9bfd0]">Already have an account? <a href="{{ route('login') }}" class="font-bold text-[#1a6b9c] hover:underline dark:text-[#79bde8]">Login</a></p>
         </div>
-    </section>
-    @endif
+    </div>
+</div>
 @endsection
-
-@unless ($isVerification ?? false)
-@push('js')
-    <script>
-        const countryCodeSelect = document.getElementById('register-country-code');
-        const countryInput = document.getElementById('register-country');
-        const timezoneInput = document.getElementById('register-timezone');
-
-        const updateCountryDetails = () => {
-            const selectedCountry = countryCodeSelect.options[countryCodeSelect.selectedIndex];
-
-            countryInput.value = selectedCountry.dataset.country;
-            timezoneInput.value = selectedCountry.dataset.timezone;
-        };
-
-        countryCodeSelect.addEventListener('change', updateCountryDetails);
-        updateCountryDetails();
-
-        const passwordInput = document.getElementById('register-password');
-        const strengthBars = document.querySelectorAll('[data-password-strength-bar]');
-        const strengthLabel = document.getElementById('password-strength-label');
-        const updatePasswordStrength = () => {
-            const password = passwordInput.value;
-            const letters = /\p{L}/u.test(password);
-            const numbers = /\p{N}/u.test(password);
-            const symbols = /[^\p{L}\p{N}\s]/u.test(password);
-            const meetsMinimum = password.length >= 8 && letters && numbers && symbols;
-            const strong = meetsMinimum && password.length >= 12 && /\p{Ll}/u.test(password) && /\p{Lu}/u.test(password);
-            const level = password.length === 0 ? 0 : strong ? 3 : meetsMinimum ? 2 : 1;
-            const colors = ['bg-[#d4e8f5]', 'bg-red-500', 'bg-amber-500', 'bg-emerald-500'];
-
-            strengthBars.forEach((bar, index) => {
-                bar.classList.remove(...colors);
-                bar.classList.add(index < level ? colors[level] : colors[0]);
-            });
-            strengthLabel.textContent = ['Enter a password to check its strength.', 'Weak password', 'Medium password', 'Strong password'][level];
-            strengthLabel.classList.remove('text-[#6e8ca2]', 'dark:text-[#8eabbf]', 'text-red-600', 'text-amber-600', 'text-emerald-600');
-            strengthLabel.classList.add(['text-[#6e8ca2]', 'text-red-600', 'text-amber-600', 'text-emerald-600'][level]);
-        };
-        passwordInput.addEventListener('input', updatePasswordStrength);
-        passwordInput.addEventListener('change', updatePasswordStrength);
-        updatePasswordStrength();
-
-        document.querySelectorAll('[data-password-toggle]').forEach((button) => {
-            button.addEventListener('click', () => {
-                const input = document.getElementById(button.dataset.passwordToggle);
-                const shouldShow = input.type === 'password';
-
-                input.type = shouldShow ? 'text' : 'password';
-                button.textContent = shouldShow ? 'Hide' : 'Show';
-            });
-        });
-    </script>
-@endpush
-@endunless

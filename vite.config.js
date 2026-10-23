@@ -7,7 +7,11 @@ export default defineConfig({
     plugins: [
         laravel({
             input: [
+                'resources/admin/css/app.css',
+                'resources/admin/js/app.js',
                 'resources/users/css/app.css',
+                'resources/users/css/auth.css',
+                'resources/users/js/auth/app.js',
                 'resources/users/js/app.js',
                 'resources/users/js/sports/football.js',
                 'resources/users/js/sports/cricket.js',

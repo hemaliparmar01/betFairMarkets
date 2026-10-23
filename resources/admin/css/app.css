@@ -1,0 +1,380 @@
+/* Admin specific overrides */
+@import "tailwindcss";
+
+:root {
+    color-scheme: light;
+
+    --bg: 244 248 252;
+    --bg-soft: 236 245 255;
+
+    --surface: 255 255 255;
+    --surface-soft: 248 250 252;
+    --surface-elevated: 255 255 255;
+
+    --border: 226 232 240;
+    --border-strong: 203 213 225;
+
+    --text-main: 15 23 42;
+    --text-soft: 51 65 85;
+    --text-muted: 100 116 139;
+
+    --primary: 14 165 233;
+    --primary-strong: 2 132 199;
+    --secondary: 34 211 238;
+    --accent: 245 158 11;
+
+    --success: 5 150 105;
+    --danger: 225 29 72;
+    --warning: 217 119 6;
+
+    --ring: 186 230 253;
+
+    --shadow-soft: 15 23 42;
+    --shadow-primary: 14 165 233;
+}
+
+.dark {
+    color-scheme: dark;
+
+    --bg: 2 6 23;
+    --bg-soft: 15 23 42;
+
+    --surface: 15 23 42;
+    --surface-soft: 30 41 59;
+    --surface-elevated: 17 24 39;
+
+    --border: 51 65 85;
+    --border-strong: 71 85 105;
+
+    --text-main: 241 245 249;
+    --text-soft: 203 213 225;
+    --text-muted: 148 163 184;
+
+    --primary: 56 189 248;
+    --primary-strong: 14 165 233;
+    --secondary: 45 212 191;
+    --accent: 251 191 36;
+
+    --success: 16 185 129;
+    --danger: 244 63 94;
+    --warning: 245 158 11;
+
+    --ring: 14 165 233;
+
+    --shadow-soft: 2 6 23;
+    --shadow-primary: 56 189 248;
+}
+
+html,
+body {
+    min-height: 100%;
+}
+
+body {
+    background: rgb(var(--bg));
+    color: rgb(var(--text-main));
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.betguru-auth-bg {
+    background:
+        radial-gradient(circle at top left, rgb(var(--primary) / 0.10), transparent 28%),
+        radial-gradient(circle at bottom right, rgb(var(--secondary) / 0.10), transparent 30%),
+        linear-gradient(to bottom, rgb(var(--bg)), rgb(var(--bg-soft)));
+}
+
+.betguru-card {
+    background: rgb(var(--surface) / 0.94);
+    border: 1px solid rgb(var(--border));
+    box-shadow: 0 20px 60px rgb(var(--shadow-soft) / 0.08);
+    backdrop-filter: blur(10px);
+}
+
+.betguru-card-soft {
+    background: rgb(var(--surface-soft));
+    border: 1px solid rgb(var(--border));
+}
+
+.betguru-card-elevated {
+    background: rgb(var(--surface-elevated));
+    border: 1px solid rgb(var(--border));
+    box-shadow: 0 12px 34px rgb(var(--shadow-soft) / 0.08);
+}
+
+.betguru-input {
+    width: 100%;
+    border-radius: 1rem;
+    border: 1px solid rgb(var(--border));
+    background: rgb(var(--surface-soft));
+    padding: 0.875rem 1rem;
+    font-size: 0.875rem;
+    color: rgb(var(--text-main));
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+.betguru-input::placeholder {
+    color: rgb(var(--text-muted));
+}
+
+.betguru-input:focus {
+    border-color: rgb(var(--primary));
+    background: rgb(var(--surface));
+    box-shadow: 0 0 0 4px rgb(var(--ring) / 0.30);
+}
+
+.betguru-select {
+    width: 100%;
+    border-radius: 1rem;
+    border: 1px solid rgb(var(--border));
+    background: rgb(var(--surface-soft));
+    padding: 0.875rem 1rem;
+    font-size: 0.875rem;
+    color: rgb(var(--text-main));
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+.betguru-select:focus {
+    border-color: rgb(var(--primary));
+    background: rgb(var(--surface));
+    box-shadow: 0 0 0 4px rgb(var(--ring) / 0.30);
+}
+
+.betguru-label {
+    margin-bottom: 0.5rem;
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: rgb(var(--text-soft));
+}
+
+.betguru-btn-primary {
+    display: inline-flex;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+    border-radius: 1rem;
+    background-image: linear-gradient(
+        to right,
+        rgb(var(--primary)),
+        rgb(var(--secondary))
+    );
+    padding: 1rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: white;
+    box-shadow: 0 14px 34px rgb(var(--shadow-primary) / 0.22);
+    transition: all 0.2s ease;
+}
+
+.betguru-btn-primary:hover {
+    transform: translateY(-1px);
+}
+
+.betguru-btn-primary:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.betguru-link {
+    color: rgb(var(--primary));
+    font-weight: 600;
+    transition: color 0.2s ease;
+}
+
+.betguru-link:hover {
+    color: rgb(var(--primary-strong));
+}
+
+.betguru-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 9999px;
+    border: 1px solid rgb(var(--primary) / 0.20);
+    background: rgb(var(--primary) / 0.10);
+    padding: 0.25rem 0.75rem;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgb(var(--primary));
+}
+
+.betguru-live-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 9999px;
+    border: 1px solid rgb(var(--danger) / 0.20);
+    background: rgb(var(--danger) / 0.10);
+    padding: 0.375rem 0.75rem;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgb(var(--danger));
+}
+
+.betguru-strength-weak {
+    background: rgb(var(--danger));
+}
+
+.betguru-strength-medium {
+    background: rgb(var(--warning));
+}
+
+.betguru-strength-strong {
+    background: rgb(var(--success));
+}
+
+.betguru-muted-box {
+    border: 1px solid rgb(var(--border));
+    background: rgb(var(--surface));
+    color: rgb(var(--text-soft));
+}
+
+.betguru-divider-input {
+    border-right: 1px solid rgb(var(--border));
+}
+
+.theme-text-main {
+    color: rgb(var(--text-main));
+}
+
+.theme-text-soft {
+    color: rgb(var(--text-soft));
+}
+
+.theme-text-muted {
+    color: rgb(var(--text-muted));
+}
+
+.theme-text-primary {
+    color: rgb(var(--primary));
+}
+
+.theme-text-success {
+    color: rgb(var(--success));
+}
+
+.theme-text-danger {
+    color: rgb(var(--danger));
+}
+
+.theme-bg-base {
+    background: rgb(var(--bg));
+}
+
+.theme-bg-surface {
+    background: rgb(var(--surface));
+}
+
+.theme-bg-surface-soft {
+    background: rgb(var(--surface-soft));
+}
+
+.theme-border {
+    border-color: rgb(var(--border));
+}
+
+.theme-panel-subtle {
+    border: 1px solid rgb(var(--border));
+    background: rgb(var(--surface-soft));
+    color: rgb(var(--text-soft));
+}
+
+.theme-chip-danger {
+    background: rgb(var(--danger) / 0.10);
+    color: rgb(var(--danger));
+}
+
+.theme-chip-danger-strong {
+    background: rgb(var(--danger) / 0.12);
+    color: rgb(var(--danger));
+}
+
+.theme-chip-success {
+    background: rgb(var(--success) / 0.12);
+    color: rgb(var(--success));
+}
+
+.theme-chip-primary {
+    background: rgb(var(--primary) / 0.10);
+    color: rgb(var(--primary));
+}
+
+.theme-chip-accent {
+    background: rgb(var(--accent) / 0.12);
+    color: rgb(var(--accent));
+}
+
+.betguru-gradient-cta {
+    background-image: linear-gradient(
+        to right,
+        rgb(var(--primary)),
+        rgb(var(--secondary))
+    );
+    box-shadow: 0 14px 34px rgb(var(--shadow-primary) / 0.22);
+}
+
+.betguru-gradient-cta-flat {
+    background-image: linear-gradient(
+        to right,
+        rgb(var(--primary)),
+        rgb(var(--secondary))
+    );
+}
+
+.betguru-gradient-badge {
+    background-image: linear-gradient(
+        to bottom right,
+        rgb(var(--primary)),
+        rgb(var(--secondary))
+    );
+    box-shadow: 0 14px 34px rgb(var(--shadow-primary) / 0.22);
+}
+
+.betguru-border-top {
+    border-top: 1px solid rgb(var(--border));
+}
+
+.betguru-border-bottom {
+    border-bottom: 1px solid rgb(var(--border));
+}
+
+.betguru-pl-11 {
+    padding-left: 44px;
+}
+
+.betguru-pl-15 {
+    padding-left: 60px;
+}
+
+.betguru-progress-bar {
+    display: block;
+    width: 100%;
+    height: 0.5rem;
+    overflow: hidden;
+    border: 0;
+    border-radius: 9999px;
+    background: rgb(var(--border));
+}
+
+.betguru-progress-bar::-webkit-progress-bar {
+    background: rgb(var(--border));
+    border-radius: 9999px;
+}
+
+.betguru-progress-bar::-webkit-progress-value,
+.betguru-progress-bar::-moz-progress-bar {
+    border-radius: 9999px;
+    background: rgb(var(--text-main));
+}
+
+[x-cloak] {
+    display: none !important;
+}
+
+button {
+    cursor: pointer;
+}

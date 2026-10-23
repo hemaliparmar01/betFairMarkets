@@ -7,7 +7,6 @@ use App\Http\Controllers\Controller;
 use App\Models\FootballMarket;
 use App\Models\FootballMatch;
 use App\Services\FootballV6Stats;
-use App\Services\LiveMatchExpiry;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
@@ -1154,7 +1153,7 @@ class FootballSyncController extends Controller
     private function readBetFairData(array $payloads, string $cacheKey, bool $isLiveApi, int $ttlSeconds)
     {
         $getExistingRecords = getInRedis($cacheKey) ?? [];
-        $mainArray = array_filter($getExistingRecords, static fn (array $match): bool => in_array($match['result_status'] ?? null, ['Finished', LiveMatchExpiry::AWAITING_REPLAY], true));
+        $mainArray = array_filter($getExistingRecords, static fn (array $match): bool => ($match['result_status'] ?? null) === 'Finished');
         $databaseMarkets = [];
         $databaseLookupKeys = [];
 
@@ -1172,7 +1171,7 @@ class FootballSyncController extends Controller
                 $payloadTimestamp,
                 $getExistingRecords
             );
-            if (in_array($getExistingRecords[$existingKey ?? $payloadUniqueKey]['result_status'] ?? null, ['Finished', LiveMatchExpiry::AWAITING_REPLAY], true)) {
+            if (($getExistingRecords[$existingKey ?? $payloadUniqueKey]['result_status'] ?? null) === 'Finished') {
                 continue;
             }
             $existingMarkets = $getExistingRecords[$existingKey ?? $payloadUniqueKey]['markets'] ?? [];
@@ -1205,7 +1204,7 @@ class FootballSyncController extends Controller
             $uniqueKey = $this->generateUniqueKey($team1, $team2, $currentTimestamp);
 
             $checkIsExists = $this->checkIfRecordExistsOnAnotherApi($uniqueKey, $team1, $team2, $currentTimestamp, $getExistingRecords);
-            if ($checkIsExists !== null && in_array($getExistingRecords[$checkIsExists]['result_status'] ?? null, ['Finished', LiveMatchExpiry::AWAITING_REPLAY], true)) {
+            if ($checkIsExists !== null && ($getExistingRecords[$checkIsExists]['result_status'] ?? null) === 'Finished') {
                 $mainArray[$checkIsExists] = $getExistingRecords[$checkIsExists];
 
                 continue;
@@ -1431,7 +1430,7 @@ class FootballSyncController extends Controller
 
         return withRedisLock($cacheKey, function () use ($payloads, $cacheKey, $isLive, $ttlSeconds, $sportsImages): array {
             $getExistingRecords = getInRedis($cacheKey) ?? [];
-            $databaseMatches = array_filter($getExistingRecords, static fn (array $match): bool => in_array($match['result_status'] ?? null, ['Finished', LiveMatchExpiry::AWAITING_REPLAY], true));
+            $databaseMatches = array_filter($getExistingRecords, static fn (array $match): bool => ($match['result_status'] ?? null) === 'Finished');
 
             foreach (($payloads['events'] ?? []) as $payloadKey => $payload) {
                 $homeTeam = is_array($payload['homeTeam'] ?? null)
@@ -1473,7 +1472,7 @@ class FootballSyncController extends Controller
                 }
                 $resultStatus = $isLive
                     ? $this->sportsApiResultStatus($statusCode, $statusType, $existingRecord['result_status'] ?? 'Live')
-                    : (($existingRecord['result_status'] ?? null) === LiveMatchExpiry::AWAITING_REPLAY ? LiveMatchExpiry::AWAITING_REPLAY : 'Prematch');
+                    : 'Prematch';
                 $minutesStatus = $this->alignMinuteStatusWithResult($minutesStatus, $resultStatus);
                 $homeScore = is_array($payload['homeScore'] ?? null)
                     ? ($payload['homeScore']['current'] ?? 0)
@@ -1704,13 +1703,6 @@ class FootballSyncController extends Controller
                     $existing = $existingMatches->get($row['unique_key']);
                     $storedPayload = $existing?->payload;
                     $incomingPayload = json_decode($row['payload'], true);
-                    if ($existing?->result_status === LiveMatchExpiry::AWAITING_REPLAY
-                        && ! in_array($row['result_status'], ['Finished', LiveMatchExpiry::AWAITING_REPLAY], true)
-                        && (int) $existing->start_timestamp === $row['start_timestamp']) {
-                        $row['result_status'] = LiveMatchExpiry::AWAITING_REPLAY;
-                        $incomingPayload['result_status'] = LiveMatchExpiry::AWAITING_REPLAY;
-                        $row['payload'] = json_encode($incomingPayload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
-                    }
                     if (
                         $existing === null
                         || (string) $existing->betfair_match_id !== (string) $row['betfair_match_id']
@@ -1843,10 +1835,6 @@ class FootballSyncController extends Controller
 
         if ((int) $statusCode === 100 || $statusType === 'finished') {
             return 'Finished';
-        }
-
-        if ($currentStatus === LiveMatchExpiry::AWAITING_REPLAY) {
-            return $currentStatus;
         }
 
         if (in_array((int) $statusCode, [6, 7, 31], true) || $statusType === 'inprogress') {

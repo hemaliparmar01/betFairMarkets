@@ -27,7 +27,19 @@ class CustomerAuthRequest extends FormRequest
      */
     public function rules(CustomerAuthService $auth): array
     {
-        if ($this->routeIs('customers.verification.verify')) {
+        if ($this->routeIs('customers.password.email')) {
+            return ['email' => ['required', 'email', 'max:254']];
+        }
+
+        if ($this->routeIs('customers.password.update')) {
+            return [
+                'email' => ['required', 'email', 'max:254'],
+                'token' => ['required', 'string', 'max:255'],
+                'password' => ['required', 'string', 'max:255', 'confirmed', Password::min(8)->letters()->numbers()->symbols()],
+            ];
+        }
+
+        if ($this->routeIs('login.mobile.verify-code', 'customers.verification.verify')) {
             return ['code' => ['required', 'regex:/^[0-9]{6}$/']];
         }
 
@@ -61,6 +73,14 @@ class CustomerAuthRequest extends FormRequest
             'fonts_hash' => ['nullable', 'regex:/^[a-f0-9]{64}$/'],
             'canvas_hash' => ['nullable', 'regex:/^[a-f0-9]{64}$/'],
         ];
+
+        if ($this->routeIs('login.mobile.send-code')) {
+            return $rules + [
+                'country_code' => ['required', Rule::in($auth->countries()->pluck('code')->all())],
+                'mobile' => ['required', 'regex:/^[0-9]{4,15}$/'],
+                'otp_channel' => ['nullable', Rule::in(['mobile', 'email'])],
+            ];
+        }
 
         if ($this->routeIs('register.store')) {
             return $rules + [
