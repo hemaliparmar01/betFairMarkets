@@ -167,7 +167,7 @@ if (dashboard) {
                 // const values = history.map((point) => Number(point.odds));
                 // const minimum = Math.min(...values); const maximum = Math.max(...values); const range = maximum - minimum || 1;
                 // const points = values.map((value, index) => `${10 + index * 380 / Math.max(1, values.length - 1)},${90 - (value - minimum) / range * 70}`).join(' ');
-                const chart = runner.chart_url ? `<img src="${escape(runner.chart_url)}" alt="Market Chart" loading="lazy" decoding="async" class="mt-3 h-32 w-full object-contain">` : '<p class="mt-3 text-sm">Market chart unavailable.</p>';
+                const chart = `<img src="${escape(dashboard.dataset.marketChartUrl + '?marketId=' + row.dataset.matchId + '&selectionId=' + runner.runnerId)}" alt="Market Chart">`;
                 return `<section class="mb-4 rounded-xl border border-[#d4e0ec] p-4"><h3 class="font-bold">${escape(runner.runner)}</h3><p class="mt-1 text-sm">Opening ${number(initial)} → Current ${number(current)}</p>${renderOddsHistory(runner)}${chart}</section>`;
             }).join('') || '<p>Market data is not available yet.</p>';
         } else if (activeModal.action === 'prediction') {

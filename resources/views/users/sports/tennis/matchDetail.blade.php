@@ -154,11 +154,7 @@
 
                                 <div class="col-span-2 md:col-span-1">
                                     @if ($checkAuthAndSubscription['display_odds'])
-                                        @if ($runner['chart_url'] ?? null)
-                                            <img src="{{ $runner['chart_url'] }}" alt="Market Chart" loading="lazy" decoding="async" class="w-full rounded-lg">
-                                        @else
-                                            <p class="py-3 text-center text-xs text-slate-400">{{ __('Market chart unavailable.') }}</p>
-                                        @endif
+                                        <img src="{{ env('BETFAIR_API_KEY') . '?marketId=' . $runner['match_id'] . '&selectionId=' . $runner['runner_id'] }}" alt="Market Chart">
                                     @else
                                         @include('lock_icon')
                                     @endif

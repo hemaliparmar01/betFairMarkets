@@ -18,6 +18,8 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+Schedule::command('sports:expire-live-matches')->everyFiveMinutes()->withoutOverlapping(5);
+
 Schedule::call(function () {
     app(FootballV6Stats::class)->queueDueMatches();
 })->name('football-v6-live-statistics')->everyMinute()->withoutOverlapping(2);

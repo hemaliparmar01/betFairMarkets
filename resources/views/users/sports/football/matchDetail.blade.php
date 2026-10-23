@@ -22,7 +22,7 @@
                     <span class="min-w-0 break-words">{{ $match['team1'] }}</span>
                 </h1>
                 <div>
-                    <div class="text-2xl font-extrabold sm:text-4xl"><span data-score-status="{{ $match['status'] }}" class="match-score match-score-on-dark">{{ $match['score'] }}</span></div>
+                    <div class="text-2xl font-extrabold sm:text-4xl">{{ $match['score'] }}</div>
                     <div class="mt-1 text-xs font-bold uppercase tracking-wide text-[#b9def3]">{{ $match['status'] }} · {{ $match['minutes'] }}@if ($match['status'] === 'Live' && preg_match('/^\d+(?:\+\d*)?$/', (string) $match['minutes']) === 1)<span class="minute-tick-blink">'</span>@endif</div>
                 </div>
                 <h1 class="flex max-w-[38%] min-w-0 items-center justify-start gap-2 text-left text-base font-bold sm:text-2xl">
@@ -64,9 +64,6 @@
                                 <div class="col-span-2 min-w-0 md:col-span-1">
                                     <span class="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 md:hidden">Selection</span>
                                     <div class="truncate text-sm font-extrabold text-[#0b2a40] dark:text-white" title="{{ $runner['name'] }}">{{ $runner['name'] }}</div>
-                                    @if ($checkAuthAndSubscription['display_odds'])
-                                        @include('users.sports.oddsHistory', ['history' => $runner['history'] ?? [], 'incomplete' => $runner['history_incomplete'] ?? false])
-                                    @endif
                                 </div>
 
                                 <div>
@@ -117,11 +114,7 @@
 
                                 <div class="col-span-2 md:col-span-1">
                                     @if ($checkAuthAndSubscription['display_odds'])
-                                        @if ($runner['chart_url'] ?? null)
-                                            <img src="{{ $runner['chart_url'] }}" alt="Market Chart" loading="lazy" decoding="async" class="w-full rounded-lg">
-                                        @else
-                                            <p class="py-3 text-center text-xs text-slate-400">{{ __('Market chart unavailable.') }}</p>
-                                        @endif
+                                        <img src="{{ env('BETFAIR_API_KEY') . '?marketId=' . $runner['match_id'] . '&selectionId=' . $runner['runner_id'] }}" alt="Market Chart">
                                     @else
                                         @include('lock_icon')
                                     @endif

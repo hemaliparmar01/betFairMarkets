@@ -227,7 +227,6 @@ trait AmericanFootballTrait
                     'runner_id' => $runner['runnerId'] ?? null,
                     'match_id' => $matchId,
                     'market_id' => $runner['marketId'] ?? null,
-                    'chart_url' => betfairMarketChartUrl($runner),
                     'name' => $runner['runner'] ?? 'Selection',
                     'initial_back_odds' => $initial,
                     'current_back_odds' => $current,

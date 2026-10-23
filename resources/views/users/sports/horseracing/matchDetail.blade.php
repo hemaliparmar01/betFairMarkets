@@ -3,7 +3,7 @@
 @section('title', $match['team1'].' · '.$match['team2'].' · BF Markets')
 @section('content')
     @include('users.layout.sports')
-    <section id="horseRaceDetail" data-horse-detail data-race-channel="sports.{{ $raceSport }}.live" data-race-sport="{{ $raceSport }}" data-horse-url="{{ route($raceSport.'.matches.show', $match['id']) }}" data-horse-payload="{{ json_encode($detail) }}" class="min-w-0 pt-4 text-[#12324a] dark:text-[#e8edf2]">
+    <section id="horseRaceDetail" data-horse-detail data-race-channel="sports.{{ $raceSport }}.live" data-race-sport="{{ $raceSport }}" data-market-chart-url="{{ env('BETFAIR_API_KEY') }}" data-horse-url="{{ route($raceSport.'.matches.show', $match['id']) }}" data-horse-payload="{{ json_encode($detail) }}" class="min-w-0 pt-4 text-[#12324a] dark:text-[#e8edf2]">
         <a href="{{ route($raceSport.'.home') }}" class="mb-4 inline-flex items-center gap-2 text-sm font-medium text-[#5a7d99] hover:text-[#1a6b9c]">← {{ __('Back to '.$raceTitle) }}</a>
         <div class="mb-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-[#2a3f50] dark:bg-[#1a2a38]">
             <div class="flex flex-wrap items-center justify-between gap-3">

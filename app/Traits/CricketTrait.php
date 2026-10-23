@@ -281,7 +281,6 @@ trait CricketTrait
                     'runner_id' => $runner['runnerId'] ?? null,
                     'match_id' => $matchId,
                     'market_id' => $runner['marketId'] ?? null,
-                    'chart_url' => betfairMarketChartUrl($runner),
                     'history' => oddsMovementHistory($runner),
                     'history_incomplete' => (bool) ($runner['odds_history_incomplete'] ?? false),
                     'name' => $runner['runner'] ?? 'Selection',

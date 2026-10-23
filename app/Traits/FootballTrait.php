@@ -6,6 +6,7 @@ use App\Http\Controllers\Users\Football\FootballSyncController;
 use App\Models\Favorite;
 use App\Models\FootballMatch;
 use App\Models\PredictionVote;
+use App\Services\LiveMatchExpiry;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
@@ -684,10 +685,10 @@ trait FootballTrait
             'goals_pending' => $goalsPending,
             'height' => 64 + max(0, count($lanes['home']) - 1, count($lanes['away']) - 1) * 28,
             'minute' => $minute,
-            'minute_label' => $minuteLabel.($live && ! $halfTime ? "'" : ''),
+            'minute_label' => ($match['result_status'] ?? '') === LiveMatchExpiry::AWAITING_REPLAY ? LiveMatchExpiry::AWAITING_REPLAY : $minuteLabel.($live && ! $halfTime ? "'" : ''),
             'period_limit' => $periodLimit,
             'progress' => min(100, max(0, $minute / 90 * 100)),
-            'running' => $live && ! $halfTime,
+            'running' => $live && ! $halfTime && ($match['result_status'] ?? '') !== LiveMatchExpiry::AWAITING_REPLAY,
             'seconds_into_minute' => $live && ! $halfTime ? max(0, time() - ($periodStart ?: (int) $match['timestamp'])) % 60 : 0,
             'calculated_at' => time(),
             'finished' => $finished,
@@ -696,6 +697,10 @@ trait FootballTrait
 
     public function calculateMinutes(?string $minute_status, int $timestamp, string $result_status, array $added_time = [], ?int $current_period_start_timestamp = null)
     {
+        if ($result_status === LiveMatchExpiry::AWAITING_REPLAY) {
+            return LiveMatchExpiry::AWAITING_REPLAY;
+        }
+
         if ($minute_status == 'Prematch' || $result_status == 'Prematch') {
             $time = Carbon::parse($timestamp)->timezone(getCurrentUserTimezone())->format('H:i');
 
@@ -895,7 +900,6 @@ trait FootballTrait
                     'runner_id' => $runner['runnerId'] ?? null,
                     'match_id' => (int) $matchId,
                     'market_id' => $runner['marketId'] ?? null,
-                    'chart_url' => betfairMarketChartUrl($runner),
                     'history' => oddsMovementHistory($runner),
                     'history_incomplete' => (bool) ($runner['odds_history_incomplete'] ?? false),
                     'name' => $runner['runner'] ?? 'Selection',

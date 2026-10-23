@@ -6,18 +6,6 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 
-if (! function_exists('betfairMarketChartUrl')) {
-    /** @param array<string, mixed> $runner */
-    function betfairMarketChartUrl(array $runner): ?string
-    {
-        $baseUrl = config('services.betfair.chart_url');
-        $marketId = (string) ($runner['marketId'] ?? '');
-        $selectionId = (string) ($runner['runnerId'] ?? '');
-
-        return $baseUrl.'?marketId='.$marketId.'&selectionId='.$selectionId;
-    }
-}
-
 if (! function_exists('hasMeaningfulOpeningOdds')) {
     /** @param array<string, mixed> $runner */
     function hasMeaningfulOpeningOdds(array $runner): bool

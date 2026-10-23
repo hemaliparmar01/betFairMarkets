@@ -2,10 +2,6 @@
 
 return [
 
-    'betfair' => [
-        'chart_url' => env('BETFAIR_API_KEY'),
-    ],
-
     'pinnodds' => [
         'key' => env('PINACLE_ODDS_KEY'),
         'url' => 'https://pinnodds.com',
