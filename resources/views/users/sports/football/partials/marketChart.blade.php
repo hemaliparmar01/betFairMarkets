@@ -17,10 +17,10 @@
     <svg viewBox="0 0 280 80" class="h-16 w-full" role="img" aria-label="Back odds movement chart">
         <line x1="8" y1="70" x2="272" y2="70" stroke="currentColor" class="text-slate-200 dark:text-slate-700" />
         <line x1="8" y1="10" x2="8" y2="70" stroke="currentColor" class="text-slate-200 dark:text-slate-700" />
-        <polyline points="{{ implode(' ', $coordinates) }}" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="text-[#1a6b9c]" />
+        <polyline points="{{ implode(' ', $coordinates) }}" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="text-[var(--color-primary-accent)]" />
         @foreach ($coordinates as $coordinate)
             @php [$circleX, $circleY] = explode(',', $coordinate); @endphp
-            <circle cx="{{ $circleX }}" cy="{{ $circleY }}" r="3" fill="currentColor" class="text-[#1a6b9c]" />
+            <circle cx="{{ $circleX }}" cy="{{ $circleY }}" r="3" fill="currentColor" class="text-[var(--color-primary-accent)]" />
         @endforeach
     </svg>
     <div class="flex items-center justify-between text-[10px] font-semibold text-slate-400">

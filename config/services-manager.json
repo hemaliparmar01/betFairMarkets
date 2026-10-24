@@ -1,0 +1,171 @@
+{
+  "prefix": "bfmarkets",
+  "stop_timeout": 120,
+  "restart_delay": 10,
+  "services": {
+    "reverb": {
+      "command": [
+        "reverb:start"
+      ],
+      "enabled": true
+    },
+    "betfair": {
+      "command": [
+        "betfair:listen"
+      ],
+      "enabled": true
+    },
+    "sports-api-pro": {
+      "command": [
+        "sports-api-pro:listen"
+      ],
+      "enabled": true
+    },
+    "queue-default": {
+      "command": [
+        "queue:work",
+        "--queue=default",
+        "--sleep=1",
+        "--timeout=60",
+        "--tries=3"
+      ],
+      "enabled": true
+    },
+    "queue-sports-images": {
+      "command": [
+        "queue:work",
+        "--queue=sports-images",
+        "--sleep=1",
+        "--timeout=30",
+        "--tries=3"
+      ],
+      "enabled": true,
+      "unit": "bfmarkets-queue-images.service"
+    },
+    "queue-realtime-football": {
+      "command": [
+        "queue:work",
+        "sports-realtime",
+        "--queue=realtime-football",
+        "--sleep=0",
+        "--timeout=15",
+        "--tries=6"
+      ],
+      "enabled": true,
+      "unit": "bfmarkets-realtime@football.service"
+    },
+    "queue-realtime-cricket": {
+      "command": [
+        "queue:work",
+        "sports-realtime",
+        "--queue=realtime-cricket",
+        "--sleep=0",
+        "--timeout=15",
+        "--tries=6"
+      ],
+      "enabled": true,
+      "unit": "bfmarkets-realtime@cricket.service"
+    },
+    "queue-realtime-icehockey": {
+      "command": [
+        "queue:work",
+        "sports-realtime",
+        "--queue=realtime-icehockey",
+        "--sleep=0",
+        "--timeout=15",
+        "--tries=6"
+      ],
+      "enabled": true,
+      "unit": "bfmarkets-realtime@icehockey.service"
+    },
+    "queue-realtime-americanfootball": {
+      "command": [
+        "queue:work",
+        "sports-realtime",
+        "--queue=realtime-americanfootball",
+        "--sleep=0",
+        "--timeout=15",
+        "--tries=6"
+      ],
+      "enabled": true,
+      "unit": "bfmarkets-realtime@americanfootball.service"
+    },
+    "queue-realtime-baseball": {
+      "command": [
+        "queue:work",
+        "sports-realtime",
+        "--queue=realtime-baseball",
+        "--sleep=0",
+        "--timeout=15",
+        "--tries=6"
+      ],
+      "enabled": true,
+      "unit": "bfmarkets-realtime@baseball.service"
+    },
+    "queue-realtime-basketball": {
+      "command": [
+        "queue:work",
+        "sports-realtime",
+        "--queue=realtime-basketball",
+        "--sleep=0",
+        "--timeout=15",
+        "--tries=6"
+      ],
+      "enabled": true,
+      "unit": "bfmarkets-realtime@basketball.service"
+    },
+    "queue-realtime-tennis": {
+      "command": [
+        "queue:work",
+        "sports-realtime",
+        "--queue=realtime-tennis",
+        "--sleep=0",
+        "--timeout=15",
+        "--tries=6"
+      ],
+      "enabled": true,
+      "unit": "bfmarkets-realtime@tennis.service"
+    },
+    "queue-realtime-greyhounds": {
+      "command": [
+        "queue:work",
+        "sports-realtime",
+        "--queue=realtime-greyhounds",
+        "--sleep=0",
+        "--timeout=15",
+        "--tries=6"
+      ],
+      "enabled": true,
+      "unit": "bfmarkets-realtime@greyhounds.service"
+    },
+    "queue-realtime-horseracing": {
+      "command": [
+        "queue:work",
+        "sports-realtime",
+        "--queue=realtime-horseracing",
+        "--sleep=0",
+        "--timeout=15",
+        "--tries=6"
+      ],
+      "enabled": true,
+      "unit": "bfmarkets-realtime@horseracing.service"
+    },
+    "pinnodds": {
+      "command": [
+        "pinnodds:listen"
+      ],
+      "enabled": true
+    },
+    "scheduler": {
+      "command": [
+        "schedule:work"
+      ],
+      "enabled": true,
+      "environments": [
+        "local",
+        "production"
+      ],
+      "unit": "bfmarkets-scheduler.service"
+    }
+  }
+}

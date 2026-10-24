@@ -7,9 +7,8 @@
 <div class="fixtures-container overflow-x-auto [scrollbar-width:thin]">
 @endif
 @forelse ($data as $group)
-    <h2 data-league-header="{{ $group['tournament_name'].'|'.$group['status'] }}" class="mb-2 mt-5 flex items-center gap-2 border-b border-[#e3ecf5] pb-2 text-xs font-bold uppercase tracking-wide text-[#1e4763] dark:border-[#2a3f50] dark:text-[#b0c8dd]">
-        @if ($group['tournament_logo'] ?? null)<img src="{{ $group['tournament_logo'] }}" alt="" class="size-5 object-contain" onerror="this.remove()">@endif
-        {{ $group['tournament_name'] }}
+    <h2 data-league-header="{{ leagueHeadingKey($group, $group['tournament_name']).'|'.$group['status'] }}" class="mb-2 mt-5 flex items-center gap-2 border-b border-[#e3ecf5] pb-2 text-xs font-bold uppercase tracking-wide text-[#1e4763] dark:border-[var(--color-border-dark)] dark:text-[var(--color-text-muted-dark)]">
+        @include('users.layout.leagueHeading', ['heading' => $group])
     </h2>
     @foreach ($group['matches'] as $event)
         @php
@@ -34,9 +33,9 @@
             $chart = ['title' => request()->input('market_name', 'MATCH_ODDS') === 'NUMBER_OF_SETS' ? 'Total Sets' : 'Match Winner', 'runners' => $checkAuthAndSubscription['display_odds'] ? array_map(static fn (array $runner): array => array_intersect_key($runner, array_flip(['runner', 'initialBackOdds', 'currentBackOdds', 'backOddsHistory'])), $event['markets']) : [], 'locked' => ! $checkAuthAndSubscription['display_odds']];
         @endphp
         <div data-tennis-match-url="{{ route('tennis.matches.show', $event['sportsApiPro_match_id']) }}" data-match-id="{{ $event['sportsApiPro_match_id'] }}" data-match-status="{{ $event['status'] }}" data-tennis-score-version="{{ $event['tennis_score_version'] ?? 0 }}" data-tennis-status="{{ $event['status'] }}" data-tennis-stats="{{ json_encode(['team1' => $event['team1'], 'team2' => $event['team2'], 'home' => $event['home_score_data'] ?? [], 'away' => $event['away_score_data'] ?? [], 'statistics' => $event['live_stats'] ?? [], 'periods' => $event['period_labels'] ?? [], 'serving' => $event['serving_side'] ?? null, 'surface' => $event['ground_type'] ?? null, 'current_set' => $event['current_set'] ?? null]) }}" data-tennis-chart="{{ json_encode($chart) }}" data-tennis-prediction="{{ json_encode($prediction) }}"
-            class="event-row my-2 grid min-w-[960px] grid-cols-[28px_94px_minmax(420px,1fr)_120px_220px] items-center gap-3 rounded-xl border border-[#e6eff8] bg-[#fafdff] px-3 py-3 text-[#12324a] hover:bg-[#f2f8ff] dark:border-[#2a3f50] dark:bg-[#1a2a38] dark:text-[#e8edf2]">
+            class="event-row my-2 grid min-w-[960px] grid-cols-[28px_94px_minmax(420px,1fr)_120px_220px] items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[#fafdff] px-3 py-3 text-[#12324a] hover:bg-[#f2f8ff] dark:border-[var(--color-border-dark)] dark:bg-[var(--color-surface-dark)] dark:text-[var(--color-text-dark)]">
             <button type="button" data-action="favorite" data-requires-login="{{ $authenticated ? 'false' : 'true' }}" data-login-url="{{ route('login') }}" data-sport="tennis" data-event-key="{{ $event['unique_key'] }}" data-event-id="{{ $event['sportsApiPro_match_id'] }}" data-team1="{{ $event['team1'] }}" data-team2="{{ $event['team2'] }}" data-start-timestamp="{{ $event['timestamp'] }}" aria-pressed="{{ $event['is_favorite'] ? 'true' : 'false' }}" @class(['fav-star cursor-pointer border-0 bg-transparent text-lg text-[#b8ccdf]', '!text-[#e6b422]' => $event['is_favorite']])><i class="fas fa-star"></i></button>
-            <span class="whitespace-nowrap text-center text-xs font-semibold {{ $event['status'] === 'Live' ? 'text-[#dc2e08]' : 'text-[#5a7d99]' }}">{{ $event['minutes'] }}</span>
+            <span class="whitespace-nowrap text-center text-xs font-semibold {{ $event['status'] === 'Live' ? 'text-[#dc2e08]' : 'text-[var(--color-text-muted)]' }}">{{ $event['minutes'] }}</span>
             <button type="button" data-action="open-match" class="grid min-w-0 grid-cols-[minmax(0,1fr)_96px_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-sm">
                 <span class="flex min-w-0 items-center justify-end gap-1.5 text-right font-bold">@if ($event['home_team_logo'] ?? null)<img src="{{ $event['home_team_logo'] }}" alt="" class="size-5 shrink-0 object-contain" onerror="this.remove()">@endif<span class="break-words">{{ $event['team1'] }}</span>@if ($event['status'] === 'Live' && ($event['serving_side'] ?? null) === 'home')<span class="shrink-0 text-[10px] text-amber-500" title="{{ __('Serving') }}">●</span>@endif</span>
                 <span class="flex min-w-0 flex-col items-center gap-0.5 text-center tabular-nums" data-tennis-score>
@@ -83,7 +82,7 @@
             </div>
             <div class="flex min-w-0 gap-2 overflow-x-auto [scrollbar-width:thin]">
                 @foreach ($event['markets'] !== [] ? $event['markets'] : [[], []] as $runner)
-                    <span @if ($checkAuthAndSubscription['display_odds'] && (float) ($runner['currentBackOdds'] ?? 0) > 0) tabindex="0" data-tennis-odds-tooltip="{{ ($runner['initialBackOdds'] ?? 0) > 1 ? number_format($runner['initialBackOdds'], 2) : '—' }} {{ ($runner['odds_direction'] ?? '') === 'up' ? '<<' : '>>' }} {{ number_format($runner['currentBackOdds'], 2) }}" aria-label="{{ $runner['runner'] ?? 'Odds' }}" @else title="{{ $runner['runner'] ?? 'Unavailable' }}" @endif class="inline-flex min-w-[96px] shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-[#d4e2f3] bg-white px-2 py-1 text-sm font-bold dark:border-[#3a5568] dark:bg-[#1f3444]">
+                    <span @if ($checkAuthAndSubscription['display_odds'] && (float) ($runner['currentBackOdds'] ?? 0) > 0) tabindex="0" data-tennis-odds-tooltip="{{ ($runner['initialBackOdds'] ?? 0) > 1 ? number_format($runner['initialBackOdds'], 2) : '—' }} {{ ($runner['odds_direction'] ?? '') === 'up' ? '<<' : '>>' }} {{ number_format($runner['currentBackOdds'], 2) }}" aria-label="{{ $runner['runner'] ?? 'Odds' }}" @else title="{{ $runner['runner'] ?? 'Unavailable' }}" @endif class="inline-flex min-w-[96px] shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-[#d4e2f3] bg-white px-2 py-1 text-sm font-bold dark:border-[#3a5568] dark:bg-[var(--color-surface-raised-dark)]">
                         @if ($checkAuthAndSubscription['display_odds'])
                             {{ (float) ($runner['currentBackOdds'] ?? 0) > 0 ? number_format($runner['currentBackOdds'], 2) : '—' }}
                             @if (($runner['odds_direction'] ?? '') === 'up')<span class="text-emerald-600">↑</span>@elseif (($runner['odds_direction'] ?? '') === 'down')<span class="text-red-500">↓</span>@endif
@@ -96,9 +95,9 @@
         </div>
     @endforeach
 @empty
-    @if (! $append)<p class="py-10 text-center text-sm text-[#5a7d99]" data-tennis-empty>{{ __('No data available.') }}</p>@endif
+    @if (! $append)<p class="py-10 text-center text-sm text-[var(--color-text-muted)]" data-tennis-empty>{{ __('No data available.') }}</p>@endif
 @endforelse
 @if (! $append)
 </div>
-<div id="tennisModal" class="fixed inset-0 z-[10000] hidden items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="tennisModalTitle"><div class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 text-[#12324a] shadow-xl dark:bg-[#1a2a38] dark:text-[#e8edf2]" data-tennis-modal-panel></div></div>
+<div id="tennisModal" class="fixed inset-0 z-[10000] hidden items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="tennisModalTitle"><div class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 text-[#12324a] shadow-xl dark:bg-[var(--color-surface-dark)] dark:text-[var(--color-text-dark)]" data-tennis-modal-panel></div></div>
 @endif

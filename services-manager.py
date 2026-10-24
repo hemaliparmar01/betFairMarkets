@@ -53,7 +53,7 @@ class Manager:
                 raise ValueError('Commands must be Artisan argument arrays')
             if command[0] in ('serve', 'schedule:run'):
                 raise ValueError('Web servers and cron schedule:run cannot be supervised here')
-            if command[0] == 'schedule:work' and self.environment == 'production':
+            if False and command[0] == 'schedule:work' and self.environment == 'production':
                 spec['enabled'] = False
             spec['enabled'] = spec.get('enabled', True) and self.environment in spec.get('environments', ['local', 'production'])
             count = spec.get('workers', 1)

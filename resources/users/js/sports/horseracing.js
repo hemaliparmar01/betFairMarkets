@@ -1,3 +1,4 @@
+import { patchRealtimeChildren, patchRealtimeHtml, markRealtimeUnavailable } from '../realtimeDom.js';
 import { renderOddsHistory } from '../oddsHistory';
 import { watchRacingFeed } from '../racingFeed.js';
 
@@ -101,10 +102,10 @@ if (dashboard) {
                 nodes.forEach((node) => target.append(node));
                 loadedPages++;
             } else {
-                if (markets) target.innerHTML = result.html;
+                if (markets) patchRealtimeHtml(target, result.html);
                 else {
                     const fragment = document.createElement('template'); fragment.innerHTML = result.html;
-                    target.replaceChildren(...fragment.content.querySelector('.fixtures-container').childNodes);
+                    patchRealtimeChildren(target, fragment.content.querySelector('.fixtures-container'));
                 }
                 if (reset) loadedPages = 1;
             }
@@ -147,12 +148,12 @@ if (dashboard) {
     function renderModal() {
         if (!activeModal) return;
         const rows = [...dashboard.querySelectorAll('[data-match-id]')];
-        const row = rows.find((candidate) => candidate.dataset.matchId === activeModal.matchId && (!activeModal.marketId || candidate.dataset.marketId === activeModal.marketId)) ?? activeModal.row;
-        if (!row) { closeModal(); return; }
+        const liveRow = rows.find((candidate) => candidate.dataset.matchId === activeModal.matchId && (!activeModal.marketId || candidate.dataset.marketId === activeModal.marketId));
+        const row = liveRow ?? activeModal.row;
+        if (!row) { const panel = dashboard.querySelector('[data-horseracing-modal-panel]'); if (panel) markRealtimeUnavailable(panel, true); return; }
         activeModal.row = row.cloneNode(true);
         const modal = dashboard.querySelector('#horseracingModal');
         const panel = modal.querySelector('[data-horseracing-modal-panel]');
-        const scrollTop = panel.scrollTop;
         let title = ''; let body = '';
         if (activeModal.action === 'chart') {
             const data = parse(row.dataset.horseracingMarket); title = `${data.title ?? 'Race Winner'} · Odds Movement`;
@@ -192,8 +193,8 @@ if (dashboard) {
             }
             body += `<details class="mt-5 border-t border-[#d4e0ec] pt-3"><summary class="cursor-pointer font-bold">Terms</summary><dl class="space-y-2 py-3 text-sm"><dt class="font-bold">Balance</dt><dd>Back heavy above 58%; Lay heavy below 42%.</dd><dt class="font-bold">Momentum</dt><dd>Change in the favorite runner’s back size: strong above 10%, directional above 3%.</dd><dt class="font-bold">Delta</dt><dd>Percentage change in the current favorite runner’s back size.</dd><dt class="font-bold">Volatility</dt><dd>Standard deviation of log odds returns over the latest ten seconds.</dd></dl></details>`;
         }
-        panel.innerHTML = `<div class="relative mb-5 flex items-center justify-between gap-3 pr-16"><h2 id="horseracingModalTitle" class="text-lg font-extrabold">${escape(title)}</h2><button type="button" data-action="expand-modal" aria-label="Expand" class="absolute right-10 top-0 text-xl">↗</button><button type="button" data-action="close-modal" aria-label="Close" class="absolute right-0 top-0 px-2 text-2xl">×</button></div>${body}`;
-        panel.scrollTop = scrollTop;
+        patchRealtimeHtml(panel, `<div class="relative mb-5 flex items-center justify-between gap-3 pr-16"><h2 id="horseracingModalTitle" class="text-lg font-extrabold">${escape(title)}</h2><button type="button" data-action="expand-modal" aria-label="Expand" class="absolute right-10 top-0 text-xl">↗</button><button type="button" data-action="close-modal" aria-label="Close" class="absolute right-0 top-0 px-2 text-2xl">×</button></div>${body}`);
+        markRealtimeUnavailable(panel, !liveRow);
         modal.classList.remove('hidden'); modal.classList.add('flex'); document.body.style.overflow = 'hidden';
     }
     filters?.addEventListener('click', (event) => {
@@ -205,7 +206,13 @@ if (dashboard) {
     dashboard.addEventListener('click', async (event) => {
         const button = event.target.closest('[data-action]');
         if (event.target.id === 'horseracingModal') { closeModal(); return; }
-        if (!button) return;
+        if (!button) {
+            const row = event.target.closest('[data-horseracing-match-url]');
+            if (row && !event.target.closest('a, button, input, select, textarea, [role="dialog"]')) {
+                window.location.assign(row.dataset.horseracingMatchUrl);
+            }
+            return;
+        }
         if (button.dataset.requiresLogin === 'true') { window.location.assign(button.dataset.loginUrl); return; }
         const action = button.dataset.action;
         if (action === 'expand-modal') { const panel = dashboard.querySelector('[data-horseracing-modal-panel]'); panel.classList.toggle('max-w-3xl'); panel.classList.toggle('max-w-6xl'); return; }
@@ -287,11 +294,11 @@ if (horseDetail) {
     function renderRunners() {
         status.textContent = detail.race.status === 'Finished' ? 'Finished' : detail.race.market_status === 'SUSPENDED' ? 'Suspended' : 'Upcoming';
         if (detail.market.locked) {
-            container.innerHTML = detail.race.available === false ? '<p class="p-8 text-center">Race details and odds become available five minutes before the start.</p>' : '<p class="p-8 text-center">🔒 Log in with an active subscription to view race odds.</p>';
+            patchRealtimeHtml(container, detail.race.available === false ? '<p class="p-8 text-center">Race details and odds become available five minutes before the start.</p>' : '<p class="p-8 text-center">🔒 Log in with an active subscription to view race odds.</p>');
             countdown(); return;
         }
         const market = detail.markets.find(m => m.type === selectedMarket) ?? detail.markets[0];
-        if (!market) { container.innerHTML = '<p class="p-8 text-center">No runner data available.</p>'; return; }
+        if (!market) { patchRealtimeHtml(container, '<p class="p-8 text-center">No runner data available.</p>'); return; }
         selectedMarket = market.type;
         const selectors = horseDetail.querySelector('[data-horse-markets]');
         const types = [...new Set(detail.markets.map(item=>item.type))];
@@ -301,7 +308,7 @@ if (horseDetail) {
         horseDetail.querySelectorAll('[data-horse-market]').forEach(button=>button.classList.toggle('active',button.dataset.horseMarket === selectedMarket));
         const ranks = horseFavouriteRanks(market.runners, monitoringOpening);
         const maximum = Math.max(0,...market.runners.map(r=>Number(r.pressure_amount ?? 0)));
-        container.innerHTML = market.runners.map(runner => {
+        patchRealtimeHtml(container, market.runners.map(runner => {
             const key = `${runner.marketId ?? selectedMarket}|${runner.runnerId}|${runner.handicap ?? 0}`;
             const rank = ranks[String(runner.runnerId)];
             const label = rank ? ['','🥇 1st Favourite','🥈 2nd Favourite','🥉 3rd Favourite'][rank] : '—';
@@ -330,7 +337,7 @@ if (horseDetail) {
             const name = escapeHorse(String(runner.runner).replace(/^\d+\.\s*/,''));
             const number = runner.number ?? runner.trap ?? '—';
             return `<div class="runner-row" data-runner-id="${escapeHorse(runner.runnerId)}"><div class="runner-name-mobile"><span>${escapeHorse(number)} ${name}</span>${badge}</div><div class="horse-desktop runner-name flex items-center gap-2 text-sm font-semibold"><span class="text-xs text-gray-400">${escapeHorse(number)}</span>${name}</div><div class="horse-desktop text-center">${badge}</div>${boxes}<div class="pressure-container"><div class="pressure-label"><span style="color:${pressure==='back'?'#1f9a6e':pressure==='lay'?'#c74e4e':'#94a3b8'}">${pressure==='back'?'⬇ BACK':pressure==='lay'?'⬆ LAY':'—'}</span><span>${amount>0?`Available ${amount.toLocaleString(undefined,{maximumFractionDigits:2})}`:'No pressure'}</span></div><div class="pressure-bar-bg"><div class="pressure-bar-fill ${pressure}" style="width:${width}%"></div></div></div></div>`;
-        }).join('');
+        }).join(''));
         countdown();
     }
     async function refreshDetail() {

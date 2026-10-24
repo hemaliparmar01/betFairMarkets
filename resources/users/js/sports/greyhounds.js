@@ -1,3 +1,4 @@
+import { patchRealtimeChildren, patchRealtimeHtml, markRealtimeUnavailable } from '../realtimeDom.js';
 import { renderOddsHistory } from '../oddsHistory';
 import { watchRacingFeed } from '../racingFeed.js';
 
@@ -102,10 +103,10 @@ if (dashboard) {
                 nodes.forEach((node) => target.append(node));
                 loadedPages++;
             } else {
-                if (markets) target.innerHTML = result.html;
+                if (markets) patchRealtimeHtml(target, result.html);
                 else {
                     const fragment = document.createElement('template'); fragment.innerHTML = result.html;
-                    target.replaceChildren(...fragment.content.querySelector('.fixtures-container').childNodes);
+                    patchRealtimeChildren(target, fragment.content.querySelector('.fixtures-container'));
                 }
                 if (reset) loadedPages = 1;
             }
@@ -149,12 +150,12 @@ if (dashboard) {
     function renderModal() {
         if (!activeModal) return;
         const rows = [...dashboard.querySelectorAll('[data-match-id]')];
-        const row = rows.find((candidate) => candidate.dataset.matchId === activeModal.matchId && (!activeModal.marketId || candidate.dataset.marketId === activeModal.marketId)) ?? activeModal.row;
-        if (!row) { closeModal(); return; }
+        const liveRow = rows.find((candidate) => candidate.dataset.matchId === activeModal.matchId && (!activeModal.marketId || candidate.dataset.marketId === activeModal.marketId));
+        const row = liveRow ?? activeModal.row;
+        if (!row) { const panel = dashboard.querySelector('[data-greyhounds-modal-panel]'); if (panel) markRealtimeUnavailable(panel, true); return; }
         activeModal.row = row.cloneNode(true);
         const modal = dashboard.querySelector('#greyhoundsModal');
         const panel = modal.querySelector('[data-greyhounds-modal-panel]');
-        const scrollTop = panel.scrollTop;
         let title = ''; let body = '';
         if (activeModal.action === 'chart') {
             const data = parse(row.dataset.greyhoundsMarket); title = `${data.title ?? 'Race Winner'} · Odds Movement`;
@@ -195,8 +196,8 @@ if (dashboard) {
             }
             body += `<details class="mt-5 border-t border-[#d4e0ec] pt-3"><summary class="cursor-pointer font-bold">Terms</summary><dl class="space-y-2 py-3 text-sm"><dt class="font-bold">Balance</dt><dd>Back heavy above 58%; Lay heavy below 42%.</dd><dt class="font-bold">Momentum</dt><dd>Change in the favorite runner’s back size: strong above 10%, directional above 3%.</dd><dt class="font-bold">Delta</dt><dd>Percentage change in the current favorite runner’s back size.</dd><dt class="font-bold">Volatility</dt><dd>Standard deviation of log odds returns over the latest ten seconds.</dd></dl></details>`;
         }
-        panel.innerHTML = `<div class="relative mb-5 flex items-center justify-between gap-3 pr-16"><h2 id="greyhoundsModalTitle" class="text-lg font-extrabold">${escape(title)}</h2><button type="button" data-action="expand-modal" aria-label="Expand" class="absolute right-10 top-0 text-xl">↗</button><button type="button" data-action="close-modal" aria-label="Close" class="absolute right-0 top-0 px-2 text-2xl">×</button></div>${body}`;
-        panel.scrollTop = scrollTop;
+        patchRealtimeHtml(panel, `<div class="relative mb-5 flex items-center justify-between gap-3 pr-16"><h2 id="greyhoundsModalTitle" class="text-lg font-extrabold">${escape(title)}</h2><button type="button" data-action="expand-modal" aria-label="Expand" class="absolute right-10 top-0 text-xl">↗</button><button type="button" data-action="close-modal" aria-label="Close" class="absolute right-0 top-0 px-2 text-2xl">×</button></div>${body}`);
+        markRealtimeUnavailable(panel, !liveRow);
         modal.classList.remove('hidden'); modal.classList.add('flex'); document.body.style.overflow = 'hidden';
     }
     filters?.addEventListener('click', (event) => {
@@ -208,7 +209,13 @@ if (dashboard) {
     dashboard.addEventListener('click', async (event) => {
         const button = event.target.closest('[data-action]');
         if (event.target.id === 'greyhoundsModal') { closeModal(); return; }
-        if (!button) return;
+        if (!button) {
+            const row = event.target.closest('[data-greyhounds-match-url]');
+            if (row && !event.target.closest('a, button, input, select, textarea, [role="dialog"]')) {
+                window.location.assign(row.dataset.greyhoundsMatchUrl);
+            }
+            return;
+        }
         if (button.dataset.requiresLogin === 'true') { window.location.assign(button.dataset.loginUrl); return; }
         const action = button.dataset.action;
         if (action === 'expand-modal') { const panel = dashboard.querySelector('[data-greyhounds-modal-panel]'); panel.classList.toggle('max-w-3xl'); panel.classList.toggle('max-w-6xl'); return; }

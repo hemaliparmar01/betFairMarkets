@@ -5,6 +5,7 @@ namespace App\Traits;
 use App\Models\Favorite;
 use App\Models\HorseRacingMatch;
 use App\Models\PredictionVote;
+use App\Services\MatchBackup;
 use Carbon\Carbon;
 
 trait HorseRacingTrait
@@ -15,6 +16,10 @@ trait HorseRacingTrait
 
     public function getHorseRacingMatches(bool $grouped = true): array
     {
+        if (in_array(request()->input('type'), ['ht00', '00_70', 'fav_losing', 'fav_not_winning'], true)) {
+            return [];
+        }
+
         if (in_array(request()->input('type'), ['ht00', '00_70', 'fav_losing', 'prematch_drops', 'market_shock', 'fav_not_winning'], true)) {
             $checkAuthAndSubscription = checkAuthAndSubscription();
             abort_unless($checkAuthAndSubscription['display_odds'], 403, __('An active 7-day free trial or paid subscription is required to use smart filters.'));
@@ -26,7 +31,7 @@ trait HorseRacingTrait
         $type = request()->input('type', 'all');
         $matches = array_map(
             fn (array $race): array => prepareMatchOddsMonitoring($race),
-            array_filter(getInRedis('HorseRacing:matches') ?? [], static fn (array $race): bool => ($race['result_status'] ?? '') !== 'Finished')
+            array_filter(getVisibleSportsMatches('HorseRacing:matches') ?? [], static fn (array $race): bool => ($race['result_status'] ?? '') !== 'Finished')
         );
         $matches = array_values(array_filter($matches, static function (array $race) use ($today, $type, $favorites): bool {
             if (($race['result_status'] ?? '') === 'Finished' || ($race['data_sync_complete'] ?? false) !== true || Carbon::createFromTimestamp((int) $race['timestamp'], getCurrentUserTimezone())->toDateString() !== $today) {
@@ -86,16 +91,16 @@ trait HorseRacingTrait
             if ($match['prediction_vote'] !== null) {
                 request()->session()->put($sessionKey, $match['prediction_vote']);
             }
-            $key = $match['tournament'].'|'.$match['status'];
+            $key = leagueHeadingKey($match, $match['tournament']).'|'.$match['status'];
             if ($type === 'by_time') {
                 $key .= '|'.$match['timestamp'];
             }
-            $groups[$key] ??= ['tournament_name' => $match['tournament'], 'status' => $match['status'], 'matches' => []];
+            $groups[$key] ??= [...leagueHeadingMetadata($match), 'tournament_name' => $match['tournament'], 'status' => $match['status'], 'matches' => []];
             $groups[$key]['matches'][] = $match;
             $preparedMatches[] = $match;
         }
 
-        return $grouped ? array_values($groups) : $preparedMatches;
+        return $grouped ? array_values(rankCompetitionGroups($groups)) : $preparedMatches;
     }
 
     public function calculateMinutes(array $match): string
@@ -110,8 +115,8 @@ trait HorseRacingTrait
 
     public function getHorseRacingMatchDetail(string $matchId): ?array
     {
-        // $match = array_find(getInRedis('HorseRacing:matches') ?? [], static fn (array $race): bool => (string) $race['betfair_match_id'] === $matchId);
-        $match = collect(getInRedis('HorseRacing:matches') ?? [])->first(static fn (array $race): bool => (string) ($race['betfair_match_id'] ?? '') === $matchId);
+        // $match = array_find(getVisibleSportsMatches('HorseRacing:matches') ?? [], static fn (array $race): bool => (string) $race['betfair_match_id'] === $matchId);
+        $match = collect(getVisibleSportsMatches('HorseRacing:matches') ?? [])->first(static fn (array $race): bool => (string) ($race['betfair_match_id'] ?? '') === $matchId);
         if ($match === null) {
             $stored = HorseRacingMatch::query()->with('markets')->where('betfair_match_id', $matchId)->first();
             if ($stored === null) {
@@ -122,6 +127,9 @@ trait HorseRacingTrait
             foreach ($stored->markets as $runner) {
                 $match['markets'][$runner->market_id.'_'.$runner->market_type][] = $runner->payload;
             }
+        }
+        if (MatchBackup::isHidden($match, 'horseracing')) {
+            return null;
         }
         // $match = prepareMatchOddsMonitoring($match);
         $match['id'] = $matchId;

@@ -55,6 +55,12 @@ class TennisSportsScoreUpdated implements ShouldBeUnique, ShouldBroadcast
 
     public function broadcastWith(): array
     {
-        return ['refresh' => true, 'scores' => $this->scores ?? []];
+        $scores = $this->scores ?? [];
+        if ($scores !== []) {
+            $visibleIds = array_fill_keys(array_map('strval', array_column(getVisibleSportsMatches('Tennis:matches'), 'sportsApiPro_match_id')), true);
+            $scores = array_values(array_filter($scores, static fn (array $score): bool => isset($visibleIds[(string) $score['id']])));
+        }
+
+        return ['refresh' => true, 'scores' => $scores];
     }
 }

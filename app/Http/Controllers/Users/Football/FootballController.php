@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Users\Football;
 
 use App\Http\Controllers\Controller;
 use App\Models\PredictionVote;
+use App\Services\MatchBackup;
 use App\Traits\FootballTrait;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
@@ -56,7 +57,13 @@ class FootballController extends Controller
                 return trim(str_replace([' utd ', ' ath ', ' st '], [' united ', ' athletic ', ' saint '], $name));
             };
             $footballMatches = [];
+            $hiddenFootballMatches = [];
             foreach (getInRedis('Football:matches') ?? [] as $match) {
+                if (MatchBackup::isHidden($match, 'football')) {
+                    $hiddenFootballMatches[$normalizeName((string) $match['team1']).'|'.$normalizeName((string) $match['team2'])][] = $match;
+
+                    continue;
+                }
                 if (($match['data_sync_complete'] ?? false) === true && ($match['result_status'] ?? null) !== 'Finished') {
                     $footballMatches[$normalizeName((string) $match['team1']).'|'.$normalizeName((string) $match['team2'])][] = $match;
                 }
@@ -71,6 +78,19 @@ class FootballController extends Controller
                     $parent = $pinnacleEvents[$alert['parent_id']];
                     $alert['home'] = $parent['home'];
                     $alert['away'] = $parent['away'];
+                }
+                $hiddenCandidates = $hiddenFootballMatches[$normalizeName((string) ($alert['home'] ?? '')).'|'.$normalizeName((string) ($alert['away'] ?? ''))] ?? [];
+                if (($alert['sport'] ?? '') === 'soccer' && $hiddenCandidates !== []) {
+                    $starts = $alert['starts'] ?? $alert['start'] ?? null;
+                    $alertStart = is_numeric($starts) ? (int) $starts : (is_string($starts) ? (int) strtotime($starts) : 0);
+                    if ($alertStart > 100000000000) {
+                        $alertStart = intdiv($alertStart, 1000);
+                    }
+                    if (array_any($hiddenCandidates, static fn (array $candidate): bool => $alertStart === 0 || abs((int) $candidate['timestamp'] - $alertStart) <= 3600)) {
+                        $alert['internal_hidden'] = true;
+
+                        continue;
+                    }
                 }
                 $period = (int) ($alert['period'] ?? 0);
                 $section = strtolower(trim((string) ($alert['sect'] ?? '')));
@@ -143,17 +163,23 @@ class FootballController extends Controller
                     default => [],
                 };
                 $pinnaclePrices = array_filter($pinnaclePrices, static fn (mixed $price, mixed $side): bool => in_array($side, ['home', 'away', 'draw', 'over', 'under', 'yes', 'no'], true) && is_numeric($price) && (float) $price > 1, ARRAY_FILTER_USE_BOTH);
+                $expectedOutcomes = $period === 0 && in_array($section, ['moneyline', 'money line', '1x2', 'match odds'], true) && ($alert['sport'] ?? null) === 'soccer' ? 3 : 2;
+                $fairPrices = $this->pinnacleFairPrices($pinnaclePrices, $expectedOutcomes);
+                $selectedSide = str_starts_with($outcome, 'over ') ? 'over' : (str_starts_with($outcome, 'under ') ? 'under' : $outcome);
+                if (isset($fairPrices[$selectedSide])) {
+                    $alert['nvp'] = $fairPrices[$selectedSide];
+                }
                 if ($pinnaclePrices !== []) {
-                    $impliedTotal = array_sum(array_map(static fn (mixed $price): float => 1 / (float) $price, $pinnaclePrices));
                     foreach ($pinnaclePrices as $side => $pinnaclePrice) {
                         $runner = array_find($runners, static fn (array $runner): bool => $matchesOutcome($runner, $side));
-                        $alert['full_market'][] = ['outcome' => ucfirst($side), 'to_price' => (float) $pinnaclePrice, 'nvp' => strtolower($side) === $outcome ? ($alert['nvp'] ?? null) : (count($pinnaclePrices) > 1 && (float) ($alert['nvp'] ?? 0) > 0 ? (float) $pinnaclePrice * $impliedTotal : null), 'bf_back' => $runner['currentBackOdds'] ?? $runner['backOdds'] ?? null];
+                        $alert['full_market'][] = ['outcome' => ucfirst($side), 'to_price' => (float) $pinnaclePrice, 'nvp' => $fairPrices[$side] ?? ($side === $selectedSide ? ($alert['nvp'] ?? null) : null), 'bf_back' => $runner['currentBackOdds'] ?? $runner['backOdds'] ?? null];
                     }
                 } else {
                     $alert['full_market'][] = ['outcome' => $alert['outcome'] ?? '', 'to_price' => $alert['to_price'] ?? null, 'nvp' => $alert['nvp'] ?? null, 'bf_back' => $alert['bf_back']];
                 }
             }
             unset($alert);
+            $pinnacleAlerts = array_values(array_filter($pinnacleAlerts, static fn (array $alert): bool => empty($alert['internal_hidden'])));
 
             if (request()->expectsJson()) {
                 return response()->json([
@@ -228,7 +254,8 @@ class FootballController extends Controller
 
                     foreach ($matches as $key => $match) {
                         if (
-                            ($match['sportsApiPro_match_id'] ?? null) != $matchId
+                            MatchBackup::isHidden($match, 'football')
+                            || ($match['sportsApiPro_match_id'] ?? null) != $matchId
                             || ($match['result_status'] ?? null) !== 'Prematch'
                         ) {
                             continue;
@@ -312,6 +339,25 @@ class FootballController extends Controller
             'has_more' => $this->footballHasMore,
             'next_page' => $this->footballNextPage,
         ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $prices
+     * @return array<string, float>
+     */
+    private function pinnacleFairPrices(array $prices, int $expectedOutcomes): array
+    {
+        if (count($prices) !== $expectedOutcomes || $expectedOutcomes < 2) {
+            return [];
+        }
+        foreach ($prices as $price) {
+            if (! is_numeric($price) || ! is_finite((float) $price) || (float) $price <= 1) {
+                return [];
+            }
+        }
+        $overround = array_sum(array_map(static fn (mixed $price): float => 1 / (float) $price, $prices));
+
+        return array_map(static fn (mixed $price): float => (float) $price * $overround, $prices);
     }
 
     public function tempDataMerge()

@@ -1,10 +1,12 @@
 <?php
 
+use App\Services\MatchBackup;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Str;
 
 if (! function_exists('hasMeaningfulOpeningOdds')) {
     /** @param array<string, mixed> $runner */
@@ -571,11 +573,28 @@ if (! function_exists('getSportsApiProImage')) {
 }
 
 if (! function_exists('storeInRedis')) {
-    function storeInRedis(string $cacheKey, array $data, int $ttlMinutes = 10)
+    function storeInRedis(string $cacheKey, array $data, int $ttlMinutes = 10, bool $mergeLifecycle = true)
     {
         $existingData = Redis::get($cacheKey);
         $existingData = $existingData ? json_decode($existingData, true) : [];
         $mergedData = array_replace($existingData, $data);
+        $sport = MatchBackup::sportForCache($cacheKey);
+        if ($sport !== null && $mergeLifecycle) {
+            $cleaned = array_fill_keys(Redis::zrangebyscore($cacheKey.':cleaned', time(), '+inf'), true);
+            foreach ($mergedData as $matchKey => &$match) {
+                if (isset($cleaned[$matchKey])) {
+                    unset($mergedData[$matchKey]);
+
+                    continue;
+                }
+                $previous = $existingData[$matchKey] ?? [];
+                if (($previous['result_status'] ?? '') === 'Finished' && ($match['result_status'] ?? '') !== 'Finished') {
+                    $match = $previous;
+                }
+                $match = MatchBackup::merge($match, $previous, $sport);
+            }
+            unset($match);
+        }
         Redis::set($cacheKey, json_encode($mergedData));
         Redis::expire($cacheKey, $ttlMinutes * 60);
     }
@@ -624,4 +643,76 @@ if (! function_exists('checkAuthAndSubscription')) {
 
         return ['is_authenticated' => true, 'has_active_subscription' => false, 'display_odds' => false];
     }
+}
+
+/** @return array{country_name: ?string, country_code: ?string, country_flag: ?string, tournament_logo: ?string, country_id: mixed} */
+function leagueHeadingMetadata(array $match): array
+{
+    $country = is_array($match['country'] ?? null) ? $match['country'] : [];
+    $name = $match['country_name'] ?? $match['tournament_country'] ?? $country['name'] ?? (is_string($match['country'] ?? null) ? $match['country'] : null);
+    $code = strtoupper((string) ($match['country_code'] ?? $country['alpha2'] ?? $country['iso2'] ?? $country['code'] ?? ''));
+
+    return [
+        'country_name' => is_string($name) && trim($name) !== '' ? trim($name) : null,
+        'country_code' => preg_match('/^[A-Z]{2}$/D', $code) === 1 ? $code : null,
+        'country_flag' => $match['country_flag'] ?? $country['flag'] ?? $country['flagUrl'] ?? null,
+        'tournament_logo' => $match['tournament_logo'] ?? null,
+        'country_id' => $match['country_id'] ?? $country['id'] ?? null,
+    ];
+}
+
+function leagueHeadingKey(array $match, string $name): string
+{
+    $country = leagueHeadingMetadata($match);
+
+    return $name.'|'.($country['country_id'] ?? $country['country_code'] ?? $country['country_name'] ?? '').'|'.($match['tournament_id'] ?? '');
+}
+
+function competitionPriority(string $tournament, ?string $country = null): int
+{
+    $normalize = static fn (string $name): string => strtolower((string) preg_replace('/[^a-z0-9]+/i', '', Str::ascii($name)));
+    static $priorities = null;
+    $priorities ??= array_flip(array_map($normalize, config('league-priority', [])));
+    $aliases = [
+        'englishpremierleague' => 'Premier League', 'spanishlaliga' => 'La Liga',
+        'italianseriea' => 'Serie A', 'germanbundesliga' => 'Bundesliga',
+        'frenchligue1' => 'Ligue 1', 'uefaeuropaconferenceleague' => 'UEFA Conference League',
+        'portugueseprimeiraliga' => 'Primeira Liga', 'dutcheredivisie' => 'Eredivisie',
+        'turkishsuperlig' => 'Süper Lig', 'belgianjupilerproleague' => 'Belgian Pro League',
+        'englishchampionship' => 'EFL Championship', 'englishleague1' => 'EFL League One',
+        'brazilianseriea' => 'Brasileirão Série A', 'usamls' => 'Major League Soccer (MLS)',
+        'mls' => 'Major League Soccer (MLS)', 'majorleaguesoccer' => 'Major League Soccer (MLS)',
+    ];
+    $name = $normalize($tournament);
+    $countries = ['premierleague' => 'england', 'ligue1' => 'france', 'ligue2' => 'france', 'seriea' => 'italy', 'serieb' => 'italy'];
+    if ($country !== null && $country !== '' && isset($countries[$name]) && $normalize($country) !== $countries[$name]) {
+        return PHP_INT_MAX;
+    }
+    if ($name === 'bundesliga' && $normalize($country ?? '') === 'austria') {
+        $name = 'austrianbundesliga';
+    }
+
+    return $priorities[$normalize($aliases[$name] ?? $name)] ?? PHP_INT_MAX;
+}
+
+/** Preserve match order and the existing fallback order of unranked groups. */
+function rankCompetitionGroups(array $groups): array
+{
+    uasort($groups, static fn (array $first, array $second): int => competitionPriority((string) ($first['tournament_name'] ?? ''), $first['country_name'] ?? $first['tournament_country'] ?? null)
+        <=> competitionPriority((string) ($second['tournament_name'] ?? ''), $second['country_name'] ?? $second['tournament_country'] ?? null));
+
+    return $groups;
+}
+
+function footballStreakClassification(string $name): string
+{
+    $meaning = strtolower(trim((string) preg_replace('/[^a-z0-9]+/i', ' ', Str::ascii($name))));
+    if (preg_match('/^(no wins|without clean sheet|no clean sheet|first to concede|losses(?: in a row)?)(?: |$)/', $meaning)) {
+        return 'negative';
+    }
+    if (preg_match('/^(wins(?: in a row)?|clean sheets?|first to score|unbeaten|no losses)(?: |$)/', $meaning)) {
+        return 'positive';
+    }
+
+    return 'neutral';
 }

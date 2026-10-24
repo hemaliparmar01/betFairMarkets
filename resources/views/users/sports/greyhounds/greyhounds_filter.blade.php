@@ -1,5 +1,5 @@
 @php $checkAuthAndSubscription = $checkAuthAndSubscription ?? checkAuthAndSubscription(); @endphp
-<div id="greyhoundsFilters" class="my-4 space-y-2 border-b border-[#e6edf6] pb-4 dark:border-[#2a3f50]">
+<div id="greyhoundsFilters" class="my-4 space-y-2 border-b border-[#e6edf6] pb-4 dark:border-[var(--color-border-dark)]">
     @foreach ([['all' => 'All', 'upcoming' => 'Upcoming', 'finished' => 'Finished', 'favorites' => 'Favorites', 'by_time' => 'By Time'], ['prematch_drops' => 'Prematch Drops', 'market_shock' => 'Market Shock']] as $filters)
         <div class="flex flex-wrap gap-2">
             @foreach ($filters as $value => $label)

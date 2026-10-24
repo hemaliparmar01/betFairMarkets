@@ -5,6 +5,7 @@ namespace App\Traits;
 use App\Models\Favorite;
 use App\Models\GreyhoundsMatch;
 use App\Models\PredictionVote;
+use App\Services\MatchBackup;
 use Carbon\Carbon;
 
 trait GreyhoundsTrait
@@ -17,6 +18,10 @@ trait GreyhoundsTrait
 
     public function getGreyhoundsMatches(bool $grouped = true): array
     {
+        if (in_array(request()->input('type'), ['ht00', '00_70', 'fav_losing', 'fav_not_winning'], true)) {
+            return [];
+        }
+
         if (in_array(request()->input('type'), ['ht00', '00_70', 'fav_losing', 'prematch_drops', 'market_shock', 'fav_not_winning'], true)) {
             $checkAuthAndSubscription = checkAuthAndSubscription();
             abort_unless($checkAuthAndSubscription['display_odds'], 403, __('An active 7-day free trial or paid subscription is required to use smart filters.'));
@@ -32,7 +37,7 @@ trait GreyhoundsTrait
             $race['details_available'] = now()->timestamp >= (int) $race['timestamp'] - 300;
 
             return $race;
-        }, getInRedis('Greyhounds:matches') ?? []);
+        }, getVisibleSportsMatches('Greyhounds:matches') ?? []);
         $boundaries = [];
         foreach ($matches as $race) {
             if (($race['result_status'] ?? '') === 'Finished') {
@@ -101,12 +106,12 @@ trait GreyhoundsTrait
             if ($type === 'by_time') {
                 $key .= '|'.$match['timestamp'];
             }
-            $groups[$key] ??= ['country' => $match['country'], 'matches' => []];
+            $groups[$key] ??= [...leagueHeadingMetadata($match), 'country' => $match['country'], 'matches' => []];
             $groups[$key]['matches'][] = $match;
             $preparedMatches[] = $match;
         }
 
-        return $grouped ? array_values($groups) : $preparedMatches;
+        return $grouped ? array_values(rankCompetitionGroups($groups)) : $preparedMatches;
     }
 
     public function calculateMinutes(array $match): string
@@ -131,8 +136,8 @@ trait GreyhoundsTrait
 
     public function getGreyhoundsMatchDetail(string $matchId): ?array
     {
-        // $match = array_find(getInRedis('Greyhounds:matches') ?? [], static fn (array $race): bool => (string) $race['betfair_match_id'] === $matchId);
-        $match = collect(getInRedis('Greyhounds:matches') ?? [])->first(static fn (array $race): bool => (string) ($race['betfair_match_id'] ?? '') === $matchId);
+        // $match = array_find(getVisibleSportsMatches('Greyhounds:matches') ?? [], static fn (array $race): bool => (string) $race['betfair_match_id'] === $matchId);
+        $match = collect(getVisibleSportsMatches('Greyhounds:matches') ?? [])->first(static fn (array $race): bool => (string) ($race['betfair_match_id'] ?? '') === $matchId);
         if ($match === null) {
             $stored = GreyhoundsMatch::query()->with('markets')->where('betfair_match_id', $matchId)->first();
             if ($stored === null) {
@@ -143,6 +148,9 @@ trait GreyhoundsTrait
             foreach ($stored->markets as $runner) {
                 $match['markets'][$runner->market_id.'_'.$runner->market_type][] = $runner->payload;
             }
+        }
+        if (MatchBackup::isHidden($match, 'greyhounds')) {
+            return null;
         }
         // $match = prepareMatchOddsMonitoring($match);
         $match['details_available'] = now()->timestamp >= (int) $match['timestamp'] - 300;

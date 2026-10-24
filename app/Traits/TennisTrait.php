@@ -5,6 +5,7 @@ namespace App\Traits;
 use App\Models\Favorite;
 use App\Models\PredictionVote;
 use App\Models\TennisMatch;
+use App\Services\MatchBackup;
 use Carbon\Carbon;
 
 trait TennisTrait
@@ -19,12 +20,16 @@ trait TennisTrait
 
     public function getTennisMatches(): array
     {
+        if (in_array(request()->input('type'), ['ht00', '00_70'], true)) {
+            return [];
+        }
+
         if (in_array(request()->input('type'), ['ht00', '00_70', 'fav_losing', 'prematch_drops', 'market_shock', 'fav_not_winning'], true)) {
             $checkAuthAndSubscription = checkAuthAndSubscription();
             abort_unless($checkAuthAndSubscription['display_odds'], 403, __('An active 7-day free trial or paid subscription is required to use smart filters.'));
         }
 
-        $matches = array_values(array_map('prepareMatchOddsMonitoring', getInRedis('Tennis:matches') ?? []));
+        $matches = array_values(array_map('prepareMatchOddsMonitoring', getVisibleSportsMatches('Tennis:matches') ?? []));
         $customerId = request()->user('customers')?->getAuthIdentifier();
         $favoriteKeys = $customerId === null ? [] : array_fill_keys(Favorite::query()->where('sport', 'tennis')->where('customer_id', $customerId)->pluck('event_key')->all(), true);
         $today = Carbon::now(getCurrentUserTimezone())->toDateString();
@@ -109,11 +114,11 @@ trait TennisTrait
             if ($customerId !== null && $customerVote !== null) {
                 request()->session()->put($sessionKey, $customerVote);
             }
-            $groupKey = ($match['tournament'] ?? 'Tennis').'|'.$match['result_status'];
+            $groupKey = leagueHeadingKey($match, $match['tournament'] ?? 'Tennis').'|'.$match['result_status'];
             if ($type === 'by_time') {
                 $groupKey .= '|'.$match['timestamp'];
             }
-            $groups[$groupKey] ??= ['tournament_name' => $match['tournament'] ?? 'Tennis', 'tournament_logo' => $match['tournament_logo'] ?? null, 'status' => $match['result_status'], 'matches' => []];
+            $groups[$groupKey] ??= [...leagueHeadingMetadata($match), 'tournament_id' => $match['tournament_id'] ?? null, 'tournament_name' => $match['tournament'] ?? 'Tennis', 'tournament_logo' => $match['tournament_logo'] ?? null, 'status' => $match['result_status'], 'matches' => []];
             $groups[$groupKey]['matches'][] = array_replace($match, [
                 'status' => $match['result_status'],
                 'is_favorite' => isset($favoriteKeys[$match['unique_key']]),
@@ -128,7 +133,7 @@ trait TennisTrait
             ]);
         }
 
-        return array_values($groups);
+        return array_values(rankCompetitionGroups($groups));
     }
 
     public function formatTennisScore(array $score): string
@@ -176,8 +181,8 @@ trait TennisTrait
 
     public function getTennisMatchDetail(string $matchId): ?array
     {
-        // $match = array_find(getInRedis('Tennis:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === $matchId && ($match['data_sync_complete'] ?? false) === true);
-        $match = collect(getInRedis('Tennis:matches') ?? [])->first(static fn (array $candidate): bool => (string) ($candidate['sportsApiPro_match_id'] ?? '') === $matchId);
+        // $match = array_find(getVisibleSportsMatches('Tennis:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === $matchId && ($match['data_sync_complete'] ?? false) === true);
+        $match = collect(getVisibleSportsMatches('Tennis:matches') ?? [])->first(static fn (array $candidate): bool => (string) ($candidate['sportsApiPro_match_id'] ?? '') === $matchId);
         if ($match === null) {
             $stored = TennisMatch::query()->with('markets')->where('sports_api_pro_match_id', $matchId)
                 // ->where('data_sync_complete', true)
@@ -194,6 +199,9 @@ trait TennisTrait
                 $images = $id > 0 ? glob(public_path("images/tennis/teams/{$id}.*")) : [];
                 $match[$logo] = $images && is_file($images[0]) ? '/images/tennis/teams/'.basename($images[0]) : null;
             }
+        }
+        if (MatchBackup::isHidden($match, 'tennis')) {
+            return null;
         }
         // $match = prepareMatchOddsMonitoring($match);
         $markets = [];
@@ -237,7 +245,7 @@ trait TennisTrait
         $groups = $this->getTennisMatches();
         $this->marketActivityHasMore = $this->tennisHasMore;
         $this->marketActivityNextPage = $this->tennisNextPage;
-        $matchesById = getInRedis('Tennis:matches') ?? [];
+        $matchesById = getVisibleSportsMatches('Tennis:matches') ?? [];
         $rows = [];
         foreach ($groups as $group) {
             foreach ($group['matches'] as $match) {
@@ -257,7 +265,7 @@ trait TennisTrait
                         continue;
                     }
                     $first = $runners[array_key_first($runners)] ?? [];
-                    $rows[] = ['id' => $key, 'match_id' => $match['sportsApiPro_match_id'], 'team1' => $match['team1'], 'team2' => $match['team2'], 'tournament' => $group['tournament_name'], 'status' => $match['status'], 'minutes' => $match['minutes'], 'score' => $match['score'], 'marketName' => $first['name'] ?? $first['marketType'] ?? 'Market', 'marketType' => $first['marketType'] ?? '', 'runners' => array_values($runners), 'favorite' => $favorite];
+                    $rows[] = ['timestamp' => $match['timestamp'] ?? null, 'id' => $key, 'match_id' => $match['sportsApiPro_match_id'], 'team1' => $match['team1'], 'team2' => $match['team2'], 'tournament' => $group['tournament_name'], 'league_heading' => array_merge(leagueHeadingMetadata($group), ['tournament_name' => $group['tournament_name']]), 'status' => $match['status'], 'minutes' => $match['minutes'], 'score' => $match['score'], 'marketName' => $first['name'] ?? $first['marketType'] ?? 'Market', 'marketType' => $first['marketType'] ?? '', 'runners' => array_values($runners), 'favorite' => $favorite];
                 }
             }
         }

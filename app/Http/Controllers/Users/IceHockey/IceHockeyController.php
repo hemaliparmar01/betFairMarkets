@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Users\IceHockey;
 
 use App\Http\Controllers\Controller;
 use App\Models\PredictionVote;
+use App\Services\MatchBackup;
 use App\Traits\IceHockeyTrait;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
@@ -77,7 +78,8 @@ class IceHockeyController extends Controller
 
                     foreach ($matches as $key => $match) {
                         if (
-                            ($match['data_sync_complete'] ?? false) !== true
+                            MatchBackup::isHidden($match, 'icehockey')
+                            || ($match['data_sync_complete'] ?? false) !== true
                             || ($match['sportsApiPro_match_id'] ?? null) != $matchId
                             || ($match['result_status'] ?? null) !== 'Prematch'
                         ) {

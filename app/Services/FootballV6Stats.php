@@ -70,7 +70,7 @@ class FootballV6Stats
     /** @param array<string, mixed> $match */
     public function isLive(array $match): bool
     {
-        if (($match['result_status'] ?? '') !== 'Live') {
+        if (MatchBackup::isHidden($match, 'football') || ($match['result_status'] ?? '') !== 'Live') {
             return false;
         }
         $clock = $match['timeline']['clock'] ?? [];

@@ -45,6 +45,8 @@ class ListenBetfairOdds extends Command
 
     public function handle(): int
     {
+        ini_set('memory_limit', '-1');
+
         $listenerLock = Cache::store('redis')->lock('Football:betfair-odds-listener', 120);
         if (! $listenerLock->get()) {
             $this->warn('Betfair Odds listener is already running.');
@@ -775,7 +777,7 @@ class ListenBetfairOdds extends Command
 
         if ($updated) {
             app(FootballSyncController::class)->persistOddsSnapshots($changedMatches);
-            storeInRedis('Football:matches', $matches, 30);
+            storeInRedis('Football:matches', $matches, 30, false);
         }
 
         return $updated;

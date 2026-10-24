@@ -7,20 +7,20 @@
 @php $checkAuthAndSubscription = $checkAuthAndSubscription ?? checkAuthAndSubscription(); @endphp
 @if (! $checkAuthAndSubscription['display_odds'])
     @include('users.layout.sports')
-    <section class="my-8 rounded-2xl border border-[#d7e4f2] bg-[#f5f9fd] p-6 text-center dark:border-[#3a5568] dark:bg-[#1f3444]" aria-labelledby="premiumHeading">
-        <i class="fas fa-lock mb-3 text-2xl text-[#1a6b9c]" aria-hidden="true"></i>
-        <h1 id="premiumHeading" class="text-xl font-bold text-[#0b2a40] dark:text-[#e8edf2]">{{ __('Registration and subscription required') }}</h1>
-        <p class="mx-auto mt-3 max-w-xl text-sm text-[#5a7d99] dark:text-[#b0c8dd]">{{ __('Register and activate your 7-day free trial (first-time users), or purchase a paid subscription to access Market Activity, Pinnacle Drops, Horse Racing and Greyhounds.') }}</p>
-        <button type="button" data-premium-required class="mt-5 cursor-pointer rounded-xl bg-[#0b2a40] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#1a6b9c] dark:bg-[#4a8ab5]">{{ __('View access options') }}</button>
+    <section class="my-8 rounded-2xl border border-[#d7e4f2] bg-[#f5f9fd] p-6 text-center dark:border-[#3a5568] dark:bg-[var(--color-surface-raised-dark)]" aria-labelledby="premiumHeading">
+        <i class="fas fa-lock mb-3 text-2xl text-[var(--color-primary-accent)]" aria-hidden="true"></i>
+        <h1 id="premiumHeading" class="text-xl font-bold text-[var(--color-primary)] dark:text-[var(--color-text-dark)]">{{ __('Registration and subscription required') }}</h1>
+        <p class="mx-auto mt-3 max-w-xl text-sm text-[var(--color-text-muted)] dark:text-[var(--color-text-muted-dark)]">{{ __('Register and activate your 7-day free trial (first-time users), or purchase a paid subscription to access Market Activity, Pinnacle Drops, Horse Racing and Greyhounds.') }}</p>
+        <button type="button" data-premium-required class="mt-5 cursor-pointer rounded-xl bg-[var(--color-primary)] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[var(--color-primary-accent)] dark:bg-[#4a8ab5]">{{ __('View access options') }}</button>
     </section>
 @elseif (request()->routeIs('football.pinnacle-odds'))
     <section id="pinnacleDashboard" class="my-5 min-w-0" data-source-url="{{ route('football.pinnacle-odds') }}">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-                <h1 class="flex items-center gap-2 text-2xl font-extrabold text-[#0b2a40] dark:text-[#e8edf2] max-[480px]:text-xl">
+                <h1 class="flex items-center gap-2 text-2xl font-extrabold text-[var(--color-primary)] dark:text-[var(--color-text-dark)] max-[480px]:text-xl">
                     <i class="fas fa-arrow-trend-down text-[#dc4c64]"></i> {{ __('Pinnacle Odds') }}
                 </h1>
-                <p class="mt-1 text-sm text-[#5a7d99] dark:text-[#8aaccc]">{{ __('Realtime Pinnacle odds drops compared with Betfair prices') }}</p>
+                <p class="mt-1 text-sm text-[var(--color-text-muted)] dark:text-[#8aaccc]">{{ __('Realtime Pinnacle odds drops compared with Betfair prices') }}</p>
             </div>
             <span id="pinnacleConnection" class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">
                 <span class="size-2 rounded-full bg-current"></span><span data-status-text>{{ __('Connecting') }}</span>
@@ -29,34 +29,34 @@
 
         <div class="mb-4 flex gap-2 overflow-x-auto pb-2 [scrollbar-width:thin]" data-sport-filters>
             @foreach ([['all','🎯','All'],['soccer','⚽','Soccer'],['tennis','🎾','Tennis'],['basketball','🏀','Basketball'],['ice-hockey','🏒','Ice Hockey'],['baseball','⚾','Baseball'],['cricket','🏏','Cricket'],['esports','🎮','Esports']] as [$value, $icon, $label])
-                <button type="button" data-sport="{{ $value }}" class="pinnacle-sport {{ $value === 'all' ? 'border-[#0b2a40] bg-[#0b2a40] text-white' : 'border-[#d4e0ec] bg-white text-[#2a4d66] dark:border-[#3a5568] dark:bg-[#1f3444] dark:text-[#b0c8dd]' }} inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-bold">
+                <button type="button" data-sport="{{ $value }}" class="pinnacle-sport {{ $value === 'all' ? 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white' : 'border-[var(--color-border-control)] bg-white text-[#2a4d66] dark:border-[#3a5568] dark:bg-[var(--color-surface-raised-dark)] dark:text-[var(--color-text-muted-dark)]' }} inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-bold">
                     <span>{{ $icon }} {{ __($label) }}</span><span class="rounded-full bg-black/10 px-1.5 py-0.5 text-[10px]" data-count>0</span>
                 </button>
             @endforeach
         </div>
 
-        <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#dbe7f2] bg-[#f8fbfe] p-3 dark:border-[#2a3f50] dark:bg-[#1f3444]">
-            <div class="flex rounded-lg border border-[#d4e0ec] bg-white p-1 dark:border-[#3a5568] dark:bg-[#1a2a38]" data-mode-switch>
-                <button type="button" data-mode="prematch" class="rounded-md bg-[#0b2a40] px-3 py-1.5 text-xs font-bold text-white">📋 {{ __('Prematch') }}</button>
-                <button type="button" data-mode="live" class="rounded-md px-3 py-1.5 text-xs font-bold text-[#5a7d99]">🔴 {{ __('Live') }}</button>
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#dbe7f2] bg-[var(--color-surface-soft)] p-3 dark:border-[var(--color-border-dark)] dark:bg-[var(--color-surface-raised-dark)]">
+            <div class="flex rounded-lg border border-[var(--color-border-control)] bg-white p-1 dark:border-[#3a5568] dark:bg-[var(--color-surface-dark)]" data-mode-switch>
+                <button type="button" data-mode="prematch" class="rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-bold text-white">📋 {{ __('Prematch') }}</button>
+                <button type="button" data-mode="live" class="rounded-md px-3 py-1.5 text-xs font-bold text-[var(--color-text-muted)]">🔴 {{ __('Live') }}</button>
             </div>
-            <div class="flex rounded-lg border border-[#d4e0ec] bg-white p-1 dark:border-[#3a5568] dark:bg-[#1a2a38]" data-view-switch>
-                <button type="button" data-view="simple" class="rounded-md bg-[#1a6b9c] px-3 py-1.5 text-xs font-bold text-white">{{ __('Simple') }}</button>
-                <button type="button" data-view="advanced" class="rounded-md px-3 py-1.5 text-xs font-bold text-[#5a7d99]">{{ __('Advanced') }}</button>
+            <div class="flex rounded-lg border border-[var(--color-border-control)] bg-white p-1 dark:border-[#3a5568] dark:bg-[var(--color-surface-dark)]" data-view-switch>
+                <button type="button" data-view="simple" aria-pressed="true" class="rounded-md bg-[var(--color-primary-accent)] px-3 py-1.5 text-xs font-bold text-white">{{ __('Simple') }}</button>
+                <button type="button" data-view="advanced" aria-pressed="false" class="rounded-md px-3 py-1.5 text-xs font-bold text-[var(--color-text-muted)]">{{ __('Advanced') }}</button>
             </div>
         </div>
 
-        <div class="overflow-hidden rounded-2xl border border-[#dbe7f2] bg-white dark:border-[#2a3f50] dark:bg-[#1a2a38]">
-            <div class="flex flex-wrap items-center justify-between gap-3 bg-[#0b2a40] px-4 py-3 text-white">
+        <div class="overflow-hidden rounded-2xl border border-[#dbe7f2] bg-white dark:border-[var(--color-border-dark)] dark:bg-[var(--color-surface-dark)]">
+            <div class="flex flex-wrap items-center justify-between gap-3 bg-[var(--color-primary)] px-4 py-3 text-white">
                 <h2 class="flex items-center gap-2 text-sm font-extrabold uppercase tracking-wide"><span class="size-2 rounded-full bg-[#ff647c]"></span>{{ __('Pinnacle Drops') }}</h2>
                 <span class="text-xs font-semibold text-white/70" data-alert-meta>{{ __('Prematch') }} · ODDS-DROP · ≥5%</span>
             </div>
-            <div class="overflow-x-auto" data-alerts></div>
+            <div class="min-w-0" data-alerts></div>
         </div>
     </section>
 
     <div id="pinnacleModal" class="fixed inset-0 z-[10000] hidden items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="pinnacleModalTitle">
-        <div class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl dark:bg-[#1a2a38]" data-modal-panel></div>
+        <div class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl dark:bg-[var(--color-surface-dark)]" data-modal-panel></div>
     </div>
 
     @push('js')
@@ -72,18 +72,44 @@
                 const price = value => Number.isFinite(number(value)) ? number(value).toFixed(2) : '—';
                 const nvpPrice = value => number(value) > 0 ? price(value) : 'N/A';
                 const marketLabel = alert => `${alert.sect || 'Market'}${alert.point !== null && alert.point !== undefined ? ` ${alert.point}` : alert.points !== undefined ? ` ${alert.points}` : alert.hdp !== undefined ? ` ${alert.hdp}` : ''}${Number(alert.period) > 0 ? ` · Period ${alert.period}` : ''}`;
+                const selectionLabel = alert => {
+                    const selection = String(alert.outcome || '—');
+                    const line = alert.point ?? alert.points ?? alert.hdp;
+                    const section = String(alert.sect || '').toLowerCase();
+                    if (/spread|handicap/.test(section) && line !== null && line !== undefined) return `${selection} (${line})`;
+                    if (/total|o\/u/.test(section) && /^(over|under)$/i.test(selection) && line !== null && line !== undefined) return `${selection} ${line} Goals`;
+                    return selection;
+                };
+                const displayMarket = alert => {
+                    const section = String(alert.sect || 'Market');
+                    const line = alert.point ?? alert.points ?? alert.hdp;
+                    if (/^(total|totals|o\/u)$/i.test(section) && line !== null && line !== undefined) return `Over/Under ${line} Goals`;
+                    if (/^(spread|spreads|asian handicap)$/i.test(section) && line !== null && line !== undefined) return `Asian Handicap ${line}`;
+                    return marketLabel(alert);
+                };
+                const runnerKey = alert => JSON.stringify([sportKey(alert.sport), alert.parent_id ?? alert.id, alert.home, alert.away, alert.period ?? 0, alert.sect, alert.point ?? alert.points ?? alert.hdp ?? null, alert.outcome, alert.is_live ?? false]);
+                const changedDrops = (previous, incoming) => {
+                    const old = new Map(previous.map(alert => [runnerKey(alert), alert]));
+                    return new Set(incoming.filter(alert => {
+                        const before = old.get(runnerKey(alert));
+                        return before && number(alert.to_price) > 1 && number(before.to_price) > number(alert.to_price)
+                            && number(alert.from_price) > number(alert.to_price)
+                            && (!(number(before.alerted) > 0 && number(alert.alerted) > 0) || number(alert.alerted) >= number(before.alerted));
+                    }).map(runnerKey));
+                };
                 const matchKey = alert => `${sportKey(alert.sport)}|${alert.parent_id ?? alert.id ?? ''}|${alert.home ?? ''}|${alert.away ?? ''}|${isLive(alert)}`;
                 const escapeHtml = value => { const el = document.createElement('div'); el.textContent = String(value ?? ''); return el.innerHTML; };
                 const drop = alert => { const from = number(alert.from_price); const to = number(alert.to_price); return from > 0 && to > 0 ? ((from - to) / from) * 100 : 0; };
-                const pinnacleEdge = alert => { const current = number(alert.to_price); const nvp = number(alert.nvp); return current > 0 && nvp > 0 ? ((current / nvp) - 1) * 100 : null; };
-                const edge = alert => { const bf = number(alert.bf_back); const nvp = number(alert.nvp); return bf > 0 && nvp > 0 ? ((bf / nvp) - 1) * 100 : null; };
-                const edgeText = value => value === null ? 'N/A' : Math.abs(value) > 50 ? 'Low Liquidity' : `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
-                const edgeClass = value => value === null || Math.abs(value) > 50 ? 'text-slate-400 italic' : value >= 5 ? 'text-emerald-600' : value >= 3 ? 'text-green-500' : value >= 0 ? 'text-amber-600' : 'text-slate-500';
+                const oddsEdge = (odds, fair) => { const current = number(odds); const nvp = number(fair); return Number.isFinite(current) && Number.isFinite(nvp) && current > 1 && nvp > 1 ? ((current / nvp) - 1) * 100 : null; };
+                const pinnacleEdge = alert => oddsEdge(alert.to_price, alert.nvp);
+                const edge = alert => oddsEdge(alert.bf_back, alert.nvp);
+                const edgeText = value => value === null || !Number.isFinite(value) ? 'N/A' : `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+                const edgeClass = value => value === null || !Number.isFinite(value) ? 'pinnacle-edge-na' : value >= 0 ? 'pinnacle-edge-pos' : 'pinnacle-edge-neg';
                 const isLive = alert => alert.is_live === true || alert.is_live === 1 || alert.is_live === '1' || String(alert.status || '').toLowerCase() === 'live';
                 const alertTime = value => { const raw = number(value); if (!raw) return '—'; const time = raw < 100000000000 ? raw * 1000 : raw; const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000)); return seconds < 60 ? `${seconds}s ago` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ago` : `${Math.floor(seconds / 3600)}h ago`; };
 
                 const filtered = () => state.alerts.filter(alert => Math.round(drop(alert) * 100000000) / 100000000 >= 5 && (state.sport === 'all' || sportKey(alert.sport) === state.sport) && (state.mode === 'live' ? isLive(alert) : !isLive(alert))).sort((a, b) => (number(b.alerted) || 0) - (number(a.alerted) || 0));
-                const render = () => {
+                const render = (flashes = new Set()) => {
                     root.querySelectorAll('[data-sport]').forEach(button => {
                         const count = state.alerts.filter(alert => Math.round(drop(alert) * 100000000) / 100000000 >= 5 && (button.dataset.sport === 'all' || sportKey(alert.sport) === button.dataset.sport) && (state.mode === 'live' ? isLive(alert) : !isLive(alert))).length;
                         button.querySelector('[data-count]').textContent = count;
@@ -102,7 +128,9 @@
                         return;
                     }
 
-                    const header = state.view === 'simple' ? `<div class="grid min-w-[760px] grid-cols-[80px_minmax(240px,1fr)_130px_100px_100px_110px] gap-3 border-b border-[#dbe7f2] bg-[#f5f9fc] px-4 py-2 text-[10px] font-extrabold uppercase tracking-wide text-[#6a8aaa] dark:border-[#2a3f50] dark:bg-[#1f3444]"><span>Drop</span><span>Match · Market</span><span class="text-center">Pinnacle Odds</span><span class="text-center">NVP</span><span class="text-center">Betfair</span><span class="text-center">Edge %</span></div>` : '';
+                    root.dataset.view = state.view;
+                    const infoButton = type => `<button type="button" class="pinnacle-info" data-info="${type}" aria-label="${type === 'nvp' ? 'About NVP' : 'About Edge percentage'}" aria-describedby="pinnacleInfoTooltip">ⓘ</button>`;
+                    const header = `<div class="pinnacle-row pinnacle-columns"><span>Drop</span><span>Match / Market</span><span>Pinnacle</span><span class="pinnacle-advanced">NVP ${infoButton('nvp')}</span><span>Betfair</span><span class="pinnacle-advanced">Edge % ${infoButton('edge')}</span><span class="pinnacle-time">Time</span></div>`;
                     const html = [...groups.values()].map((alerts, groupIndex) => {
                         const first = alerts[0];
                         const groupKey = matchKey(first);
@@ -111,10 +139,10 @@
                             const dropValue = drop(alert);
                             const pinnacleEdgeValue = pinnacleEdge(alert);
                             const edgeValue = edge(alert);
-                            if (state.view === 'advanced') return `<button type="button" data-alert-index="${alertIndex}" class="grid w-full min-w-[520px] grid-cols-[80px_1fr] gap-4 border-t border-[#e6eff8] px-5 py-4 text-left hover:bg-[#f8fbfe] dark:border-[#2a3f50] dark:hover:bg-[#1f3444]"><span class="text-right text-base font-black text-[#dc4c64]">−${Math.abs(dropValue).toFixed(1)}%</span><span class="min-w-0"><strong class="block text-sm text-[#12324a] dark:text-[#e8edf2]">${escapeHtml(marketLabel(alert))} · ${escapeHtml(alert.outcome || '')}</strong><span class="mt-1 block text-xs text-[#6a8aaa]">Pinnacle ${price(alert.from_price)} → <b class="text-[#dc4c64]">${price(alert.to_price)}</b> · NVP ${nvpPrice(alert.nvp)} · Pinnacle Edge <b class="${edgeClass(pinnacleEdgeValue)}">${edgeText(pinnacleEdgeValue)}</b> · Betfair Back ${price(alert.bf_back)} / Lay ${price(alert.bf_lay)} · Sizes ${price(alert.bf_back_size)} / ${price(alert.bf_lay_size)} · Betfair Edge <b class="${edgeClass(edgeValue)}">${edgeText(edgeValue)}</b> · ${alertTime(alert.alerted)}</span></span></button>`;
-                            return `<button type="button" data-alert-index="${alertIndex}" class="grid w-full min-w-[760px] grid-cols-[80px_minmax(240px,1fr)_130px_100px_100px_110px] items-center gap-3 border-t border-[#e6eff8] px-4 py-3 text-left hover:bg-[#f8fbfe] dark:border-[#2a3f50] dark:hover:bg-[#1f3444]"><span class="text-right text-sm font-black text-[#dc4c64]">−${Math.abs(dropValue).toFixed(1)}%</span><span class="min-w-0"><strong class="block truncate text-sm text-[#12324a] dark:text-[#e8edf2]">${escapeHtml(marketLabel(alert))} · ${escapeHtml(alert.outcome || '')}</strong><small class="text-[10px] font-bold uppercase text-[#6a8aaa]">${isLive(alert) ? 'LIVE' : 'PREMATCH'} · ${escapeHtml(alert.sport || '')}</small></span><span class="text-center text-xs font-semibold"><s class="text-slate-400">${price(alert.from_price)}</s> → <b class="text-[#dc4c64]">${price(alert.to_price)}</b></span><span class="text-center text-xs font-bold text-[#dc4c64]">${nvpPrice(alert.nvp)}</span><span class="text-center text-xs font-extrabold text-[#1a6b9c]">${price(alert.bf_back)}</span><span class="text-center text-xs font-extrabold ${edgeClass(edgeValue)}">${edgeText(edgeValue)}</span></button>`;
+                            const direction = number(alert.to_price) > number(alert.from_price) ? 'up' : number(alert.to_price) < number(alert.from_price) ? 'down' : 'same';
+                            return `<button type="button" data-alert-index="${alertIndex}" class="pinnacle-row pinnacle-market-row ${flashes.has(runnerKey(alert)) ? 'pinnacle-row-updated' : ''}"><span data-label="Drop" class="pinnacle-drop">−${Math.abs(dropValue).toFixed(1)}%</span><span data-label="Market / Selection" class="pinnacle-market"><strong>${escapeHtml(displayMarket(alert))}</strong><span class="pinnacle-selection">${escapeHtml(selectionLabel(alert))}</span><small>${isLive(alert) ? 'LIVE' : 'PREMATCH'} · ${escapeHtml(alert.sport || '')}</small></span><span data-label="Pinnacle" class="pinnacle-prices">${price(alert.from_price)} → ${price(alert.to_price)} <b class="pinnacle-direction-${direction}">${direction === 'up' ? '↑' : direction === 'down' ? '↓' : '→'}</b></span><span data-label="NVP" class="pinnacle-advanced">${nvpPrice(alert.nvp)}</span><span data-label="Betfair" class="pinnacle-betfair">${number(alert.bf_back) > 1 ? price(alert.bf_back) : '—'}</span><span data-label="Edge %" class="pinnacle-advanced pinnacle-edges"><span class="${edgeClass(pinnacleEdgeValue)}">Pinnacle: ${edgeText(pinnacleEdgeValue)}</span><span class="${edgeClass(edgeValue)}">BF: ${edgeText(edgeValue)}</span></span><small data-label="Time" class="pinnacle-time">${alertTime(alert.alerted)}</small></button>`;
                         }).join('');
-                        return `<article class="m-2 overflow-hidden rounded-xl border border-[#dbe7f2] dark:border-[#2a3f50]"><button type="button" data-group="${groupIndex}" data-group-key="${escapeHtml(groupKey)}" class="flex w-full items-center justify-between gap-3 bg-[#f5f9fc] px-4 py-3 text-left dark:bg-[#1f3444]"><span class="min-w-0"><strong class="block truncate text-sm text-[#12324a] dark:text-[#e8edf2]">${escapeHtml(first.home)} v ${escapeHtml(first.away)}</strong><small class="text-[10px] font-bold uppercase tracking-wide text-[#6a8aaa]">${isLive(first) ? 'LIVE' : 'PREMATCH'} · ${escapeHtml(first.sport)} · ${escapeHtml(first.league)}</small></span><span class="shrink-0 text-xs font-bold text-[#6a8aaa]">${alerts.length} alert${alerts.length === 1 ? '' : 's'} <i class="fas fa-chevron-down ml-1 ${state.collapsedGroups.has(groupKey) ? '-rotate-90' : ''}"></i></span></button><div data-group-body="${groupIndex}" class="${state.collapsedGroups.has(groupKey) ? 'hidden' : ''}">${rows}</div></article>`;
+                        return `<article class="pinnacle-match-group"><button type="button" data-group="${groupIndex}" data-group-key="${escapeHtml(groupKey)}" class="pinnacle-group-toggle" aria-expanded="${!state.collapsedGroups.has(groupKey)}"><span class="pinnacle-market"><strong>${escapeHtml(first.home)} v ${escapeHtml(first.away)}</strong><small>${isLive(first) ? 'LIVE' : 'PREMATCH'} · ${escapeHtml(first.sport)} · ${escapeHtml(first.league)}</small></span><span class="pinnacle-group-count">${alerts.length} alert${alerts.length === 1 ? '' : 's'} <i class="fas fa-chevron-down ${state.collapsedGroups.has(groupKey) ? '-rotate-90' : ''}" aria-hidden="true"></i></span></button><div data-group-body="${groupIndex}" class="${state.collapsedGroups.has(groupKey) ? 'hidden' : ''}">${rows}</div></article>`;
                     }).join('');
                     root.querySelector('[data-alerts]').innerHTML = header + html;
                 };
@@ -123,22 +151,54 @@
                     state.openAlertKey = alert.alert_key;
                     const dropValue = drop(alert); const pinnacleEdgeValue = pinnacleEdge(alert); const edgeValue = edge(alert);
                     const recent = state.alerts.filter(item => matchKey(item) === matchKey(alert)).sort((a, b) => (number(b.alerted) || 0) - (number(a.alerted) || 0)).slice(0, 5);
-                    modal.querySelector('[data-modal-panel]').innerHTML = `<div class="flex items-start justify-between gap-4"><div><h2 id="pinnacleModalTitle" class="text-xl font-extrabold text-[#12324a] dark:text-[#e8edf2]">${escapeHtml(alert.home)} v ${escapeHtml(alert.away)}</h2><p class="mt-1 text-xs font-bold uppercase text-[#6a8aaa]">${isLive(alert) ? 'LIVE' : 'PREMATCH'} · ${escapeHtml(alert.sport)} · ${escapeHtml(alert.league)}</p></div><button type="button" data-close-modal class="flex size-9 shrink-0 items-center justify-center rounded-full border border-[#d4e0ec] text-[#5a7d99]">✕</button></div><div class="mt-5 grid gap-3 rounded-xl border border-[#dbe7f2] bg-[#f8fbfe] p-4 sm:grid-cols-2 dark:border-[#2a3f50] dark:bg-[#1f3444]"><div class="text-3xl font-black text-[#dc4c64]">−${Math.abs(dropValue).toFixed(1)}%</div><div class="grid grid-cols-2 gap-3 text-xs"><span>Pinnacle<br><b>${price(alert.from_price)} → ${price(alert.to_price)}</b></span><span>NVP<br><b>${nvpPrice(alert.nvp)}</b></span><span>Pinnacle Edge<br><b class="${edgeClass(pinnacleEdgeValue)}">${edgeText(pinnacleEdgeValue)}</b></span><span>Betfair Back / Lay<br><b class="text-[#1a6b9c]">${price(alert.bf_back)} / ${price(alert.bf_lay)}</b></span><span>Betfair Sizes<br><b>${price(alert.bf_back_size)} / ${price(alert.bf_lay_size)}</b></span><span>Betfair Edge<br><b class="${edgeClass(edgeValue)}">${edgeText(edgeValue)}</b></span></div></div><h3 class="mb-2 mt-5 text-xs font-extrabold uppercase tracking-wide text-[#6a8aaa]">Full Market</h3><div class="overflow-x-auto"><table class="w-full min-w-[520px] text-sm"><thead class="border-b border-[#dbe7f2] text-left text-[10px] uppercase text-[#6a8aaa]"><tr><th class="p-2">Outcome</th><th class="p-2 text-right">Pinnacle</th><th class="p-2 text-right">NVP</th><th class="p-2 text-right">Betfair</th><th class="p-2 text-right">Edge</th></tr></thead><tbody>${(alert.full_market?.length ? alert.full_market : [alert]).map(selection => `<tr class="border-b border-[#e6eff8]"><td class="p-2 font-bold">${escapeHtml(selection.outcome || '—')}</td><td class="p-2 text-right font-bold text-[#dc4c64]">${price(selection.to_price)}</td><td class="p-2 text-right">${nvpPrice(selection.nvp)}</td><td class="p-2 text-right font-bold text-[#1a6b9c]">${price(selection.bf_back)}</td><td class="p-2 text-right font-bold ${edgeClass(edge(selection))}">${edgeText(edge(selection))}</td></tr>`).join('')}</tbody></table></div><h3 class="mb-2 mt-5 text-xs font-extrabold uppercase tracking-wide text-[#6a8aaa]">Recent Alerts</h3><div class="divide-y divide-[#e6eff8]">${recent.map(item => `<div class="flex items-center justify-between gap-3 py-2 text-xs"><span class="text-[#6a8aaa]">${alertTime(item.alerted)}</span><span class="flex-1">${escapeHtml(marketLabel(item))} · ${price(item.from_price)} → ${price(item.to_price)}</span><b class="${edgeClass(edge(item))}">${edgeText(edge(item))}</b></div>`).join('')}</div>`;
+                    window.patchRealtimeHtml(modal.querySelector('[data-modal-panel]'), `<div class="flex items-start justify-between gap-4"><div><h2 id="pinnacleModalTitle" class="text-xl font-extrabold text-[#12324a] dark:text-[var(--color-text-dark)]">${escapeHtml(alert.home)} v ${escapeHtml(alert.away)}</h2><p class="mt-1 text-xs font-bold uppercase text-[#6a8aaa]">${isLive(alert) ? 'LIVE' : 'PREMATCH'} · ${escapeHtml(alert.sport)} · ${escapeHtml(alert.league)}</p></div><button type="button" data-close-modal class="flex size-9 shrink-0 items-center justify-center rounded-full border border-[var(--color-border-control)] text-[var(--color-text-muted)]">✕</button></div><div class="mt-5 grid gap-3 rounded-xl border border-[#dbe7f2] bg-[var(--color-surface-soft)] p-4 sm:grid-cols-2 dark:border-[var(--color-border-dark)] dark:bg-[var(--color-surface-raised-dark)]"><div class="text-3xl font-black text-[#dc4c64]">−${Math.abs(dropValue).toFixed(1)}%</div><div class="grid grid-cols-2 gap-3 text-xs"><span>Pinnacle<br><b>${price(alert.from_price)} → ${price(alert.to_price)}</b></span><span>NVP<br><b>${nvpPrice(alert.nvp)}</b></span><span>Pinnacle Edge<br><b class="${edgeClass(pinnacleEdgeValue)}">${edgeText(pinnacleEdgeValue)}</b></span><span>Betfair Back / Lay<br><b class="text-[var(--color-primary-accent)]">${price(alert.bf_back)} / ${price(alert.bf_lay)}</b></span><span>Betfair Sizes<br><b>${price(alert.bf_back_size)} / ${price(alert.bf_lay_size)}</b></span><span>Betfair Edge<br><b class="${edgeClass(edgeValue)}">${edgeText(edgeValue)}</b></span></div></div><h3 class="mb-2 mt-5 text-xs font-extrabold uppercase tracking-wide text-[#6a8aaa]">Full Market</h3><div class="overflow-x-auto"><table class="w-full min-w-[520px] text-sm"><thead class="border-b border-[#dbe7f2] text-left text-[10px] uppercase text-[#6a8aaa]"><tr><th class="p-2">Outcome</th><th class="p-2 text-right">Pinnacle</th><th class="p-2 text-right">NVP</th><th class="p-2 text-right">Betfair</th><th class="p-2 text-right">Edge</th></tr></thead><tbody>${(alert.full_market?.length ? alert.full_market : [alert]).map(selection => `<tr class="border-b border-[var(--color-border)]"><td class="p-2 font-bold">${escapeHtml(selection.outcome || '—')}</td><td class="p-2 text-right font-bold text-[#dc4c64]">${price(selection.to_price)}</td><td class="p-2 text-right">${nvpPrice(selection.nvp)}</td><td class="p-2 text-right font-bold text-[var(--color-primary-accent)]">${price(selection.bf_back)}</td><td class="p-2 text-right font-bold ${edgeClass(edge(selection))}">${edgeText(edge(selection))}</td></tr>`).join('')}</tbody></table></div><h3 class="mb-2 mt-5 text-xs font-extrabold uppercase tracking-wide text-[#6a8aaa]">Recent Alerts</h3><div class="divide-y divide-[var(--color-border)]">${recent.map(item => `<div class="flex items-center justify-between gap-3 py-2 text-xs"><span class="text-[#6a8aaa]">${alertTime(item.alerted)}</span><span class="flex-1">${escapeHtml(marketLabel(item))} · ${price(item.from_price)} → ${price(item.to_price)}</span><b class="${edgeClass(edge(item))}">${edgeText(edge(item))}</b></div>`).join('')}</div>`);
                     modal.classList.remove('hidden'); modal.classList.add('flex');
                 };
 
+                root.addEventListener('animationend', event => { if (event.animationName === 'pinnacleRowUpdate') event.target.classList.remove('pinnacle-row-updated'); });
                 root.addEventListener('click', event => {
                     const sportButton = event.target.closest('[data-sport]');
-                    const switchButton = event.target.closest('[data-mode], [data-view]');
+                    const switchButton = event.target.closest('button[data-mode], button[data-view]');
                     const groupButton = event.target.closest('[data-group]');
                     const alertButton = event.target.closest('[data-alert-index]');
-                    if (sportButton) { state.sport = sportButton.dataset.sport; root.querySelectorAll('[data-sport]').forEach(button => { const active = button === sportButton; button.classList.toggle('border-[#0b2a40]', active); button.classList.toggle('bg-[#0b2a40]', active); button.classList.toggle('text-white', active); button.classList.toggle('border-[#d4e0ec]', !active); button.classList.toggle('bg-white', !active); button.classList.toggle('text-[#2a4d66]', !active); }); render(); }
-                    if (switchButton) { const key = switchButton.dataset.mode ? 'mode' : 'view'; state[key] = switchButton.dataset[key]; switchButton.parentElement.querySelectorAll('button').forEach(button => { button.classList.remove('bg-[#0b2a40]','bg-[#1a6b9c]','text-white'); button.classList.add('text-[#5a7d99]'); }); switchButton.classList.remove('text-[#5a7d99]'); switchButton.classList.add(key === 'mode' ? 'bg-[#0b2a40]' : 'bg-[#1a6b9c]','text-white'); render(); }
-                    if (groupButton) { const body = root.querySelector(`[data-group-body="${groupButton.dataset.group}"]`); const collapsed = body?.classList.toggle('hidden'); if (collapsed) state.collapsedGroups.add(groupButton.dataset.groupKey); else state.collapsedGroups.delete(groupButton.dataset.groupKey); groupButton.querySelector('i')?.classList.toggle('-rotate-90'); }
+                    if (sportButton) { state.sport = sportButton.dataset.sport; root.querySelectorAll('[data-sport]').forEach(button => { const active = button === sportButton; button.classList.toggle('border-[#0b2a40]', active); button.classList.toggle('bg-[var(--color-primary)]', active); button.classList.toggle('text-white', active); button.classList.toggle('border-[#d4e0ec]', !active); button.classList.toggle('bg-white', !active); button.classList.toggle('text-[#2a4d66]', !active); }); render(); }
+                    if (switchButton) { const key = switchButton.dataset.mode ? 'mode' : 'view'; state[key] = switchButton.dataset[key]; switchButton.parentElement.querySelectorAll('button').forEach(button => { button.setAttribute('aria-pressed', String(button === switchButton)); button.classList.remove('bg-[var(--color-primary)]','bg-[var(--color-primary-accent)]','text-white'); button.classList.add('text-[var(--color-text-muted)]'); }); switchButton.classList.remove('text-[var(--color-text-muted)]'); switchButton.classList.add(key === 'mode' ? 'bg-[var(--color-primary)]' : 'bg-[var(--color-primary-accent)]','text-white'); render(); }
+                    if (groupButton) { const body = root.querySelector(`[data-group-body="${groupButton.dataset.group}"]`); const collapsed = body?.classList.toggle('hidden'); groupButton.setAttribute('aria-expanded', String(!collapsed)); if (collapsed) state.collapsedGroups.add(groupButton.dataset.groupKey); else state.collapsedGroups.delete(groupButton.dataset.groupKey); groupButton.querySelector('i')?.classList.toggle('-rotate-90'); }
                     if (alertButton) { openModal(state.alerts[Number(alertButton.dataset.alertIndex)]); scheduleRefresh(); }
                 });
                 modal.addEventListener('click', event => { if (event.target === modal || event.target.closest('[data-close-modal]')) { state.openAlertKey = null; modal.classList.add('hidden'); modal.classList.remove('flex'); } });
                 document.addEventListener('keydown', event => { if (event.key === 'Escape') { state.openAlertKey = null; modal.classList.add('hidden'); modal.classList.remove('flex'); } });
+
+                const explanations = {
+                    nvp: "NVP (No-Vig Price) is the 'fair' or 'true' odds for an outcome. It is calculated by removing the bookmaker's margin (vigorish) from the Pinnacle odds. It represents the true probability of the event without the bookmaker's built-in profit.",
+                    edge: "Edge % represents the percentage difference between the current odds (Pinnacle or Betfair) and the fair NVP odds. A positive (+) Edge % means you are getting better odds than the fair price (Value Bet). A negative (-) Edge % means the odds are lower than the fair price."
+                };
+                const infoTooltip = document.createElement('div');
+                infoTooltip.id = 'pinnacleInfoTooltip';
+                infoTooltip.className = 'pinnacle-info-tooltip';
+                infoTooltip.setAttribute('role', 'tooltip');
+                infoTooltip.setAttribute('popover', 'manual');
+                document.body.append(infoTooltip);
+                let infoTrigger = null;
+                const hideInfo = () => { infoTooltip.hidePopover(); infoTrigger = null; };
+                const showInfo = button => {
+                    infoTrigger = button;
+                    infoTooltip.textContent = explanations[button.dataset.info];
+                    infoTooltip.showPopover();
+                    const rect = button.getBoundingClientRect();
+                    const box = infoTooltip.getBoundingClientRect();
+                    infoTooltip.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - box.width - 8))}px`;
+                    infoTooltip.style.top = `${Math.max(8, rect.bottom + box.height + 8 < window.innerHeight ? rect.bottom + 8 : rect.top - box.height - 8)}px`;
+                };
+                root.addEventListener('pointerover', event => { const button = event.target.closest('[data-info]'); if (button && button !== infoTrigger) showInfo(button); });
+                root.addEventListener('pointerout', event => { const button = event.target.closest('[data-info]'); if (button && !button.contains(event.relatedTarget) && document.activeElement !== button) hideInfo(); });
+                root.addEventListener('focusin', event => { const button = event.target.closest('[data-info]'); if (button) showInfo(button); });
+                root.addEventListener('focusout', event => { if (event.target.closest('[data-info]')) hideInfo(); });
+                root.addEventListener('click', event => { const button = event.target.closest('[data-info]'); if (button) showInfo(button); });
+                document.addEventListener('pointerdown', event => { if (!event.target.closest('[data-info]') && !infoTooltip.contains(event.target)) hideInfo(); });
+                document.addEventListener('keydown', event => { if (event.key === 'Escape') hideInfo(); });
+                window.addEventListener('resize', hideInfo);
+                document.addEventListener('scroll', hideInfo, true);
 
                 const status = root.querySelector('#pinnacleConnection');
                 const updateStatus = () => {
@@ -158,10 +218,11 @@
                             const response = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' });
                         if (!response.ok) throw new Error(`HTTP ${response.status}`);
                         const payload = await response.json();
+                        const flashes = changedDrops(state.alerts, payload.data ?? []);
                         state.alerts = payload.data ?? [];
                         state.feeds = payload.feeds ?? {};
                         updateStatus();
-                        render();
+                        render(flashes);
                         if (state.openAlertKey) {
                             const alert = state.alerts.find(item => item.alert_key === state.openAlertKey);
                             if (alert) openModal(alert);

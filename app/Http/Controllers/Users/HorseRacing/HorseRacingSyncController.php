@@ -9,6 +9,7 @@ use App\Models\HorseRacingMatch;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
 use Throwable;
 
 class HorseRacingSyncController extends Controller
@@ -311,6 +312,10 @@ class HorseRacingSyncController extends Controller
 
     private function storeMatchesInDatabase(array $matches): void
     {
+        $cleaned = array_fill_keys(Redis::zrangebyscore('HorseRacing:matches:cleaned', time(), '+inf'), true);
+        if ($cleaned !== []) {
+            $matches = array_filter($matches, static fn (array $match): bool => ! isset($cleaned[$match['unique_key']]));
+        }
         $rows = [];
         $selections = [];
         $now = now();

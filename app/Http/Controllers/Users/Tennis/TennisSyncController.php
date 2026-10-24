@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Users\Tennis;
 use App\Http\Controllers\Controller;
 use App\Models\TennisMarket;
 use App\Models\TennisMatch;
+use App\Services\MatchBackup;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 
 class TennisSyncController extends Controller
@@ -520,6 +522,9 @@ class TennisSyncController extends Controller
                 $code >= 80 && $code <= 100, $code === 110 => 'finished', $code === 60 => 'postponed', $code === 70 => 'cancelled', $code >= 8 && $code <= 12 => 'inprogress', default => 'notstarted',
             }];
         }
+        if (MatchBackup::isOlderEvent($match, $event) && ! in_array($event['status']['type'] ?? $event['status.type'] ?? null, ['finished', 'abandoned'], true) && ($event['status']['code'] ?? $event['status.code'] ?? null) != 100) {
+            return false;
+        }
         $before = $match;
         $type = $this->eventValue($event, 'status.type');
         $code = $this->eventValue($event, 'status.code');
@@ -564,8 +569,11 @@ class TennisSyncController extends Controller
                 $match[$side.'_score'] = $match[$side.'_score_data']['current'] ?? $match[$side.'_score_data']['display'] ?? ($match[$side.'_score'] ?? null);
             }
         }
-        foreach (['home_team_id' => $homeIsTeam1 ? 'homeTeam.id' : 'awayTeam.id', 'away_team_id' => $homeIsTeam1 ? 'awayTeam.id' : 'homeTeam.id', 'home_team_short_name' => $homeIsTeam1 ? 'homeTeam.shortName' : 'awayTeam.shortName', 'away_team_short_name' => $homeIsTeam1 ? 'awayTeam.shortName' : 'homeTeam.shortName', 'home_ranking' => $homeIsTeam1 ? 'homeTeam.ranking' : 'awayTeam.ranking', 'away_ranking' => $homeIsTeam1 ? 'awayTeam.ranking' : 'homeTeam.ranking', 'home_country_code' => $homeIsTeam1 ? 'homeTeam.country.alpha2' : 'awayTeam.country.alpha2', 'away_country_code' => $homeIsTeam1 ? 'awayTeam.country.alpha2' : 'homeTeam.country.alpha2', 'tournament_id' => 'tournament.id', 'tournament_image_id' => 'tournament.uniqueTournament.id', 'winner_code' => 'winnerCode', 'ground_type' => 'groundType', 'last_period' => 'lastPeriod'] as $field => $key) {
+        foreach (['home_team_id' => $homeIsTeam1 ? 'homeTeam.id' : 'awayTeam.id', 'away_team_id' => $homeIsTeam1 ? 'awayTeam.id' : 'homeTeam.id', 'home_team_short_name' => $homeIsTeam1 ? 'homeTeam.shortName' : 'awayTeam.shortName', 'away_team_short_name' => $homeIsTeam1 ? 'awayTeam.shortName' : 'homeTeam.shortName', 'home_ranking' => $homeIsTeam1 ? 'homeTeam.ranking' : 'awayTeam.ranking', 'away_ranking' => $homeIsTeam1 ? 'awayTeam.ranking' : 'homeTeam.ranking', 'home_country_code' => $homeIsTeam1 ? 'homeTeam.country.alpha2' : 'awayTeam.country.alpha2', 'away_country_code' => $homeIsTeam1 ? 'awayTeam.country.alpha2' : 'homeTeam.country.alpha2', 'tournament_id' => 'tournament.id', 'tournament_image_id' => 'tournament.uniqueTournament.id', 'winner_code' => 'winnerCode', 'country_id' => 'tournament.category.country.id', 'country_name' => 'tournament.category.country.name', 'country_code' => 'tournament.category.country.alpha2', 'ground_type' => 'groundType', 'last_period' => 'lastPeriod'] as $field => $key) {
             $value = $this->eventValue($event, $key);
+            if ($field === 'country_name' && $value === null && preg_match('/^[A-Z]{2}$/i', (string) $this->eventValue($event, 'tournament.category.country.alpha2')) === 1) {
+                $value = $this->eventValue($event, 'tournament.category.name');
+            }
             if ($field === 'tournament_id' || $field === 'tournament_image_id') {
                 $value ??= $event['tournamentId'] ?? null;
             }
@@ -631,6 +639,8 @@ class TennisSyncController extends Controller
         } elseif (! isset($match['home_score_data']['point'], $match['away_score_data']['point'])) {
             unset($match['tennis_points_source']);
         }
+
+        MatchBackup::observe($match, 'tennis', $event, $channel, $before);
 
         return $match !== $before;
     }
@@ -699,15 +709,18 @@ class TennisSyncController extends Controller
                     if ($sourceTimestamp !== null && ! str_ends_with($channel, ':point-by-point')) {
                         $match['tennis_score_source_timestamp'] = $sourceTimestamp;
                     }
+                    MatchBackup::observe($match, 'tennis', ['status' => ['type' => $match['result_status'] === 'Finished' ? 'finished' : 'inprogress']], $channel, $before);
                     $match['tennis_score_version'] = max((int) ($before['tennis_score_version'] ?? 0) + 1, (int) floor(microtime(true) * 1000));
-                    $scoreUpdates[] = [
-                        'id' => (string) $match['sportsApiPro_match_id'],
-                        'version' => $match['tennis_score_version'],
-                        'status' => $match['result_status'] ?? 'Live',
-                        'current_set' => (int) ($match['current_set'] ?? 1),
-                        'home' => $match['home_score_data'] ?? [],
-                        'away' => $match['away_score_data'] ?? [],
-                    ];
+                    if (! MatchBackup::isHidden($match, 'tennis')) {
+                        $scoreUpdates[] = [
+                            'id' => (string) $match['sportsApiPro_match_id'],
+                            'version' => $match['tennis_score_version'],
+                            'status' => $match['result_status'] ?? 'Live',
+                            'current_set' => (int) ($match['current_set'] ?? 1),
+                            'home' => $match['home_score_data'] ?? [],
+                            'away' => $match['away_score_data'] ?? [],
+                        ];
+                    }
                 }
                 if ($before !== $match) {
                     $changed[$key] = $match;
@@ -717,7 +730,7 @@ class TennisSyncController extends Controller
             unset($match);
         }
         if ($changed !== []) {
-            storeInRedis('Tennis:matches', $matches, 30);
+            storeInRedis('Tennis:matches', $matches, 30, false);
             $this->storeMatchesInDatabase($changed);
         }
 
@@ -849,6 +862,13 @@ class TennisSyncController extends Controller
         Cache::store('redis')
             ->lock('Tennis:database-write-lock', 120)
             ->block(10, function () use ($matchRows, $marketRows, $matchKeys, $marketSnapshotKeys): void {
+                $cleaned = array_fill_keys(Redis::zrangebyscore('Tennis:matches:cleaned', time(), '+inf'), true);
+                if ($cleaned !== []) {
+                    $matchRows = array_filter($matchRows, static fn (array $row): bool => ! isset($cleaned[$row['unique_key']]));
+                    $marketRows = array_filter($marketRows, static fn (array $row): bool => ! isset($cleaned[$row['tennis_match_unique_key']]));
+                    $matchKeys = array_values(array_diff($matchKeys, array_keys($cleaned)));
+                    $marketSnapshotKeys = array_values(array_diff($marketSnapshotKeys, array_keys($cleaned)));
+                }
                 $existingMatches = TennisMatch::query()
                     ->whereIn('unique_key', $matchKeys)
                     ->get([
@@ -877,6 +897,8 @@ class TennisSyncController extends Controller
                     }
                     $storedPayload = $existing?->payload;
                     $incomingPayload = json_decode($row['payload'], true);
+                    $incomingPayload = MatchBackup::merge($incomingPayload, $storedPayload ?? [], 'tennis');
+                    $row['payload'] = json_encode($incomingPayload, JSON_THROW_ON_ERROR);
                     if (
                         $existing === null
                         || (string) $existing->betfair_match_id !== (string) $row['betfair_match_id']

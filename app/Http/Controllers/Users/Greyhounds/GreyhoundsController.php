@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Users\Greyhounds;
 
 use App\Http\Controllers\Controller;
 use App\Models\PredictionVote;
+use App\Services\MatchBackup;
 use App\Traits\GreyhoundsTrait;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
@@ -108,7 +109,8 @@ class GreyhoundsController extends Controller
 
                     foreach ($matches as $key => $match) {
                         if (
-                            ($match['data_sync_complete'] ?? false) !== true
+                            MatchBackup::isHidden($match, 'greyhounds')
+                            || ($match['data_sync_complete'] ?? false) !== true
                             || ($match['betfair_match_id'] ?? null) != $matchId
                             || ($match['result_status'] ?? null) !== 'Prematch'
                         ) {

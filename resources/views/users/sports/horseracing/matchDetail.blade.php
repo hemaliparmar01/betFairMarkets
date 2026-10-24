@@ -3,24 +3,24 @@
 @section('title', $match['team1'].' · '.$match['team2'].' · BF Markets')
 @section('content')
     @include('users.layout.sports')
-    <section id="horseRaceDetail" data-horse-detail data-race-channel="sports.{{ $raceSport }}.live" data-race-sport="{{ $raceSport }}" data-market-chart-url="{{ env('BETFAIR_API_KEY') }}" data-horse-url="{{ route($raceSport.'.matches.show', $match['id']) }}" data-horse-payload="{{ json_encode($detail) }}" class="min-w-0 pt-4 text-[#12324a] dark:text-[#e8edf2]">
-        <a href="{{ route($raceSport.'.home') }}" class="mb-4 inline-flex items-center gap-2 text-sm font-medium text-[#5a7d99] hover:text-[#1a6b9c]">← {{ __('Back to '.$raceTitle) }}</a>
-        <div class="mb-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-[#2a3f50] dark:bg-[#1a2a38]">
+    <section id="horseRaceDetail" data-horse-detail data-race-channel="sports.{{ $raceSport }}.live" data-race-sport="{{ $raceSport }}" data-market-chart-url="{{ env('BETFAIR_API_KEY') }}" data-horse-url="{{ route($raceSport.'.matches.show', $match['id']) }}" data-horse-payload="{{ json_encode($detail) }}" class="min-w-0 pt-4 text-[#12324a] dark:text-[var(--color-text-dark)]">
+        <a href="{{ route($raceSport.'.home') }}" class="mb-4 inline-flex items-center gap-2 text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-primary-accent)]">← {{ __('Back to '.$raceTitle) }}</a>
+        <div class="mb-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-[var(--color-border-dark)] dark:bg-[var(--color-surface-dark)]">
             <div class="flex flex-wrap items-center justify-between gap-3">
-                <div class="flex items-center gap-3"><span class="text-2xl">{{ $raceSport === 'greyhounds' ? '🐕' : '🏇' }}</span><div><h1 class="text-xl font-bold" data-horse-course>{{ $match['team1'] }}</h1><p class="text-sm text-[#5a7d99]" data-horse-description>{{ $match['team2'] }}</p><p class="text-xs text-[#5a7d99]">{{ $match['country'] ?? '' }}</p></div></div>
-                <div class="flex items-center gap-4"><div class="text-right"><div class="text-2xl font-bold">{{ $match['minutes'] }}</div><div id="countdown-timer" class="text-xs font-medium text-[#5a7d99]"></div></div><span data-horse-status class="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">{{ $match['status'] === 'Prematch' ? __('Upcoming') : $match['status'] }}</span></div>
+                <div class="flex items-center gap-3"><span class="text-2xl">{{ $raceSport === 'greyhounds' ? '🐕' : '🏇' }}</span><div><h1 class="text-xl font-bold" data-horse-course>{{ $match['team1'] }}</h1><p class="text-sm text-[var(--color-text-muted)]" data-horse-description>{{ $match['team2'] }}</p><p class="text-xs text-[var(--color-text-muted)]">{{ $match['country'] ?? '' }}</p></div></div>
+                <div class="flex items-center gap-4"><div class="text-right"><div class="text-2xl font-bold">{{ $match['minutes'] }}</div><div id="countdown-timer" class="text-xs font-medium text-[var(--color-text-muted)]"></div></div><span data-horse-status class="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">{{ $match['status'] === 'Prematch' ? __('Upcoming') : $match['status'] }}</span></div>
             </div>
         </div>
-        <div class="mb-3 flex flex-wrap gap-2" data-horse-markets>@foreach ($detail['markets'] as $market)<button type="button" data-horse-market="{{ $market['type'] }}" class="rounded-full border border-[#d4e0ec] px-3 py-1 text-xs font-semibold [&.active]:bg-[#0b2a40] [&.active]:text-white">{{ $market['type'] }}</button>@endforeach</div>
-        <p class="mb-3 text-xs text-[#5a7d99]">{{ __('Pressure shows odds direction and available exchange liquidity, not traded volume.') }}</p>
+        <div class="mb-3 flex flex-wrap gap-2" data-horse-markets>@foreach ($detail['markets'] as $market)<button type="button" data-horse-market="{{ $market['type'] }}" class="rounded-full border border-[var(--color-border-control)] px-3 py-1 text-xs font-semibold [&.active]:bg-[var(--color-primary)] [&.active]:text-white">{{ $market['type'] }}</button>@endforeach</div>
+        <p class="mb-3 text-xs text-[var(--color-text-muted)]">{{ __('Pressure shows odds direction and available exchange liquidity, not traded volume.') }}</p>
         <p data-horse-error class="hidden mb-3 text-sm text-red-500"></p>
-        <div class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-[#2a3f50] dark:bg-[#1a2a38]">
+        <div class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-[var(--color-border-dark)] dark:bg-[var(--color-surface-dark)]">
             <div class="runner-header"><div>{{ __('Runner') }}</div><div class="text-center">{{ __('Favourite') }}</div><div class="text-center">{{ __('Back') }}</div><div class="text-center">{{ __('Lay') }}</div><div class="text-center">{{ __('Available Liquidity Pressure') }}</div></div>
             <div id="runners-container" aria-live="polite">@if (($detail['race']['available'] ?? true) === false)<p class="p-8 text-center">{{ __('Race details and odds become available five minutes before the start.') }}</p>@elseif (! $checkAuthAndSubscription['display_odds'])<p class="flex items-center justify-center gap-3 p-8">@include('lock_icon') {{ __('Log in with an active subscription to view race odds.') }}</p>@endif</div>
         </div>
-            <div class="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200 dark:bg-[#203746] dark:border-[#2a3f50]">
-                <h3 class="text-xs font-bold text-gray-700 dark:text-[#e8edf2] uppercase tracking-wider mb-3">Visual Indicators Legend</h3>
-                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 text-xs text-gray-600 dark:text-[#b0c8dd]">
+            <div class="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200 dark:bg-[#203746] dark:border-[var(--color-border-dark)]">
+                <h3 class="text-xs font-bold text-gray-700 dark:text-[var(--color-text-dark)] uppercase tracking-wider mb-3">Visual Indicators Legend</h3>
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 text-xs text-gray-600 dark:text-[var(--color-text-muted-dark)]">
                     <div class="flex items-center gap-2">
                         <span class="legend-arrow-down text-base">↓</span>
                         <span>Odds dropped (shortening)</span>
@@ -44,7 +44,7 @@
                         <span>Old → New</span>
                     </div>
                     <div class="flex items-center gap-2">
-                        <span class="px-2 py-0.5 rounded-full bg-[#e8f7ee] text-[#1f9a6e] text-[10px] font-bold">-2.0%</span>
+                        <span class="px-2 py-0.5 rounded-full bg-[#e8f7ee] text-[var(--color-success)] text-[10px] font-bold">-2.0%</span>
                         <span>Change %</span>
                     </div>
                     <div class="flex items-center gap-2">
@@ -54,7 +54,7 @@
                         <span>Recent trend (last 30 seconds)</span>
                     </div>
                     <div class="flex items-center gap-2">
-                        <span class="w-3 h-3 rounded-sm bg-[#1f9a6e]"></span>
+                        <span class="w-3 h-3 rounded-sm bg-[var(--color-success)]"></span>
                         <span>Back pressure</span>
                     </div>
                     <div class="flex items-center gap-2">

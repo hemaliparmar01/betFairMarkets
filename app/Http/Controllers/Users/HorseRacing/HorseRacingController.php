@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Users\HorseRacing;
 
 use App\Http\Controllers\Controller;
 use App\Models\PredictionVote;
+use App\Services\MatchBackup;
 use App\Traits\HorseRacingTrait;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
@@ -107,7 +108,8 @@ class HorseRacingController extends Controller
 
                     foreach ($matches as $key => $match) {
                         if (
-                            ($match['data_sync_complete'] ?? false) !== true
+                            MatchBackup::isHidden($match, 'horseracing')
+                            || ($match['data_sync_complete'] ?? false) !== true
                             || ($match['betfair_match_id'] ?? null) != $matchId
                             || ($match['result_status'] ?? null) !== 'Prematch'
                         ) {

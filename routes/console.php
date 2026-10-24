@@ -18,7 +18,10 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Schedule::command('sports:process-match-backups')->everyFiveMinutes()->withoutOverlapping(5);
+Schedule::command('sports:process-match-backups --scheduled')
+    ->everyMinute()
+    ->withoutOverlapping(5)
+    ->appendOutputTo(storage_path('logs/match-backups.log'));
 
 Schedule::call(function () {
     app(FootballV6Stats::class)->queueDueMatches();
@@ -153,3 +156,5 @@ Schedule::call(function () {
 })->name('horseracing-sports-prematch')->everyFifteenMinutes()->withoutOverlapping(2);
 
 Schedule::command('subscriptions:process')->everyFiveMinutes()->withoutOverlapping(10);
+
+Schedule::command('football:cleanup-timelines')->dailyAt('00:00')->timezone(config('app.timezone'))->withoutOverlapping();

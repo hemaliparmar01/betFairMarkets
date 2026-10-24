@@ -1,0 +1,965 @@
+/* Original BetGuru alert layouts; shared colors are scoped to these filters. */
+
+
+.fixtures-container:has(> .football-alert--prematch) {
+    width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    border: 1px solid var(--alert-frame-border);
+    border-radius: 10px;
+    background: var(--alert-surface);
+    color: var(--alert-text);
+}
+
+.fixtures-container:has(> .football-alert--prematch),
+.fixtures-container:has(> .football-alert--prematch) * {
+    box-sizing: border-box;
+}
+
+.prematch-drops__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--alert-border);
+}
+
+.prematch-drops__heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.prematch-drops__icon {
+    display: inline-flex;
+    width: 35px;
+    height: 35px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    color: var(--alert-accent);
+}
+
+.prematch-drops__icon svg {
+    width: 30px;
+    height: 30px;
+}
+
+.prematch-drops__title-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.prematch-drops__title {
+    margin: 0;
+    color: var(--alert-heading);
+    font-size: 16px;
+    font-weight: 900;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.prematch-drops__info {
+    display: inline-flex;
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #858b96;
+    border-radius: 50%;
+    color: #727986;
+    font-size: 9px;
+    font-weight: 800;
+}
+
+.prematch-drops__subtitle {
+    margin: 3px 0 0;
+    color: var(--alert-muted);
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+.prematch-drops__table-scroll {
+    width: 100%;
+    overflow: hidden;
+}
+
+.prematch-drops__table {
+    width: 100%;
+    min-width: 0;
+}
+
+.football-alert.prematch-drops__row {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    border-bottom: 1px solid var(--alert-border);
+}
+
+.football-alert.prematch-drops__row:last-child {
+    border-bottom: 0;
+}
+
+.prematch-drops__layer {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    align-items: center;
+    gap: 14px;
+}
+
+.prematch-drops__layer--top {
+    grid-template-columns: 90px minmax(0, 1fr) auto;
+}
+
+.prematch-drops__layer--bottom {
+    grid-template-columns: minmax(220px, 1fr) auto 42px;
+    padding-top: 10px;
+    border-top: 1px solid var(--alert-divider);
+}
+
+.prematch-drops__status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.prematch-drops__status::before {
+    content: "";
+    width: 11px;
+    height: 11px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+}
+
+.prematch-drops__status--new {
+    color: #1da43c;
+}
+
+.prematch-drops__status--new::before {
+    background: #20ad3d;
+}
+
+.prematch-drops__status--active {
+    color: #dfaa00;
+}
+
+.prematch-drops__status--active::before {
+    background: #ffc20a;
+}
+
+.prematch-drops__status--weak {
+    color: #e62932;
+}
+
+.prematch-drops__status--weak::before {
+    background: #ed2732;
+}
+
+.prematch-drops__match {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+}
+
+.prematch-drops__match>div {
+    min-width: 0;
+}
+
+.prematch-drops__sport-icon {
+    font-size: 16px;
+}
+
+.prematch-drops__teams {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    color: #202029;
+    font-size: 10px;
+    font-weight: 800;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.prematch-drops__match-meta {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px 7px;
+    margin-top: 4px;
+    color: #4f5664;
+    font-size: 9px;
+}
+
+.prematch-drops__flag {
+    width: 14px;
+    height: 10px;
+    flex: 0 0 auto;
+    border-radius: 1px;
+    object-fit: cover;
+}
+
+.prematch-drops__kickoff {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    white-space: nowrap;
+}
+
+.prematch-drops__drop-summary {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 22px;
+}
+
+.prematch-drops__metric {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    white-space: nowrap;
+}
+
+.prematch-drops__context {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.prematch-drops__field {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.prematch-drops__field-label {
+    color: var(--alert-label);
+    font-size: 8px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.prematch-drops__market,
+.prematch-drops__selection {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0;
+    font-size: 10px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.prematch-drops__selection {
+    color: var(--alert-accent);
+}
+
+.prematch-drops__movement {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 12px;
+}
+
+.prematch-drops__odds {
+    display: grid;
+    flex: 0 0 auto;
+    grid-template-columns: 47px 22px 47px 22px 47px;
+    align-items: center;
+    gap: 4px;
+}
+
+.prematch-drops__odd {
+    display: inline-flex;
+    min-height: 29px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #dedee5;
+    border-radius: 5px;
+    background: var(--alert-surface);
+    color: #25252e;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.prematch-drops__odd--current {
+    color: #20a34a;
+}
+
+.prematch-drops__arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 900;
+    line-height: 1;
+    will-change: transform, opacity;
+}
+
+.prematch-drops__arrow--down {
+    color: var(--alert-shock-accent);
+    animation: prematch-drops-arrow-down 1.35s ease-in-out infinite;
+}
+
+.prematch-drops__arrow--up {
+    color: #20a34a;
+    animation: prematch-drops-arrow-up 1.35s ease-in-out infinite;
+}
+
+.prematch-drops__arrow--same {
+    color: #828895;
+}
+
+@keyframes prematch-drops-arrow-down {
+    0% {
+        opacity: 0;
+        transform: translate3d(0, -3px, 0);
+    }
+
+    30%,
+    70% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate3d(0, 3px, 0);
+    }
+}
+
+@keyframes prematch-drops-arrow-up {
+    0% {
+        opacity: 0;
+        transform: translate3d(0, 3px, 0);
+    }
+
+    30%,
+    70% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate3d(0, -3px, 0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .prematch-drops__arrow--down,
+    .prematch-drops__arrow--up {
+        animation: none;
+    }
+}
+
+.prematch-drops__percentage {
+    color: var(--alert-shock-accent);
+    font-size: 12px;
+    font-weight: 900;
+}
+
+.prematch-drops__started {
+    color: #343740;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.prematch-drops__chart {
+    display: inline-flex;
+    width: 37px;
+    height: 29px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #9b72c8;
+    border-radius: 5px;
+    background: var(--alert-surface);
+    color: var(--alert-accent);
+}
+
+.prematch-drops__chart svg {
+    width: 16px;
+    height: 16px;
+}
+
+.prematch-drops__empty {
+    padding: 42px 20px;
+    color: #666d78;
+    text-align: center;
+}
+
+.prematch-drops__legend {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 26px;
+    padding: 10px 24px;
+    border-top: 1px solid var(--alert-border);
+    color: #3f4550;
+    font-size: 9px;
+}
+
+.prematch-drops__legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.prematch-drops__legend-dot {
+    width: 9px;
+    height: 9px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+}
+
+.prematch-drops__legend-dot--new {
+    background: #20ad3d;
+}
+
+.prematch-drops__legend-dot--active {
+    background: #ffc20a;
+}
+
+.prematch-drops__legend-dot--weak {
+    background: #ed2732;
+}
+
+@media (max-width: 850px) {
+    .prematch-drops__layer--top {
+        grid-template-columns: 80px minmax(0, 1fr);
+    }
+
+    .prematch-drops__drop-summary {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+        padding-left: 94px;
+    }
+
+    .prematch-drops__layer--bottom {
+        grid-template-columns: minmax(0, 1fr) 42px;
+    }
+
+    .prematch-drops__context {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 560px) {
+    .prematch-drops__header {
+        padding: 14px 12px;
+    }
+
+    .football-alert.prematch-drops__row {
+        padding: 12px;
+    }
+
+    .prematch-drops__layer--top,
+    .prematch-drops__layer--bottom {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .prematch-drops__drop-summary {
+        grid-column: auto;
+        justify-content: flex-start;
+        padding-left: 0;
+    }
+
+    .prematch-drops__context {
+        grid-column: auto;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 9px;
+    }
+
+    .prematch-drops__movement {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .prematch-drops__chart {
+        justify-self: start;
+    }
+
+    .prematch-drops__legend {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 7px;
+        padding: 10px 12px;
+    }
+}
+
+.fixtures-container:has(> .football-alert--shock) {
+    width: 100%;
+    padding: 18px;
+    border: 1px solid #e7e7eb;
+    border-radius: 12px;
+    background: var(--alert-surface);
+    color: var(--alert-shock-text);
+}
+
+.market-shock-detector__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+
+.market-shock-detector__heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.market-shock-detector__icon {
+    display: inline-flex;
+    width: 38px;
+    height: 38px;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: #6f31bc;
+    color: var(--alert-surface);
+}
+
+.market-shock-detector__icon svg {
+    width: 21px;
+    height: 21px;
+    fill: currentColor;
+}
+
+.market-shock-detector__title-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.market-shock-detector__title {
+    margin: 0;
+    color: var(--alert-shock-text);
+    font-size: 16px;
+    font-weight: 800;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.market-shock-detector__info {
+    display: inline-flex;
+    width: 15px;
+    height: 15px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #78808c;
+    border-radius: 50%;
+    color: #78808c;
+    font-size: 9px;
+    font-weight: 800;
+}
+
+.market-shock-detector__subtitle {
+    margin: 3px 0 0;
+    color: var(--alert-muted);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.market-shock-detector__actions {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+}
+
+.market-shock-detector__action {
+    display: inline-flex;
+    min-height: 34px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 14px;
+    border: 1px solid #dedee5;
+    border-radius: 6px;
+    background: var(--alert-surface);
+    color: #1e1e27;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.fixtures-container:has(> .football-alert--shock) {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.football-alert.market-shock-card {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid #e3e3e9;
+    border-radius: 9px;
+    background: var(--alert-surface);
+    box-shadow: 0 2px 8px rgba(27, 31, 44, 0.05);
+}
+
+.market-shock-card__badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 10px;
+    padding: 4px 9px;
+    border-radius: 4px;
+    background: var(--alert-shock-accent);
+    color: var(--alert-surface);
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.market-shock-card__match {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--alert-shock-text);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.market-shock-card__sport-icon {
+    display: inline-flex;
+    width: 15px;
+    height: 15px;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+}
+
+.market-shock-card__league {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 6px;
+    color: #292934;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.market-shock-card__flag {
+    width: 15px;
+    height: 11px;
+    object-fit: cover;
+    border-radius: 1px;
+}
+
+.market-shock-card__meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+    padding-bottom: 9px;
+    border-bottom: 1px solid #ededf1;
+    color: #555d6b;
+    font-size: 9px;
+}
+
+.market-shock-card__detected {
+    color: var(--alert-shock-accent);
+    font-weight: 700;
+}
+
+.market-shock-card__countdown {
+    display: inline-flex;
+    width: 100%;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    color: #555d6b;
+    font-weight: 700;
+}
+
+.market-shock-card__countdown-value,
+.market-shock-detector__footer-countdown {
+    color: var(--alert-shock-accent);
+    font-variant-numeric: tabular-nums;
+    font-weight: 900;
+}
+
+.market-shock-card__details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.market-shock-card__detail-label {
+    display: block;
+    margin-bottom: 4px;
+    color: #636a78;
+    font-size: 9px;
+}
+
+.market-shock-card__detail-value {
+    display: block;
+    color: #23232c;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.market-shock-card__selection {
+    color: #6f31bc;
+}
+
+.market-shock-card__odds {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.market-shock-card__odd {
+    display: flex;
+    min-height: 34px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #e2e2e8;
+    border-radius: 5px;
+    background: var(--alert-surface);
+    color: #20202a;
+    font-size: 14px;
+    font-weight: 800;
+}
+
+.market-shock-card__odd--current {
+    color: #20a44b;
+}
+
+.market-shock-card__arrow {
+    color: #737986;
+    font-size: 16px;
+}
+
+.market-shock-card__drop {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.market-shock-card__percentage {
+    flex: 0 0 auto;
+    color: var(--alert-shock-accent);
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.market-shock-card__threshold {
+    color: #31333c;
+    font-size: 8px;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.market-shock-card__chart {
+    display: flex;
+    width: 100%;
+    min-height: 32px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    margin-top: 13px;
+    border: 1px solid #8b63bc;
+    border-radius: 5px;
+    background: var(--alert-surface);
+    color: #6f31bc;
+    font-size: 11px;
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.market-shock-card__chart svg {
+    width: 15px;
+    height: 15px;
+}
+
+.market-shock-detector__empty {
+    grid-column: 1 / -1;
+    padding: 40px 20px;
+    color: #666d78;
+    text-align: center;
+}
+
+.market-shock-detector__footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 14px;
+    color: #5e6470;
+    font-size: 10px;
+}
+
+@media (max-width: 1200px) {
+    .fixtures-container:has(> .football-alert--shock) {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 680px) {
+    .market-shock-detector__header {
+        flex-direction: column;
+    }
+
+    .fixtures-container:has(> .football-alert--shock) {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Integration with BF Markets' existing rows, controls and AJAX pagination. */
+.fixtures-container:has(> .football-alert) > .league-header { display: none; }
+.fixtures-container:has(> .football-alert--shock) > .market-shock-detector__header { grid-column: 1 / -1; }
+.football-alert.event-row { cursor: pointer; align-items: stretch; }
+.football-alert--prematch.event-row { display: block; background: var(--alert-surface); margin: 0; border-radius: 0; border-width: 0; padding: 0; gap: 0; min-height: 0; }
+.football-alert--shock.event-row { display: contents; }
+.football-alert .football-alert-top { grid-template-columns: minmax(0, 1fr) auto; }
+.football-alert .event-actions { order: 2; width: auto; margin-top: 10px; align-self: flex-end; }
+.football-alert-markets { width: 100%; min-width: 0; }
+.football-alert-market { padding-top: 8px; }
+.football-alert-provider { display: block; margin: 0 0 4px; color: var(--alert-label); font-size: 9px; font-weight: 700; }
+.football-alert--prematch .football-alert-market-row { grid-template-columns: minmax(0, 1fr) auto; padding-bottom: 10px; }
+.football-alert--shock .football-alert-market-row + .football-alert-market-row { margin-top: 12px; padding-top: 2px; border-top: 1px solid var(--alert-divider); }
+.football-alert-league-logo { width: 18px; height: 18px; object-fit: contain; }
+.football-alert-shock-heading { display: flex; justify-content: space-between; align-items: center; }
+.football-alert .prematch-drops__teams { white-space: normal; overflow-wrap: anywhere; }
+.football-alert .prematch-drops__market, .football-alert .prematch-drops__selection { white-space: normal; overflow-wrap: anywhere; }
+.football-alert .odd-box { position: relative; }
+.football-alert-tooltip { position: absolute; bottom: 110%; left: 0; z-index: 10; visibility: hidden; white-space: nowrap; padding: 4px 8px; border-radius: 5px; background: var(--alert-text); color: var(--alert-surface); font-size: 11px; }
+.football-alert .odd-box:hover .football-alert-tooltip { visibility: visible; }
+@media (max-width: 850px) {
+    .football-alert--prematch .football-alert-market-row { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+    .football-alert .football-alert-top { grid-template-columns: minmax(0, 1fr) auto; }
+}
+.dark-mode .fixtures-container:has(> .football-alert) {
+    --alert-surface: var(--color-surface-dark, #1a2a38);
+    --alert-text: var(--color-text-dark, #e8edf2);
+    --alert-heading: var(--color-text-dark, #e8edf2);
+    --alert-muted: var(--color-text-muted-dark, #b0c8dd);
+    --alert-label: var(--color-text-muted-dark, #b0c8dd);
+    --alert-border: var(--color-border-dark, #2a3f50);
+    --alert-frame-border: var(--color-border-dark, #2a3f50);
+    --alert-divider: var(--color-border-dark, #2a3f50);
+    --alert-shock-text: var(--color-text-dark, #e8edf2);
+}
+.football-alert--prematch .event-actions > [title^="Live Statistics"],
+.football-alert--prematch .event-actions > [title^="Quick Stats"],
+.football-alert--prematch .event-actions > [title^="Statistics"] { display: none; }
+
+/* Reference alert rows: every received market/selection stays in the same grid. */
+.prematch-drops__column-head,
+.prematch-drops__data-row {
+    display: grid;
+    grid-template-columns: 60px minmax(190px, 1.8fr) minmax(95px, .85fr) minmax(110px, 1fr) 170px 55px 70px 36px;
+    align-items: center;
+    gap: 8px;
+    min-width: 920px;
+    padding: 10px 16px;
+}
+.prematch-drops__column-head {
+    color: var(--alert-muted);
+    background: var(--color-surface-soft);
+    border-bottom: 1px solid var(--alert-border);
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+.prematch-drops__data-row { min-height: 62px; padding-block: 7px; border-bottom: 1px solid var(--alert-divider); }
+.football-alert--prematch .football-alert-markets { display: block; margin: 0; }
+.football-alert--prematch .football-alert-market { padding: 0; }
+.football-alert--prematch .football-alert-provider { display: none; }
+.football-alert--prematch .event-actions { margin: 0; padding: 4px 16px; }
+.prematch-drops__data-row .prematch-drops__odds { grid-template-columns: 42px 16px 42px 16px 42px; gap: 2px; }
+.prematch-drops__data-row .prematch-drops__teams { white-space: normal; }
+.alert-source { display: block; margin-top: 3px; color: var(--alert-muted); font-size: 8px; }
+.alert-unavailable { color: var(--alert-muted); font-size: 11px; }
+.alert-chart-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    margin-top: 12px;
+    padding: 5px 8px;
+    border: 1px solid var(--alert-border);
+    border-radius: 5px;
+    color: var(--alert-accent);
+    font-size: 11px;
+    font-weight: 700;
+}
+.football-alert--shock .football-alert-markets { display: contents; }
+.football-alert--shock .football-alert-market { display: contents; }
+.football-alert--shock .market-shock-card__odds { grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr); }
+.football-alert--shock .football-alert-market-row { min-width: 0; padding-block: 10px; }
+@media (max-width: 600px) {
+    .prematch-drops__column-head { display: none; }
+    .prematch-drops__data-row {
+        min-width: 0;
+        grid-template-columns: minmax(0, 1fr) 38px;
+        gap: 10px;
+        padding: 12px;
+    }
+    .prematch-drops__data-row > :first-child { display: none; }
+    .prematch-drops__data-row .prematch-drops__match,
+    .prematch-drops__data-row .prematch-drops__market,
+    .prematch-drops__data-row .prematch-drops__selection,
+    .prematch-drops__data-row .prematch-drops__movement { grid-column: 1 / -1; }
+    .prematch-drops__data-row > .alert-unavailable { display: none; }
+    .prematch-drops__data-row .prematch-drops__chart { grid-column: 2; }
+}
+
+/* One received selection per source-style shock card, retaining the match-level event/ID wrapper. */
+.football-shock-item { display: flex; flex-direction: column; margin: 0; align-self: stretch; }
+.football-shock-item .market-shock-card__match { margin-top: 6px; }
+.football-shock-item .market-shock-card__drop { margin-bottom: 10px; }
+.football-shock-item .alert-chart-link { margin-top: auto; }
+.football-shock-item .market-shock-card__odds { grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr); }
+.football-shock-item .event-actions { justify-content: center; width: 100%; }
+.football-shock-item .event-actions [data-action="chart"] { display: none; }
+.football-alert--shock.fixture-goal-active .football-shock-item { background: inherit; }
+.fixtures-container:has(> .football-alert--prematch) { overflow-x: auto; }
+.fixtures-container:has(> .football-alert) > .prematch-drops__legend,
+.fixtures-container:has(> .football-alert) > .market-shock-detector__footer { order: 999; grid-column: 1 / -1; }
+.prematch-drops__legend { min-width: 920px; }
+@media (max-width: 600px) {
+    .prematch-drops__legend { min-width: 0; }
+    .prematch-drops__data-row [data-label]::before { content: attr(data-label); display: block; margin-bottom: 4px; font-size: 8px; text-transform: uppercase; color: var(--alert-label); }
+}
+
+.prematch-drops__header, .market-shock-detector__header { flex-wrap: wrap; }
+.alert-header-actions { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; }
+.alert-header-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 29px; padding: 0 13px; border: 1px solid var(--alert-border); border-radius: 5px; background: var(--alert-surface); color: var(--alert-text); font-size: 10px; font-weight: 700; }
+.alert-header-action:first-child { min-width: 96px; justify-content: space-between; }
+@media (max-width: 600px) {
+    .alert-header-actions { margin-left: 45px; }
+}
+.football-alert--shock .football-alert-market > .football-alert-provider { display: none; }
+
+.prematch-drops__match-meta .event-actions { display: inline-flex; margin: 0; padding: 0; align-self: auto; }
+.football-alert--prematch .event-actions [data-action="chart"] { display: none; }
+.prematch-drops__column-head > :nth-child(5) { white-space: nowrap; font-size: 7.5px; }

@@ -40,3 +40,5 @@ Thumbs.db
 
 /public/images/tennis/teams/
 /public/images/tennis/tournaments/
+/storage/app/service-manager/
+__pycache__/

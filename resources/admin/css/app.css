@@ -1,5 +1,6 @@
 /* Admin specific overrides */
 @import "tailwindcss";
+@import "../../users/css/modal.css";
 
 :root {
     color-scheme: light;

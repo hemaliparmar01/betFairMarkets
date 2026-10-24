@@ -1,3 +1,8 @@
+import { patchRealtimeChildren, patchRealtimeHtml, markRealtimeUnavailable } from './realtimeDom.js';
+window.patchRealtimeChildren = patchRealtimeChildren;
+window.patchRealtimeHtml = patchRealtimeHtml;
+window.markRealtimeUnavailable = markRealtimeUnavailable;
+import './modalScrollLock.js';
 import { watchRacingFeed } from './racingFeed.js';
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';

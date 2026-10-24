@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Users\Cricket;
 use App\Http\Controllers\Controller;
 use App\Models\CricketMarket;
 use App\Models\CricketMatch;
+use App\Services\MatchBackup;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 
 class CricketSyncController extends Controller
@@ -478,6 +480,9 @@ class CricketSyncController extends Controller
         if (($match['result_status'] ?? null) === 'Finished') {
             return false;
         }
+        if (MatchBackup::isOlderEvent($match, $event) && ! in_array($event['status']['type'] ?? $event['status.type'] ?? null, ['finished', 'abandoned'], true) && ($event['status']['code'] ?? $event['status.code'] ?? null) != 100) {
+            return false;
+        }
         $before = $match;
         $type = $this->eventValue($event, 'status.type');
         $code = $this->eventValue($event, 'status.code');
@@ -519,8 +524,11 @@ class CricketSyncController extends Controller
                 }
             }
         }
-        foreach (['home_team_id' => $homeIsTeam1 ? 'homeTeam.id' : 'awayTeam.id', 'away_team_id' => $homeIsTeam1 ? 'awayTeam.id' : 'homeTeam.id', 'tournament_id' => 'tournament.id', 'country_id' => 'tournament.category.country.id', 'winner_code' => 'winnerCode'] as $field => $key) {
+        foreach (['home_team_id' => $homeIsTeam1 ? 'homeTeam.id' : 'awayTeam.id', 'away_team_id' => $homeIsTeam1 ? 'awayTeam.id' : 'homeTeam.id', 'tournament_id' => 'tournament.id', 'country_id' => 'tournament.category.country.id', 'country_name' => 'tournament.category.country.name', 'country_code' => 'tournament.category.country.alpha2', 'winner_code' => 'winnerCode'] as $field => $key) {
             $value = $this->eventValue($event, $key);
+            if ($field === 'country_name' && $value === null && preg_match('/^[A-Z]{2}$/i', (string) $this->eventValue($event, 'tournament.category.country.alpha2')) === 1) {
+                $value = $this->eventValue($event, 'tournament.category.name');
+            }
             if ($value !== null) {
                 $match[$field] = $field === 'winner_code' && ! $homeIsTeam1 && in_array((int) $value, [1, 2], true) ? 3 - (int) $value : $value;
             }
@@ -574,6 +582,8 @@ class CricketSyncController extends Controller
         if ($this->eventValue($event, 'status.description') !== null) {
             $match['match_status_description'] = $this->eventValue($event, 'status.description');
         }
+
+        MatchBackup::observe($match, 'cricket', $event, $channel, $before);
 
         return $match !== $before;
     }
@@ -641,7 +651,7 @@ class CricketSyncController extends Controller
             unset($match);
         }
         if ($changed !== []) {
-            storeInRedis('Cricket:matches', $matches, 30);
+            storeInRedis('Cricket:matches', $matches, 30, false);
             $this->storeMatchesInDatabase($changed);
         }
 
@@ -750,6 +760,13 @@ class CricketSyncController extends Controller
         Cache::store('redis')
             ->lock('Cricket:database-write-lock', 120)
             ->block(10, function () use ($matchRows, $marketRows, $matchKeys, $marketSnapshotKeys): void {
+                $cleaned = array_fill_keys(Redis::zrangebyscore('Cricket:matches:cleaned', time(), '+inf'), true);
+                if ($cleaned !== []) {
+                    $matchRows = array_filter($matchRows, static fn (array $row): bool => ! isset($cleaned[$row['unique_key']]));
+                    $marketRows = array_filter($marketRows, static fn (array $row): bool => ! isset($cleaned[$row['cricket_match_unique_key']]));
+                    $matchKeys = array_values(array_diff($matchKeys, array_keys($cleaned)));
+                    $marketSnapshotKeys = array_values(array_diff($marketSnapshotKeys, array_keys($cleaned)));
+                }
                 $existingMatches = CricketMatch::query()
                     ->whereIn('unique_key', $matchKeys)
                     ->get([
@@ -778,6 +795,8 @@ class CricketSyncController extends Controller
                     }
                     $storedPayload = $existing?->payload;
                     $incomingPayload = json_decode($row['payload'], true);
+                    $incomingPayload = MatchBackup::merge($incomingPayload, $storedPayload ?? [], 'cricket');
+                    $row['payload'] = json_encode($incomingPayload, JSON_THROW_ON_ERROR);
                     if (
                         $existing === null
                         || (string) $existing->betfair_match_id !== (string) $row['betfair_match_id']

@@ -74,4 +74,20 @@ return [
         ],
     ],
 
+    // Conservative retention; recovery uses existing provider reconciliation only.
+    'match_lifecycle' => [
+        'retention_seconds' => (int) env('MATCH_BACKUP_RETENTION_SECONDS', 7 * 86400),
+        'race_retention_seconds' => (int) env('RACE_BACKUP_RETENTION_SECONDS', 86400),
+        'resume_stale_seconds' => (int) env('MATCH_RESUME_STALE_SECONDS', 300),
+        'backup_recheck_seconds' => (int) env('MATCH_BACKUP_RECHECK_SECONDS', 3600),
+        'cleanup_checks' => (int) env('MATCH_BACKUP_CLEANUP_CHECKS', 3),
+        'tombstone_seconds' => (int) env('MATCH_BACKUP_TOMBSTONE_SECONDS', 30 * 86400),
+        'tennis_stale_seconds' => (int) env('TENNIS_PROVIDER_STALE_SECONDS', 6 * 3600),
+        'cricket_stale_seconds' => (int) env('CRICKET_PROVIDER_STALE_SECONDS', 3 * 86400),
+    ],
+
+    'fixtures' => [
+        'goal_highlight_seconds' => (int) env('FIXTURE_GOAL_HIGHLIGHT_SECONDS', 40),
+    ],
+
 ];

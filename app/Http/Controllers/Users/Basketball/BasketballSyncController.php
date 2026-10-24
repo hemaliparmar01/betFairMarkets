@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Users\Basketball;
 use App\Http\Controllers\Controller;
 use App\Models\BasketballMarket;
 use App\Models\BasketballMatch;
+use App\Services\MatchBackup;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 
 class BasketballSyncController extends Controller
@@ -520,6 +522,9 @@ class BasketballSyncController extends Controller
                 100, 110 => 'finished', 60 => 'postponed', 70 => 'cancelled', 13, 14, 15, 16, 17, 30, 31 => 'inprogress', default => 'notstarted',
             }];
         }
+        if (MatchBackup::isOlderEvent($match, $event) && ! in_array($event['status']['type'] ?? $event['status.type'] ?? null, ['finished', 'abandoned'], true) && ($event['status']['code'] ?? $event['status.code'] ?? null) != 100) {
+            return false;
+        }
         $before = $match;
         $type = $this->eventValue($event, 'status.type');
         $code = $this->eventValue($event, 'status.code');
@@ -573,8 +578,11 @@ class BasketballSyncController extends Controller
             }
             $match['match_time'] = array_replace($match['match_time'] ?? [], $timePatch);
         }
-        foreach (['home_team_id' => $homeIsTeam1 ? 'homeTeam.id' : 'awayTeam.id', 'away_team_id' => $homeIsTeam1 ? 'awayTeam.id' : 'homeTeam.id', 'home_team_short_name' => $homeIsTeam1 ? 'homeTeam.shortName' : 'awayTeam.shortName', 'away_team_short_name' => $homeIsTeam1 ? 'awayTeam.shortName' : 'homeTeam.shortName', 'tournament_id' => 'tournament.id', 'tournament_image_id' => 'tournament.uniqueTournament.id', 'country_id' => 'tournament.category.country.id', 'winner_code' => 'winnerCode'] as $field => $key) {
+        foreach (['home_team_id' => $homeIsTeam1 ? 'homeTeam.id' : 'awayTeam.id', 'away_team_id' => $homeIsTeam1 ? 'awayTeam.id' : 'homeTeam.id', 'home_team_short_name' => $homeIsTeam1 ? 'homeTeam.shortName' : 'awayTeam.shortName', 'away_team_short_name' => $homeIsTeam1 ? 'awayTeam.shortName' : 'homeTeam.shortName', 'tournament_id' => 'tournament.id', 'tournament_image_id' => 'tournament.uniqueTournament.id', 'country_id' => 'tournament.category.country.id', 'country_name' => 'tournament.category.country.name', 'country_code' => 'tournament.category.country.alpha2', 'winner_code' => 'winnerCode'] as $field => $key) {
             $value = $this->eventValue($event, $key);
+            if ($field === 'country_name' && $value === null && preg_match('/^[A-Z]{2}$/i', (string) $this->eventValue($event, 'tournament.category.country.alpha2')) === 1) {
+                $value = $this->eventValue($event, 'tournament.category.name');
+            }
             if ($field === 'tournament_id' || $field === 'tournament_image_id') {
                 $value ??= $event['tournamentId'] ?? null;
             }
@@ -625,6 +633,8 @@ class BasketballSyncController extends Controller
         if ($this->eventValue($event, 'status.description') !== null) {
             $match['match_status_description'] = $this->eventValue($event, 'status.description');
         }
+
+        MatchBackup::observe($match, 'basketball', $event, $channel, $before);
 
         return $match !== $before;
     }
@@ -735,7 +745,7 @@ class BasketballSyncController extends Controller
             unset($match);
         }
         if ($changed !== []) {
-            storeInRedis('Basketball:matches', $matches, 30);
+            storeInRedis('Basketball:matches', $matches, 30, false);
             $this->storeMatchesInDatabase($changed);
         }
 
@@ -844,6 +854,13 @@ class BasketballSyncController extends Controller
         Cache::store('redis')
             ->lock('Basketball:database-write-lock', 120)
             ->block(10, function () use ($matchRows, $marketRows, $matchKeys, $marketSnapshotKeys): void {
+                $cleaned = array_fill_keys(Redis::zrangebyscore('Basketball:matches:cleaned', time(), '+inf'), true);
+                if ($cleaned !== []) {
+                    $matchRows = array_filter($matchRows, static fn (array $row): bool => ! isset($cleaned[$row['unique_key']]));
+                    $marketRows = array_filter($marketRows, static fn (array $row): bool => ! isset($cleaned[$row['basketball_match_unique_key']]));
+                    $matchKeys = array_values(array_diff($matchKeys, array_keys($cleaned)));
+                    $marketSnapshotKeys = array_values(array_diff($marketSnapshotKeys, array_keys($cleaned)));
+                }
                 $existingMatches = BasketballMatch::query()
                     ->whereIn('unique_key', $matchKeys)
                     ->get([
@@ -872,6 +889,8 @@ class BasketballSyncController extends Controller
                     }
                     $storedPayload = $existing?->payload;
                     $incomingPayload = json_decode($row['payload'], true);
+                    $incomingPayload = MatchBackup::merge($incomingPayload, $storedPayload ?? [], 'basketball');
+                    $row['payload'] = json_encode($incomingPayload, JSON_THROW_ON_ERROR);
                     if (
                         $existing === null
                         || (string) $existing->betfair_match_id !== (string) $row['betfair_match_id']

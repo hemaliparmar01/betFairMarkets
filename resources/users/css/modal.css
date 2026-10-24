@@ -1,0 +1,11 @@
+body.modal-open {
+    position: fixed !important;
+    top: var(--modal-scroll-top) !important;
+    left: 0;
+    right: 0;
+    width: 100%;
+    overflow: hidden !important;
+    padding-right: var(--modal-body-padding) !important;
+}
+[role="dialog"][aria-modal="true"], dialog[open] { overscroll-behavior: contain; }
+[role="dialog"][aria-modal="true"] { max-height: 100dvh; }

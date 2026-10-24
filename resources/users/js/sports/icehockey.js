@@ -1,3 +1,4 @@
+import { patchRealtimeChildren, patchRealtimeHtml, markRealtimeUnavailable } from '../realtimeDom.js';
 import { renderOddsHistory } from '../oddsHistory';
 let oddsTooltip = null;
 const hideOddsTooltip = () => { oddsTooltip?.remove(); oddsTooltip = null; };
@@ -92,10 +93,10 @@ if (dashboard) {
                 nodes.forEach((node) => target.append(node));
                 loadedPages++;
             } else {
-                if (markets) target.innerHTML = result.html;
+                if (markets) patchRealtimeHtml(target, result.html);
                 else {
                     const fragment = document.createElement('template'); fragment.innerHTML = result.html;
-                    target.replaceChildren(...fragment.content.querySelector('.fixtures-container').childNodes);
+                    patchRealtimeChildren(target, fragment.content.querySelector('.fixtures-container'));
                 }
                 if (reset) loadedPages = 1;
             }
@@ -130,10 +131,9 @@ if (dashboard) {
     function renderModal() {
         const rows = [...dashboard.querySelectorAll('[data-match-id]')];
         const row = rows.find((candidate) => candidate.dataset.matchId === activeModal.matchId && (!activeModal.marketId || candidate.dataset.marketId === activeModal.marketId));
-        if (!row) { closeModal(); return; }
+        if (!row) { const panel = dashboard.querySelector('[data-icehockey-modal-panel]'); if (panel) markRealtimeUnavailable(panel, true); return; }
         const modal = dashboard.querySelector('#icehockeyModal');
         const panel = modal.querySelector('[data-icehockey-modal-panel]');
-        const scrollTop = panel.scrollTop;
         const scoreStatus = escape(row.dataset.matchStatus ?? '');
         let title = ''; let body = '';
         if (activeModal.action === 'stats') {
@@ -159,8 +159,7 @@ if (dashboard) {
             }).join('')}</tbody></table></div><a class="mt-4 inline-block rounded-xl bg-[#0b2a40] px-4 py-2 text-sm font-bold text-white" href="${escape(row.dataset.icehockeyMatchUrl)}">Match markets &amp; charts →</a>`;
         }
         hideOddsTooltip();
-        panel.innerHTML = `<div class="mb-5 flex items-center justify-between gap-3"><h2 id="icehockeyModalTitle" class="text-lg font-extrabold">${escape(title)}</h2><button type="button" data-action="close-modal" aria-label="Close" class="px-2 text-2xl">×</button></div>${body}`;
-        panel.scrollTop = scrollTop;
+        patchRealtimeHtml(panel, `<div class="mb-5 flex items-center justify-between gap-3"><h2 id="icehockeyModalTitle" class="text-lg font-extrabold">${escape(title)}</h2><button type="button" data-action="close-modal" aria-label="Close" class="px-2 text-2xl">×</button></div>${body}`);
         modal.classList.remove('hidden'); modal.classList.add('flex'); document.body.style.overflow = 'hidden';
     }
     filters?.addEventListener('click', (event) => {
@@ -173,7 +172,13 @@ if (dashboard) {
     dashboard.addEventListener('click', async (event) => {
         const button = event.target.closest('[data-action]');
         if (event.target.id === 'icehockeyModal') { closeModal(); return; }
-        if (!button) return;
+        if (!button) {
+            const row = event.target.closest('[data-icehockey-match-url]');
+            if (row && !event.target.closest('a, button, input, select, textarea, [role="dialog"]')) {
+                window.location.assign(row.dataset.icehockeyMatchUrl);
+            }
+            return;
+        }
         if (button.dataset.requiresLogin === 'true') { window.location.assign(button.dataset.loginUrl); return; }
         const action = button.dataset.action;
         if (action === 'close-modal') { closeModal(); return; }

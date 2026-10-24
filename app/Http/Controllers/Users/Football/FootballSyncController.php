@@ -6,12 +6,15 @@ use App\Events\FootballSportsScoreUpdated;
 use App\Http\Controllers\Controller;
 use App\Models\FootballMarket;
 use App\Models\FootballMatch;
+use App\Services\FootballTimelineStore;
 use App\Services\FootballV6Stats;
+use App\Services\MatchBackup;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -42,7 +45,22 @@ class FootballSyncController extends Controller
             if ($key === null || ! $this->applyTimelineFrame($matches[$key], $channel, $payload, $frameType, $requestedAt)) {
                 return false;
             }
-            storeInRedis('Football:matches', $matches, 10);
+            $incidents = $payload['incidents'] ?? $payload['events'] ?? [];
+            $finishedPeriod = is_array($incidents) ? array_find($incidents, static fn (mixed $incident): bool => is_array($incident) && ($incident['incidentType'] ?? '') === 'period' && strtoupper(trim((string) ($incident['text'] ?? ''))) === 'FT' && ($incident['isLive'] ?? null) === false) : null;
+            if ((($matches[$key]['timeline']['clock']['finished'] ?? false) || $finishedPeriod !== null) && ($matches[$key]['result_status'] ?? '') !== 'Finished') {
+                $matches[$key]['result_status'] = 'Finished';
+                $matches[$key]['minutes_status'] = 'Finished';
+                $matches[$key]['provider_lifecycle']['finished_pending'] = true;
+                unset($matches[$key]['internal_backup']);
+                foreach (['home', 'away'] as $side) {
+                    $score = $finishedPeriod[$side.'Score'] ?? data_get($payload, $side.'Score.current');
+                    if ($score !== null) {
+                        $matches[$key][$side.'_score'] = $score;
+                    }
+                }
+            }
+            storeInRedis('Football:matches', $matches, 10, false);
+            app(FootballTimelineStore::class)->stage($matches[$key]);
 
             return true;
         });
@@ -63,13 +81,20 @@ class FootballSyncController extends Controller
             return false;
         }
         $before = $timeline;
+        $sequence = data_get($payload, 'changes.changeTimestamp', $payload['changes.changeTimestamp'] ?? null);
+        if ($requestedAt === null && is_numeric($sequence) && (int) $sequence > 0) {
+            if ((int) $sequence <= (int) ($timeline['change_timestamps'][$channel] ?? 0)) {
+                return false;
+            }
+            $timeline['change_timestamps'][$channel] = (int) $sequence;
+        }
         $preserveNewerEvents = ($timeline['incidents_updated_at'] ?? 0) > $receivedAt;
         if ($isIncidents && (! $preserveNewerEvents || ($frameType === 'snapshot' && ! ($timeline['initialized'] ?? false)))) {
             $incidents = $payload['incidents'] ?? $payload['events'] ?? (array_is_list($payload) ? $payload : (isset($payload['incidentType']) || isset($payload['isDeleted'], $payload['id']) ? [$payload] : null));
             if (! is_array($incidents)) {
                 return false;
             }
-            $events = $frameType === 'snapshot' && ! $preserveNewerEvents ? [] : ($timeline['events'] ?? []);
+            $events = $timeline['events'] ?? [];
             foreach ($incidents as $incident) {
                 if (! is_array($incident)) {
                     continue;
@@ -78,6 +103,9 @@ class FootballSyncController extends Controller
                     unset($events[(string) $incident['id']]);
                     $timeline['removed'][(string) $incident['id']] = $receivedAt;
 
+                    continue;
+                }
+                if (isset($incident['id'], $timeline['removed'][(string) $incident['id']]) && ($frameType === 'snapshot' || ($incident['isDeleted'] ?? null) !== false)) {
                     continue;
                 }
                 $kind = $incident['incidentType'] ?? null;
@@ -160,6 +188,11 @@ class FootballSyncController extends Controller
                 || in_array(strtoupper((string) ($clock['status_code'] ?? '')), ['FT', '100'], true)
                 || ($clock['status_type'] ?? null) === 'finished';
             $timeline['clock'] = array_replace($timeline['clock'] ?? [], $clock);
+            if (in_array($clock['status_type'] ?? '', ['interrupted', 'willcontinue', 'postponed', 'suspended'], true)) {
+                $timeline['clock']['paused_at'] ??= (int) $receivedAt;
+            } elseif (($clock['status_type'] ?? '') === 'inprogress' && in_array((int) ($clock['status_code'] ?? 0), [6, 7], true)) {
+                unset($timeline['clock']['paused_at']);
+            }
             $timeline['clock_updated_at'] = $receivedAt;
         }
         if ($timeline === $before) {
@@ -210,6 +243,14 @@ class FootballSyncController extends Controller
             $unplacedCards[$side]['red'] = $red - $counts[$side]['total_red'];
             $counts[$side]['yellow'] = $yellow;
             $counts[$side]['total_red'] = $red;
+            if (! ($timeline['initialized'] ?? false)) {
+                if ($yellow === 0 && ! isset($match['card_stats']['yellow_cards'][$side])) {
+                    $counts[$side]['yellow'] = null;
+                }
+                if ($red === 0 && ! isset($match['card_stats']['red_cards'][$side])) {
+                    $counts[$side]['total_red'] = null;
+                }
+            }
         }
         $match['timeline']['unplaced_card_counts'] = $unplacedCards;
         $match['card_counts'] = $counts;
@@ -218,7 +259,7 @@ class FootballSyncController extends Controller
             'away' => $counts['away']['total_red'] > 0 ? 'red' : ($counts['away']['yellow'] > 0 ? 'yellow' : null),
         ];
         if (is_array($timeline['events'] ?? null)) {
-            $match['incidents_initialized'] = true;
+            $match['incidents_initialized'] = (bool) ($timeline['initialized'] ?? false);
         }
         $match['cards_updated_at'] = $timeline['incidents_updated_at'] ?? microtime(true);
         $match['card_counts_updated_at'] = $match['cards_updated_at'];
@@ -231,9 +272,7 @@ class FootballSyncController extends Controller
     /** @return array<string, mixed> */
     public function getMatchTimeline(int|string $matchId): array
     {
-        $match = array_find(getInRedis('Football:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === (string) $matchId);
-
-        return $match['timeline'] ?? [];
+        return app(FootballTimelineStore::class)->resolve((string) $matchId);
     }
 
     public function migrateTimelineCache(): int
@@ -885,7 +924,7 @@ class FootballSyncController extends Controller
     /** @return array<string, mixed>|null */
     public function loadMatchStatistics(string $matchId, bool $includePrematch = true): ?array
     {
-        $match = array_find(getInRedis('Football:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === $matchId);
+        $match = array_find(getVisibleSportsMatches('Football:matches') ?? [], static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === $matchId);
         if ($match === null) {
             return null;
         }
@@ -897,25 +936,47 @@ class FootballSyncController extends Controller
             $responses = [];
             $attempts = [];
             $sections = $includePrematch ? ['pregame-form', 'h2h', 'streaks'] : [];
+            if ($includePrematch && ($match['result_status'] ?? '') === 'Prematch') {
+                $sections = ['overview', ...$sections, 'home-season', 'away-season'];
+            }
             if (($match['result_status'] ?? '') !== 'Prematch') {
                 $sections[] = 'statistics';
             }
             foreach ($sections as $section) {
+                $details = $responses['overview']['data'] ?? $match['prematch_statistics']['overview'] ?? [];
+                $path = 'https://api.sportsapipro.com/v2/football/match/'.$matchId.($section === 'overview' ? '' : '/'.$section);
+                if (in_array($section, ['home-season', 'away-season'], true)) {
+                    $side = $section === 'home-season' ? 'home' : 'away';
+                    $teamId = $details[$side.'Team']['id'] ?? $match[$side.'_team_id'] ?? null;
+                    $tournamentId = $details['tournament']['id'] ?? $match['tournament_id'] ?? null;
+                    $seasonId = $details['season']['id'] ?? $match['season_id'] ?? null;
+                    if (! is_numeric($teamId) || ! is_numeric($tournamentId) || ! is_numeric($seasonId)
+                        || (int) $teamId <= 0 || (int) $tournamentId <= 0 || (int) $seasonId <= 0) {
+                        continue;
+                    }
+                    $path = 'https://api.sportsapipro.com/v2/football/teams/'.(int) $teamId.'/tournament/'.(int) $tournamentId.'/season/'.(int) $seasonId.'/statistics';
+                }
                 $lastAttempt = $match['statistics_requests'][$section] ?? [];
                 $ttl = ($lastAttempt['available'] ?? false)
                     ? ($section === 'statistics' ? (($match['result_status'] ?? '') === 'Finished' ? 86400 : 30) : 1800)
                     : 120;
-                if (($lastAttempt['at'] ?? 0) > microtime(true) - $ttl
+                if ((($lastAttempt['path'] ?? $path) === $path && ($lastAttempt['at'] ?? 0) > microtime(true) - $ttl)
                     || ($section === 'statistics' && ($match['statistics_updated_at'] ?? 0) > microtime(true) - 30)) {
                     continue;
                 }
                 $requestedAt = microtime(true);
                 $diagnostics = null;
                 try {
-                    $response = ApiCall('https://api.sportsapipro.com/v2/football/match/'.$matchId.'/'.$section,
-                        ['x-api-key' => GetSportApiProKey()], ['connect_timeout' => 3, 'timeout' => 6], $diagnostics);
+                    $response = $this->requestStatisticsPayload($path, $diagnostics);
                     $payload = $response['data'] ?? $response;
+                    if ($section === 'overview' && is_array($payload)) {
+                        $payload = $payload['event'] ?? $payload['match'] ?? $payload;
+                    } elseif (in_array($section, ['home-season', 'away-season'], true) && is_array($payload)) {
+                        $payload = $payload['statistics'] ?? $payload;
+                    }
                     $expectedKeys = match ($section) {
+                        'overview' => ['id'],
+                        'home-season', 'away-season' => ['avgRating', 'matches', 'awardedMatches'],
                         'statistics' => ['statistics'],
                         'pregame-form' => ['homeTeam', 'awayTeam'],
                         'h2h' => ['teamDuel', 'managerDuel'],
@@ -923,6 +984,7 @@ class FootballSyncController extends Controller
                     };
                     $available = is_array($response) && ($response['success'] ?? true) !== false
                         && is_array($payload) && array_any($expectedKeys, static fn (string $key): bool => array_key_exists($key, $payload))
+                        && ($section !== 'overview' || (string) ($payload['id'] ?? '') === $matchId)
                         && (! isset($response['matchId']) || (string) $response['matchId'] === $matchId)
                         && (! isset($diagnostics['http_status']) || ($diagnostics['http_status'] >= 200 && $diagnostics['http_status'] < 300));
                     if ($available) {
@@ -934,7 +996,7 @@ class FootballSyncController extends Controller
                     $available = false;
                     Log::warning('Football statistics request failed', ['match_id' => $matchId, 'section' => $section, 'api' => $diagnostics, 'exception' => $exception::class]);
                 }
-                $attempts[$section] = ['at' => $requestedAt, 'available' => $available];
+                $attempts[$section] = ['at' => $requestedAt, 'available' => $available, 'path' => $path];
             }
             if ($attempts === []) {
                 return $match;
@@ -945,6 +1007,13 @@ class FootballSyncController extends Controller
                 $key = array_find_key($matches, static fn (array $match): bool => (string) ($match['sportsApiPro_match_id'] ?? '') === $matchId);
                 if ($key === null) {
                     return null;
+                }
+                foreach ($attempts as $section => $attempt) {
+                    if (in_array($section, ['home-season', 'away-season'], true)
+                        && isset($matches[$key]['statistics_requests'][$section]['path'])
+                        && $matches[$key]['statistics_requests'][$section]['path'] !== $attempt['path']) {
+                        unset($matches[$key]['prematch_statistics'][$section]);
+                    }
                 }
                 foreach ($responses as $section => $response) {
                     if ($section === 'statistics') {
@@ -961,6 +1030,11 @@ class FootballSyncController extends Controller
         } finally {
             $lock->release();
         }
+    }
+
+    protected function requestStatisticsPayload(string $path, ?array &$diagnostics): mixed
+    {
+        return ApiCall($path, ['x-api-key' => GetSportApiProKey()], ['connect_timeout' => 3, 'timeout' => 6], $diagnostics);
     }
 
     /** @param array<string, mixed> $payload */
@@ -1527,6 +1601,8 @@ class FootballSyncController extends Controller
                         'tournament_logo' => $tournamentLogo,
                         'tournament_id' => $tournamentId,
                         'tournament_country' => $tournamentData['category']['name'] ?? null,
+                        'country_name' => $tournamentData['category']['country']['name'] ?? $tournamentData['category']['name'] ?? null,
+                        'country_code' => $tournamentData['category']['country']['alpha2'] ?? null,
                         'country_id' => $countryId,
                         'current_period_start_timestamp' => is_numeric($currentPeriodStartTimestamp) && (int) $currentPeriodStartTimestamp > 0
                             ? (int) $currentPeriodStartTimestamp
@@ -1562,6 +1638,8 @@ class FootballSyncController extends Controller
                     $tempArray['tournament_logo'] = $tournamentLogo;
                     $tempArray['tournament_id'] = $tournamentId;
                     $tempArray['tournament_country'] = $tournamentData['category']['name'] ?? null;
+                    $tempArray['country_name'] = $tournamentData['category']['country']['name'] ?? $tournamentData['category']['name'] ?? null;
+                    $tempArray['country_code'] = $tournamentData['category']['country']['alpha2'] ?? null;
                     $tempArray['country_id'] = $countryId;
                     if (is_numeric($currentPeriodStartTimestamp) && (int) $currentPeriodStartTimestamp > 0) {
                         $tempArray['current_period_start_timestamp'] = (int) $currentPeriodStartTimestamp;
@@ -1681,6 +1759,13 @@ class FootballSyncController extends Controller
         Cache::store('redis')
             ->lock('Football:database-write-lock', 120)
             ->get(function () use ($matchRows, $marketRows, $matchKeys, $marketSnapshotKeys): void {
+                $cleaned = array_fill_keys(Redis::zrangebyscore('Football:matches:cleaned', time(), '+inf'), true);
+                if ($cleaned !== []) {
+                    $matchRows = array_filter($matchRows, static fn (array $row): bool => ! isset($cleaned[$row['unique_key']]));
+                    $marketRows = array_filter($marketRows, static fn (array $row): bool => ! isset($cleaned[$row['football_match_unique_key']]));
+                    $matchKeys = array_values(array_diff($matchKeys, array_keys($cleaned)));
+                    $marketSnapshotKeys = array_values(array_diff($marketSnapshotKeys, array_keys($cleaned)));
+                }
                 $existingMatches = FootballMatch::query()
                     ->whereIn('unique_key', $matchKeys)
                     ->get([
@@ -1701,8 +1786,16 @@ class FootballSyncController extends Controller
                 $changedMatchRows = [];
                 foreach ($matchRows as $row) {
                     $existing = $existingMatches->get($row['unique_key']);
+                    if ($existing?->result_status === 'Finished') {
+                        $marketSnapshotKeys = array_values(array_diff($marketSnapshotKeys, [$row['unique_key']]));
+                        $marketRows = array_filter($marketRows, static fn (array $market): bool => $market['football_match_unique_key'] !== $row['unique_key']);
+
+                        continue;
+                    }
                     $storedPayload = $existing?->payload;
                     $incomingPayload = json_decode($row['payload'], true);
+                    $incomingPayload = MatchBackup::merge($incomingPayload, $storedPayload ?? [], 'football');
+                    $row['payload'] = json_encode($incomingPayload, JSON_THROW_ON_ERROR);
                     if (
                         $existing === null
                         || (string) $existing->betfair_match_id !== (string) $row['betfair_match_id']
