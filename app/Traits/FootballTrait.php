@@ -2,39 +2,16 @@
 
 namespace App\Traits;
 
-use App\Http\Controllers\Users\Football\FootballSyncController;
 use App\Models\Favorite;
 use App\Models\FootballMatch;
 use App\Models\PredictionVote;
+use App\Services\FootballTimelineStore;
+use App\Services\MatchBackup;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Str;
 
 trait FootballTrait
 {
-    private const LEAGUE_PRIORITY = [
-        'Premier League', 'La Liga', 'Serie A', 'Bundesliga', 'Ligue 1',
-        'UEFA Champions League', 'UEFA Europa League', 'UEFA Conference League',
-        'Primeira Liga', 'Eredivisie', 'Süper Lig', 'Belgian Pro League',
-        'Scottish Premiership', 'Greek Super League', 'Austrian Bundesliga',
-        'Swiss Super League', 'EFL Championship', 'Serie B', 'LaLiga 2', 'Ligue 2',
-        'Danish Superliga', 'Eliteserien', 'Allsvenskan', 'Ekstraklasa',
-        'Czech First League', 'Brasileirão Série A', 'Argentine Primera División',
-        'Liga MX', 'Major League Soccer (MLS)', 'Saudi Pro League', 'J1 League',
-        'K League 1', 'Chinese Super League', 'Croatian HNL', 'Serbian SuperLiga',
-        'Romanian SuperLiga', 'Ukrainian Premier League', 'Israeli Premier League',
-        'Norwegian Eliteserien', 'Swedish Allsvenskan', 'EFL League One', 'Liga',
-        'Segunda Federación / Primera Federación', 'Serie C',
-        'National 1 / Championnat National', 'Liga Portugal 2', 'Eerste Divisie',
-        'Belgian Challenger Pro League', 'Scottish Championship', 'Greek Super League 2',
-        'Danish 1st Division', 'Swedish Superettan', 'Norwegian OBOS-ligaen',
-        'Polish I Liga', 'Czech National Football League', 'Croatian First Football League',
-        'Serbian First League', 'Major International Competitions', 'FIFA World Cup',
-        'UEFA European Championship', 'Copa America', 'CONMEBOL Libertadores',
-        'CONMEBOL Sudamericana', 'UEFA Nations League', 'FIFA Club World Cup',
-        'AFC Champions League Elite', 'CAF Champions League', 'CONCACAF Champions Cup',
-    ];
-
     protected bool $footballHasMore = false;
 
     protected ?int $footballNextPage = null;
@@ -50,7 +27,29 @@ trait FootballTrait
             abort_unless($checkAuthAndSubscription['display_odds'], 403, __('An active 7-day free trial or paid subscription is required to use smart filters.'));
         }
 
-        $getData = getInRedis('Football:matches') ?? [];
+        try {
+            $cachedMatches = getInRedis('Football:matches');
+            $cacheMissing = empty($cachedMatches);
+            $getData = array_values(array_filter($cachedMatches ?? [], static fn (array $match): bool => ! MatchBackup::isHidden($match, 'football')));
+        } catch (\Throwable) {
+            $cacheMissing = true;
+            $getData = [];
+        }
+        if ($cacheMissing) {
+            $getData = FootballMatch::query()->whereIn('result_status', ['Live', 'Finished'])->get()->map(static fn ($stored): array => array_replace($stored->payload ?? [], [
+                'sportsApiPro_match_id' => $stored->sports_api_pro_match_id,
+                'result_status' => $stored->result_status,
+                'timestamp' => $stored->start_timestamp,
+                'timeline' => [],
+            ]))->all();
+            $backups = app(FootballTimelineStore::class)->resolveMany($getData);
+            foreach ($getData as &$storedMatch) {
+                $storedTimeline = $backups[(string) ($storedMatch['sportsApiPro_match_id'] ?? '')] ?? [];
+                $storedMatch = array_replace($storedMatch, $storedTimeline['render_context'] ?? [], ['timeline' => $storedTimeline]);
+            }
+            unset($storedMatch);
+            $getData = array_values(array_filter($getData, static fn (array $match): bool => ! MatchBackup::isHidden($match, 'football')));
+        }
         $customerId = request()->user('customers')?->getAuthIdentifier();
         $favoriteKeys = $customerId === null ? [] : array_fill_keys(
             Favorite::query()->where('sport', 'football')->where('customer_id', $customerId)->pluck('event_key')->all(),
@@ -93,7 +92,8 @@ trait FootballTrait
                     $matchesFilter = function (array $match): bool {
                         if (
                             ($match['result_status'] ?? null) !== 'Live'
-                            || (int) ($match['home_score'] ?? 0) !== 0
+                            || ! isset($match['home_score'], $match['away_score'])
+                        || (int) ($match['home_score'] ?? 0) !== 0
                             || (int) ($match['away_score'] ?? 0) !== 0
                         ) {
                             return false;
@@ -117,6 +117,7 @@ trait FootballTrait
 
                         return ($match['result_status'] ?? null) === 'Live'
                             && in_array($minuteStatus, ['half time', 'halftime', 'ht'], true)
+                            && isset($match['home_score'], $match['away_score'])
                             && (int) ($match['home_score'] ?? 0) === 0
                             && (int) ($match['away_score'] ?? 0) === 0;
                     };
@@ -134,6 +135,7 @@ trait FootballTrait
 
                         if (
                             ($match['result_status'] ?? null) !== 'Live'
+                            || ! isset($match['home_score'], $match['away_score'])
                             || $favoriteOdds < 1.01
                             || $favoriteOdds > $maximumOdds
                         ) {
@@ -248,19 +250,17 @@ trait FootballTrait
 
             $tournament = (string) ($match['tournament'] ?? '');
             $country = $match['tournament_country'] ?? null;
-            $leaguePriorities[$tournament][$country ?? ''] ??= $this->footballLeaguePriority($tournament, $country);
+            $leaguePriorities[$tournament][$country ?? ''] ??= competitionPriority($tournament, $country);
 
             return true;
         }));
         $sortByTime = in_array($type, ['by_time', 'upcoming'], true);
-        usort($getData, static function (array $first, array $second) use ($sortByTime, $leaguePriorities): int {
+        usort($getData, static function (array $first, array $second) use ($leaguePriorities): int {
             $timeComparison = (int) ($first['timestamp'] ?? 0) <=> (int) ($second['timestamp'] ?? 0);
             $priorityComparison = $leaguePriorities[$first['tournament'] ?? ''][$first['tournament_country'] ?? '']
                 <=> $leaguePriorities[$second['tournament'] ?? ''][$second['tournament_country'] ?? ''];
 
-            return $sortByTime
-                ? ($timeComparison ?: $priorityComparison)
-                : ($priorityComparison ?: $timeComparison);
+            return $priorityComparison ?: $timeComparison;
         });
         $page = max(1, (int) request()->input('page', 1));
         $perPage = min(100, max(1, (int) request()->input('per_page', 20)));
@@ -314,7 +314,7 @@ trait FootballTrait
         $pinnacleAlerts = $canDisplayOdds && in_array($type, ['prematch_drops', 'market_shock'], true)
             ? array_column(getInRedis('Pinnacle:drops')['signals'] ?? [], null, 'alert_key')
             : [];
-        $canBackfillTimeline = $showTimeline && $canDisplayOdds;
+        $storedTimelines = $showTimeline ? app(FootballTimelineStore::class)->resolveMany($getData) : [];
         $usesBetfairOdds = $canDisplayOdds && in_array($type, ['prematch_drops', 'market_shock'], true);
         $mainArray = [];
         foreach ($getData as $data) {
@@ -322,17 +322,13 @@ trait FootballTrait
                 $data = prepareMatchOddsMonitoring($data);
             }
             $tournamentName = $data['tournament'];
-            $leagueKey = $type === 'by_time' ? $tournamentName.'|'.$data['timestamp'] : $tournamentName;
+            $leagueKey = leagueHeadingKey($data, $tournamentName).($type === 'by_time' ? '|'.$data['timestamp'] : '');
             $matchId = (string) $data['sportsApiPro_match_id'];
-            $timeline = $data['timeline'] ?? [];
+            $timeline = $storedTimelines[$matchId] ?? [];
+            $data = array_replace($data, $timeline['render_context'] ?? []);
             $oddsMarkets = ! $showTimeline && $canDisplayOdds
                 ? $this->footballOddsMarkets($data, $type ?? 'all', $marketName, $liveOddsCache['Football:bet365:live:'.$matchId] ?? [], $pinnacleAlerts)
                 : [];
-            if ($canBackfillTimeline && in_array($data['result_status'], ['Live', 'Finished'], true)) {
-                app(FootballSyncController::class)->queueTimelineBackfill($matchId, $data['result_status'] === 'Finished', isset($data['home_score'], $data['away_score']) ? [
-                    'home' => (int) ($data['home_score'] ?? 0), 'away' => (int) ($data['away_score'] ?? 0),
-                ] : null, $timeline);
-            }
             $predictionVotes = [];
 
             foreach (['1x2', 'uo'] as $poll) {
@@ -347,6 +343,7 @@ trait FootballTrait
 
             if (! isset($mainArray[$leagueKey])) {
                 $mainArray[$leagueKey] = [
+                    ...leagueHeadingMetadata($data),
                     'tournament_name' => $tournamentName,
                     'tournament_id' => $data['tournament_id'] ?? null,
                     'tournament_logo' => $data['tournament_logo'] ?? null,
@@ -356,6 +353,7 @@ trait FootballTrait
                     'matches' => [],
                 ];
             }
+            $matchTimeline = $this->footballTimeline($data, $timeline);
             $mainArray[$leagueKey]['matches'][] = [
                 'unique_key' => $data['unique_key'],
                 'is_favorite' => isset($favoriteKeys[$data['unique_key']]),
@@ -368,9 +366,11 @@ trait FootballTrait
                 'status' => $data['result_status'],
                 'sportsApiPro_match_id' => $data['sportsApiPro_match_id'],
                 'betfair_match_id' => $data['betfair_match_id'] ?? null,
+                'home_score' => $data['home_score'] ?? null,
+                'away_score' => $data['away_score'] ?? null,
                 'score' => $this->getScore($data),
                 'timestamp' => $data['timestamp'],
-                'minutes' => $this->calculateMinutes($data['minutes_status'] ?? $data['result_status'], $data['timestamp'], $data['result_status'], $data['added_time'] ?? [], $data['current_period_start_timestamp'] ?? null),
+                'minutes' => $data['result_status'] === 'Prematch' ? $this->calculateMinutes('Prematch', (int) $data['timestamp'], 'Prematch') : rtrim($matchTimeline['minute_label'], "'"),
                 // 'status_type' => $data['status_type'] ?? null,
                 'cards' => $data['cards'] ?? [],
                 'card_counts' => $data['card_counts'] ?? [],
@@ -388,13 +388,13 @@ trait FootballTrait
                 'statistics_requests' => $canDisplayOdds ? ($data['statistics_requests'] ?? []) : [],
                 'predictions' => $predictionCounts[$matchId] ?? ($data['predictions'] ?? []),
                 'prediction_votes' => $predictionVotes,
-                'timeline' => $showTimeline ? $this->footballTimeline($data, $timeline) : null,
+                'timeline' => $showTimeline ? $matchTimeline : null,
                 'markets' => array_merge([], ...array_column($oddsMarkets, 'runners')),
                 'odds_markets' => $oddsMarkets,
             ];
         }
 
-        return $mainArray;
+        return rankCompetitionGroups($mainArray);
     }
 
     /**
@@ -512,34 +512,9 @@ trait FootballTrait
         ];
     }
 
-    private function footballLeaguePriority(string $tournament, ?string $country = null): int
-    {
-        $normalize = static fn (string $name): string => strtolower((string) preg_replace('/[^a-z0-9]+/i', '', Str::ascii($name)));
-        static $priorities = null;
-        $priorities ??= array_flip(array_map($normalize, self::LEAGUE_PRIORITY));
-        $aliases = [
-            'englishpremierleague' => 'Premier League', 'spanishlaliga' => 'La Liga',
-            'italianseriea' => 'Serie A', 'germanbundesliga' => 'Bundesliga',
-            'frenchligue1' => 'Ligue 1', 'uefaeuropaconferenceleague' => 'UEFA Conference League',
-            'portugueseprimeiraliga' => 'Primeira Liga', 'dutcheredivisie' => 'Eredivisie',
-            'turkishsuperlig' => 'Süper Lig', 'belgianjupilerproleague' => 'Belgian Pro League',
-            'englishchampionship' => 'EFL Championship', 'englishleague1' => 'EFL League One',
-            'brazilianseriea' => 'Brasileirão Série A', 'usamls' => 'Major League Soccer (MLS)',
-            'mls' => 'Major League Soccer (MLS)', 'majorleaguesoccer' => 'Major League Soccer (MLS)',
-        ];
-        $name = $normalize($tournament);
-        if ($country !== null && $country !== '' && $name === 'premierleague' && $normalize($country) !== 'england') {
-            return PHP_INT_MAX;
-        }
-        if ($name === 'bundesliga' && $normalize($country ?? '') === 'austria') {
-            $name = 'austrianbundesliga';
-        }
-
-        return $priorities[$normalize($aliases[$name] ?? $name)] ?? PHP_INT_MAX;
-    }
-
     private function footballTimeline(array $match, array $timeline): array
     {
+        $match = array_replace($match, $timeline['render_context'] ?? []);
         $clock = $timeline['clock'] ?? [];
         $finished = ($match['result_status'] ?? '') === 'Finished' || ($clock['finished'] ?? false);
         $clockCode = strtoupper((string) ($clock['status_code'] ?? ''));
@@ -560,6 +535,8 @@ trait FootballTrait
         $live = ! $finished && (($match['result_status'] ?? '') === 'Live' || ($clock['status_type'] ?? '') === 'inprogress' || $clockStatus !== null);
         $minuteLabel = (string) $this->calculateMinutes($minuteStatus, (int) $match['timestamp'], $finished ? 'Finished' : ($live ? 'Live' : 'Prematch'), $match['added_time'] ?? [], $periodStart ?: null);
         $halfTime = $minuteLabel === 'HT';
+        $running = $live && ! $halfTime && in_array($minuteStatus, ['1st half', '2nd half'], true)
+            && $periodStart > 0 && ! in_array($clock['status_type'] ?? '', ['interrupted', 'willcontinue', 'postponed', 'suspended'], true);
         $periodLimit = $minuteStatus === '2nd half' ? 90 : 45;
         $minute = 0;
         if ($finished) {
@@ -573,15 +550,25 @@ trait FootballTrait
             }
             if ($useClock && $periodStart > 0) {
                 $initial = (int) ($clock['initial'] ?? ($minuteStatus === '2nd half' ? 2700 : 0));
-                $minute = max(0, (int) floor((time() - $periodStart + $initial) / 60));
+                $minute = max(0, (int) floor(((int) ($clock['paused_at'] ?? time()) - $periodStart + $initial) / 60));
                 $periodLimit = (int) (($clock['max'] ?? ($minuteStatus === '2nd half' ? 5400 : 2700)) / 60);
             }
             if ($minute > 45 && ! str_starts_with($minuteLabel, '45+')) {
                 $periodLimit = max(90, $periodLimit);
             }
-            $minuteLabel = $minute > $periodLimit ? $periodLimit.'+'.($minute - $periodLimit) : (string) $minute;
+            if ($periodStart <= 0) {
+                $minute = max(0, (int) floor((float) ($clock['initial'] ?? 0) / 60));
+            }
+            $minuteLabel = $periodStart <= 0 && $minute === 0 ? __('Live') : ($minute > $periodLimit ? $periodLimit.'+'.($minute - $periodLimit) : (string) $minute);
         } else {
             $minuteLabel = __('Not started');
+        }
+        $announcedAdded = $match['added_time'][$periodLimit === 45 ? 'first_half' : 'second_half'] ?? null;
+        $confirmedLimit = $periodLimit + (is_numeric($announcedAdded) ? max(0, (int) $announcedAdded) : 0);
+        if ($live && ! $halfTime && $minute >= $confirmedLimit) {
+            $minute = $confirmedLimit;
+            $minuteLabel = $periodLimit.(is_numeric($announcedAdded) ? '+'.max(0, (int) $announcedAdded) : '+');
+            $running = false;
         }
         $events = array_values($timeline['events'] ?? []);
         foreach ($timeline['unplaced_card_counts'] ?? [] as $side => $cards) {
@@ -598,6 +585,20 @@ trait FootballTrait
             }
         }
         usort($events, static fn (array $first, array $second): int => ($first['seconds'] <=> $second['seconds']) ?: strcmp($first['id'], $second['id']));
+        $previousGoalScore = [0, 0];
+        foreach ($events as &$goalEvent) {
+            if ($goalEvent['kind'] !== 'goal' || ! isset($goalEvent['home_score'], $goalEvent['away_score'])) {
+                continue;
+            }
+            $score = [(int) $goalEvent['home_score'], (int) $goalEvent['away_score']];
+            if ($score[0] === $previousGoalScore[0] + 1 && $score[1] === $previousGoalScore[1]) {
+                $goalEvent['is_home'] = true;
+            } elseif ($score[1] === $previousGoalScore[1] + 1 && $score[0] === $previousGoalScore[0]) {
+                $goalEvent['is_home'] = false;
+            }
+            $previousGoalScore = $score;
+        }
+        unset($goalEvent);
         $missingHomeGoals = 0;
         $missingGoals = 0;
         $goalsPending = false;
@@ -684,11 +685,12 @@ trait FootballTrait
             'goals_pending' => $goalsPending,
             'height' => 64 + max(0, count($lanes['home']) - 1, count($lanes['away']) - 1) * 28,
             'minute' => $minute,
-            'minute_label' => $minuteLabel.($live && ! $halfTime ? "'" : ''),
+            'minute_label' => $minuteLabel.($live && ! $halfTime && preg_match('/^\d+(?:\+\d+)?$/', $minuteLabel) === 1 ? "'" : ''),
             'period_limit' => $periodLimit,
+            'clock_limit' => $confirmedLimit,
             'progress' => min(100, max(0, $minute / 90 * 100)),
-            'running' => $live && ! $halfTime,
-            'seconds_into_minute' => $live && ! $halfTime ? max(0, time() - ($periodStart ?: (int) $match['timestamp'])) % 60 : 0,
+            'running' => $running,
+            'seconds_into_minute' => $running ? max(0, time() - ($periodStart ?: (int) $match['timestamp'])) % 60 : 0,
             'calculated_at' => time(),
             'finished' => $finished,
         ];
@@ -720,14 +722,11 @@ trait FootballTrait
             : null;
 
         $isExplicitSecondHalf = $minute_status === '2nd half';
-        if ($minute_status === 'Live' && $elapsedMinutes >= 60) {
-            $minute_status = '2nd half';
-        }
 
         if ($minute_status == '2nd half') {
             $currentMinute = $isExplicitSecondHalf && $periodElapsedMinutes !== null
                 ? 45 + $periodElapsedMinutes
-                : max(46, $elapsedMinutes - 15);
+                : 45;
             if ($currentMinute > 90) {
                 $extraMinutes = $added_time['second_half'] ?? ($currentMinute - 90);
 
@@ -748,9 +747,9 @@ trait FootballTrait
         }
 
         if ($firstHalfElapsedMinutes > 45) {
-            $extraMinutes = $added_time['first_half'] ?? ($firstHalfElapsedMinutes - 45);
+            $extraMinutes = $added_time['first_half'] ?? null;
 
-            return "45+{$extraMinutes}";
+            return $extraMinutes === null ? '45+' : "45+{$extraMinutes}";
         }
 
         return $firstHalfElapsedMinutes;
@@ -759,7 +758,7 @@ trait FootballTrait
     public function getScore(array $match)
     {
         if (in_array($match['result_status'], ['Live', 'Finished'], true)) {
-            return $match['home_score'].' - '.$match['away_score'];
+            return isset($match['home_score'], $match['away_score']) ? $match['home_score'].' - '.$match['away_score'] : '—';
         } else {
             return '-';
         }
@@ -810,7 +809,7 @@ trait FootballTrait
     {
         $match = null;
 
-        // foreach ((getInRedis('Football:matches') ?? []) as $candidate) {
+        // foreach ((getVisibleSportsMatches('Football:matches') ?? []) as $candidate) {
         //     if (
         //         (string) ($candidate['sportsApiPro_match_id'] ?? '') === $matchId
         //     ) {
@@ -818,7 +817,7 @@ trait FootballTrait
         //         break;
         //     }
         // }
-        $match = collect(getInRedis('Football:matches') ?? [])->first(fn ($candidate) => (string) ($candidate['sportsApiPro_match_id'] ?? '') === (string) $matchId);
+        $match = collect(getVisibleSportsMatches('Football:matches') ?? [])->first(fn ($candidate) => (string) ($candidate['sportsApiPro_match_id'] ?? '') === (string) $matchId);
 
         if ($match === null) {
             $storedMatch = FootballMatch::query()
@@ -860,6 +859,9 @@ trait FootballTrait
             return null;
         }
 
+        if (MatchBackup::isHidden($match, 'football')) {
+            return null;
+        }
         // $match = prepareMatchOddsMonitoring($match);
         // $marketLabels = [];
         // foreach ($this->getAllMarkets()['options'] as $option) {
@@ -974,6 +976,7 @@ trait FootballTrait
 
                     return ($match['result_status'] ?? null) === 'Live'
                         && in_array($minuteStatus, ['half time', 'halftime', 'ht'], true)
+                            && isset($match['home_score'], $match['away_score'])
                         && (int) ($match['home_score'] ?? 0) === 0
                         && (int) ($match['away_score'] ?? 0) === 0;
                 }));
@@ -983,6 +986,7 @@ trait FootballTrait
                 $getData = array_values(array_filter($getData, function (array $match): bool {
                     if (
                         ($match['result_status'] ?? null) !== 'Live'
+                        || ! isset($match['home_score'], $match['away_score'])
                         || (int) ($match['home_score'] ?? 0) !== 0
                         || (int) ($match['away_score'] ?? 0) !== 0
                     ) {
@@ -1009,7 +1013,8 @@ trait FootballTrait
 
                     if (
                         ($match['result_status'] ?? null) !== 'Live'
-                        || $favoriteOdds < 1.01
+                        || ! isset($match['home_score'], $match['away_score'])
+                            || $favoriteOdds < 1.01
                         || $favoriteOdds > $maximumOdds
                     ) {
                         return false;
@@ -1275,20 +1280,20 @@ trait FootballTrait
             }
         }
 
-        usort($mainArray, function (array $first, array $second): int {
-            $leagueComparison = $this->footballLeaguePriority((string) ($first['comp'] ?? ''), $first['competition_country'] ?? null)
-                <=> $this->footballLeaguePriority((string) ($second['comp'] ?? ''), $second['competition_country'] ?? null);
-            if ($leagueComparison !== 0) {
-                return $leagueComparison;
-            }
-            $statusComparison = $first['statusPriority'] <=> $second['statusPriority'];
+        // usort($mainArray, function (array $first, array $second): int {
+        //     $leagueComparison = $this->footballLeaguePriority((string) ($first['comp'] ?? ''), $first['competition_country'] ?? null)
+        //         <=> $this->footballLeaguePriority((string) ($second['comp'] ?? ''), $second['competition_country'] ?? null);
+        //     if ($leagueComparison !== 0) {
+        //         return $leagueComparison;
+        //     }
+        //     $statusComparison = $first['statusPriority'] <=> $second['statusPriority'];
 
-            if ($statusComparison !== 0) {
-                return $statusComparison;
-            }
+        //     if ($statusComparison !== 0) {
+        //         return $statusComparison;
+        //     }
 
-            return $second['totalLiquidity'] <=> $first['totalLiquidity'];
-        });
+        //     return $second['totalLiquidity'] <=> $first['totalLiquidity'];
+        // });
 
         $marketName = request()->input('market_name', 'active');
         if ($marketName !== 'active') {
